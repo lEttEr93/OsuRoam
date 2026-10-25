@@ -21,7 +21,7 @@ osu! 谱面漫游推荐工具。Windows / WPF / .NET 8。
 
 ## 快速使用
 
-1. 解压 `osu-roam-v1.2.4-portable.zip`（自包含 .NET 运行时，不用另装 .NET）。
+1. 解压 `osu-roam-v1.2.4-portable.zip`（从 [Releases](https://github.com/lEttEr93/OsuRoam/releases/latest) 下载；自包含 .NET 运行时，不用另装 .NET，包内已带 `tosu.exe`）。
 2. 双击 `OsuRoam.exe`。
 3. 在「账号与连接」填 OAuth Client ID、Client Secret 和玩家名。
 4. 选游戏模式（osu! / taiko / catch / mania 1K–10K）。
