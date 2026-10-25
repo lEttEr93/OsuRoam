@@ -1,0 +1,23 @@
+# ---- .NET 构建产物 ----
+bin/
+obj/
+diagnostic-build/
+artifacts/
+[Dd]ebug/
+[Rr]elease/
+.vs/
+*.user
+*.suo
+*.userprefs
+
+# ---- 通用 ----
+logs/
+*.log
+.venv/
+__pycache__/
+node_modules/
+build/
+dist/
+
+# ---- 本机配置（含 OAuth secret，绝不入库）----
+settings.json
