@@ -42,6 +42,8 @@
                             Content="下一首" Click="MiniNextButton_Click" ToolTip="下载并导入下一首" />
                 </Grid>
                 <StackPanel Grid.Column="1" Orientation="Horizontal" Margin="0,7,7,7">
+                    <Button x:Name="HistoryButton" Content="历史" Width="46" Padding="0" Margin="0,0,6,0"
+                            Click="HistoryButton_Click" ToolTip="历史推荐" />
                     <Button x:Name="CollapseButton" Content="−" Width="34" Padding="0" Click="CollapseButton_Click" ToolTip="迷你播放器" />
                     <Button Content="×" Width="34" Margin="6,0,0,0" Padding="0" Click="CloseButton_Click" ToolTip="关闭" />
                 </StackPanel>

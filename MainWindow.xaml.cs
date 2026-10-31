@@ -26,8 +26,13 @@ public partial class MainWindow : Window
     private readonly ObservableCollection<RecommendationItem> recommendations = [];
     private readonly HashSet<int> sessionImportedBeatmapsetIds = [];
     private readonly BeatmapDownloadService downloader;
+    private readonly PatternLibrary patternLibrary = new();
+    private readonly ArchiveStore archiveStore = new();
+    private HistoryWindow? historyWindow;
     private AppSettings settings = new();
     private PlayerProfile? profile;
+    private double[]? patternPreference;
+    private Func<int, ManiaPattern?>? patternLookup;
     private IReadOnlyList<OsuBeatmapset> candidates = [];
     private CancellationTokenSource sessionCancellation = new();
     private bool isRunning;
@@ -96,6 +101,9 @@ public partial class MainWindow : Window
         AppLog.Info("osu! Roam 启动");
         AppLog.Info($"日志文件：{AppLog.CurrentPath}");
         settings = await settingsStore.LoadAsync();
+        await patternLibrary.LoadAsync();
+        await archiveStore.LoadAsync();
+        AppLog.Info($"键型库：{patternLibrary.ParsedCount} 条真实解析 / {patternLibrary.Count} 条总计");
         refreshTagList();
         applySettingsToControls();
         if (!double.IsNaN(settings.WindowLeft) && !double.IsNaN(settings.WindowTop))
@@ -139,6 +147,11 @@ public partial class MainWindow : Window
             api.Configure(settings.ClientId, ClientSecretBox.Password);
             int? maniaKeys = settings.Mode == "mania" ? settings.ManiaKeys : null;
             profile = await api.BuildProfileAsync(settings.Username, settings.Mode, maniaKeys, sessionCancellation.Token);
+            patternPreference = settings.Mode == "mania"
+                ? PatternPreference.Build(profile, patternLibrary, settings.ManiaKeys)
+                : null;
+            if (patternPreference is not null)
+                AppLog.Info($"键型偏好向量：{string.Join(", ", ManiaPattern.CorePatterns.Select((name, index) => $"{name}={patternPreference[index]:0.00}"))}");
             DifficultyRangeSettings difficultyRange = settings.GetDifficultyRange();
 settings.AutomaticDifficulty = difficultyRange.Automatic;
             settings.MinimumStars = difficultyRange.MinimumStars;
@@ -229,10 +242,37 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
         }
     }
 
+    /// <summary>为当前候选谱面准备键型：库里有真实数据就用，没有就用 tag 推断。</summary>
+    private void refreshPatternCache()
+    {
+        if (settings.Mode != "mania")
+        {
+            patternLookup = null;
+            return;
+        }
+
+        Dictionary<int, ManiaPattern?> cache = [];
+        foreach (OsuBeatmapset set in candidates)
+        {
+            IReadOnlyList<string> tags = AppSettings.ParseTags(set.Tags);
+            foreach (OsuBeatmap beatmap in set.Beatmaps)
+            {
+                if (!string.Equals(beatmap.Mode, settings.Mode, StringComparison.OrdinalIgnoreCase))
+                    continue;
+                if ((int)Math.Round(beatmap.CircleSize) != settings.ManiaKeys)
+                    continue;
+                cache[beatmap.Id] = patternLibrary.Resolve(beatmap.Id, set.Id, tags, settings.ManiaKeys);
+            }
+        }
+        patternLookup = id => cache.TryGetValue(id, out ManiaPattern? pattern) ? pattern : null;
+    }
+
     private async Task refillPoolAsync()
     {
         if (profile is null)
             return;
+
+        refreshPatternCache();
 
         int missing = Math.Max(0, settings.PoolSize - recommendations.Count);
         bool historyChanged = false;
@@ -248,11 +288,13 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
                 lowerPriority.AddRange(profile.PlayedBeatmapsetIds());
             IReadOnlyList<RecommendationItem> additions = recommendationEngine.RankAvoidingHistory(
                 candidates, profile, settings, settings.MinimumStars, settings.MaximumStars,
-                excluded, lowerPriority, missing);
+                excluded, lowerPriority, missing,
+                patternLookup, patternPreference, settings.PatternWeight);
             foreach (RecommendationItem item in additions)
             {
                 recommendations.Add(item);
                 settings.RecordRecommendation(item.BeatmapsetId);
+                archiveStore.Add(item);
                 historyChanged = true;
             }
         }
@@ -264,12 +306,35 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
             try
             {
                 await settingsStore.SaveAsync(settings);
+                await archiveStore.SaveAsync();
             }
             catch (Exception exception)
             {
                 AppLog.Error("Failed to save recommendation history", exception);
             }
         }
+    }
+
+    private void HistoryButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (historyWindow is { IsVisible: true })
+        {
+            historyWindow.Activate();
+            return;
+        }
+
+        historyWindow = new HistoryWindow(archiveStore.Entries, settings, settingsStore)
+        {
+            Owner = this
+        };
+        historyWindow.TagsChanged += () =>
+        {
+            refreshTagList();
+            foreach (RecommendationItem item in recommendations)
+                item.RefreshTagInclusion(settings.IncludedTags);
+        };
+        historyWindow.Closed += (_, _) => historyWindow = null;
+        historyWindow.Show();
     }
 
     private async Task downloadItemAsync(RecommendationItem item, bool importAfterDownload, string status)
@@ -289,6 +354,15 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
             {
                 item.DownloadState = DownloadState.Queued;
                 await downloader.DownloadAsync(item, settings, sessionCancellation.Token);
+                if (settings.Mode == "mania")
+                {
+                    string oszPath = Path.Combine(settingsStore.CacheDirectory, $"{item.BeatmapsetId}.osz");
+                    if (patternLibrary.TryIngestOsz(oszPath, item.BeatmapId, item.BeatmapsetId))
+                    {
+                        refreshPatternCache();
+                        await patternLibrary.SaveAsync();
+                    }
+                }
             }
             if (importAfterDownload)
             {

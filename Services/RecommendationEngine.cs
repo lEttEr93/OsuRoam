@@ -12,13 +12,16 @@ public sealed class RecommendationEngine
         double maximumStars,
         ISet<int> excludedBeatmapsetIds,
         IReadOnlyList<int> recommendationHistory,
-        int count)
+        int count,
+        Func<int, ManiaPattern?>? patternLookup = null,
+        double[]? patternPreference = null,
+        double patternWeight = 0)
     {
         if (count <= 0) return [];
         List<OsuBeatmapset> source = beatmapsets.ToList();
         HashSet<int> historyIds = recommendationHistory.Where(id => id > 0).ToHashSet();
         HashSet<int> excludedFresh = [.. excludedBeatmapsetIds, .. historyIds];
-        List<RecommendationItem> result = Rank(source, profile, settings, minimumStars, maximumStars, excludedFresh, count).ToList();
+        List<RecommendationItem> result = Rank(source, profile, settings, minimumStars, maximumStars, excludedFresh, count, false, patternLookup, patternPreference, patternWeight).ToList();
         HashSet<int> selectedIds = [.. excludedBeatmapsetIds, .. result.Select(item => item.BeatmapsetId)];
         if (result.Count >= count) return result;
 
@@ -26,7 +29,7 @@ public sealed class RecommendationEngine
         foreach (int beatmapsetId in recommendationHistory)
         {
             if (beatmapsetId <= 0 || !checkedHistoryIds.Add(beatmapsetId) || selectedIds.Contains(beatmapsetId)) continue;
-            RecommendationItem? reusable = Rank(source.Where(set => set.Id == beatmapsetId), profile, settings, minimumStars, maximumStars, selectedIds, 1, isRecycled: true).FirstOrDefault();
+            RecommendationItem? reusable = Rank(source.Where(set => set.Id == beatmapsetId), profile, settings, minimumStars, maximumStars, selectedIds, 1, isRecycled: true, patternLookup, patternPreference, patternWeight).FirstOrDefault();
             if (reusable is null) continue;
             result.Add(reusable);
             selectedIds.Add(reusable.BeatmapsetId);
@@ -43,7 +46,10 @@ public sealed class RecommendationEngine
         double maximumStars,
         ISet<int> excludedBeatmapsetIds,
         int count,
-        bool isRecycled = false)
+        bool isRecycled = false,
+        Func<int, ManiaPattern?>? patternLookup = null,
+        double[]? patternPreference = null,
+        double patternWeight = 0)
     {
         double starCenter = (minimumStars + maximumStars) / 2;
         double starRadius = Math.Max(0.2, (maximumStars - minimumStars) / 2);
@@ -82,7 +88,13 @@ public sealed class RecommendationEngine
                 double tagFit = settings.IncludedTags.Count == 0 ? 0 : (double)settings.IncludedTags.Count(tag => setTags.Contains(tag, StringComparer.OrdinalIgnoreCase)) / settings.IncludedTags.Count;
                 double simpleFilterFit = settings.SimpleFilterFit(set);
                 double simpleFilterBonus = simpleFilterFit * 0.18 + settings.DefaultStatusPriority(set) * 0.08;
-                double score = familiarityWeight * (starFit * 0.62 + bpmFit * 0.15 + lengthFit * 0.10 + mapperFit * 0.13) + settings.Exploration * 0.55 * discovery + tagFit * 0.12 + simpleFilterBonus;
+                double patternFit = 0;
+                ManiaPattern? pattern = patternPreference is not null && patternWeight > 0
+                    ? patternLookup?.Invoke(beatmap.Id)
+                    : null;
+                if (pattern is not null)
+                    patternFit = PatternPreference.Fit(pattern, patternPreference!);
+                double score = familiarityWeight * (starFit * 0.62 + bpmFit * 0.15 + lengthFit * 0.10 + mapperFit * 0.13) + settings.Exploration * 0.55 * discovery + tagFit * 0.12 + simpleFilterBonus + patternFit * patternWeight;
                 string reason = tagFit > 0
                     ? $"标签偏好 {tagFit:P0} · 星级匹配 {starFit:P0}"
                     : mapperFit > 0.3
@@ -90,6 +102,8 @@ public sealed class RecommendationEngine
                         : bpmFit > 0.78
                             ? $"节奏匹配 · 星级匹配 {starFit:P0}"
                             : $"探索新曲 · 星级匹配 {starFit:P0}";
+                if (pattern is not null && pattern.Source == PatternSource.Osu)
+                    reason = $"{reason} · {pattern.Category}";
 
                 RecommendationItem item = new()
                 {

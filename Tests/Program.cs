@@ -16,6 +16,7 @@ testSearchSortPlanRotates();
 testPatternAnalyzerDetectsStream();
 testPatternAnalyzerDetectsJacks();
 testPatternAnalyzerDetectsLnChart();
+testPatternPreferenceShapesRanking();
 testDirtyTagsAreFiltered();
 testCompoundTagsRemainTogether();
 testCommonCompoundTagsUseLongestMatches();
@@ -513,6 +514,54 @@ static void assertSequenceStrings(IReadOnlyList<string> expected, IReadOnlyList<
 {
     if (!expected.SequenceEqual(actual, StringComparer.OrdinalIgnoreCase))
         throw new InvalidOperationException($"{message}：expected=[{string.Join(',', expected)}], actual=[{string.Join(',', actual)}]");
+}
+
+static OsuBeatmapset taggedManiaSet(int setId, int beatmapId, string tags) => new()
+{
+    Id = setId,
+    Artist = "artist",
+    Title = $"set {setId}",
+    Creator = "mapper",
+    Status = "ranked",
+    Tags = tags,
+    RankedDate = new DateTimeOffset(2024, 1, 1, 0, 0, 0, TimeSpan.Zero),
+    Beatmaps =
+    [
+        new OsuBeatmap
+        {
+            Id = beatmapId,
+            BeatmapsetId = setId,
+            Mode = "mania",
+            CircleSize = 4,
+            DifficultyRating = 3,
+            Version = "4K",
+            Bpm = 180,
+            TotalLength = 120
+        }
+    ]
+};
+
+static void testPatternPreferenceShapesRanking()
+{
+    AppSettings settings = recommendationSettings();
+    PlayerProfile profile = emptyProfile();
+    List<OsuBeatmapset> sets = [taggedManiaSet(500, 5001, "ln 长条"), taggedManiaSet(600, 6001, "stream 流")];
+
+    // 600 是流谱；偏好向量只认 Stream
+    double[] preference = [1, 0, 0, 0, 0, 0];
+    Func<int, ManiaPattern?> lookup = id =>
+    {
+        OsuBeatmapset? set = sets.FirstOrDefault(candidate => candidate.Beatmaps.Any(beatmap => beatmap.Id == id));
+        return set is null ? null : PatternTags.Infer(AppSettings.ParseTags(set.Tags).ToList(), 4);
+    };
+
+    IReadOnlyList<RecommendationItem> withoutPattern = new RecommendationEngine().RankAvoidingHistory(
+        sets, profile, settings, 1, 10, new HashSet<int>(), [], 1, lookup, preference, 0);
+    assertEqual(500, withoutPattern[0].BeatmapsetId, "权重为 0 时键型不参与排序，保持候选顺序");
+
+    IReadOnlyList<RecommendationItem> withPattern = new RecommendationEngine().RankAvoidingHistory(
+        sets, profile, settings, 1, 10, new HashSet<int>(), [], 1, lookup, preference, 0.3);
+    assertEqual(600, withPattern[0].BeatmapsetId, "有键型偏好时命中的流谱应排到前面");
 }
 
 static void assertTrue(bool actual, string message)

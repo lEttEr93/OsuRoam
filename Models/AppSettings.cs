@@ -72,6 +72,8 @@ public sealed class AppSettings
     public bool IncludeLoved { get; set; } = true;
     public bool ExcludeRecentlyPlayed { get; set; } = true;
     public double Exploration { get; set; } = 0.45;
+    /// <summary>键型偏好在排序里的权重（0 = 不参与）。</summary>
+    public double PatternWeight { get; set; } = 0.12;
     public int PoolSize { get; set; } = 5;
     public int ResultDelaySeconds { get; set; } = 5;
     public bool AutoDownload { get; set; } = true;

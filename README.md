@@ -1,4 +1,4 @@
-# osu! Roam v1.2.4
+# osu! Roam v1.2.5
 
 osu! 谱面漫游推荐工具。Windows / WPF / .NET 8。
 
@@ -12,16 +12,39 @@ osu! 谱面漫游推荐工具。Windows / WPF / .NET 8。
 
 1. **画像**：拉当前模式的 `recent` + `best` 成绩（mania 会按所选键数过滤），算出星级 62 分位（±0.45 作为建议区间）、BPM 中位数、时长中位数、谱师出现频率、近期玩过的谱面集合。
 2. **硬过滤**（任一不满足直接出局）：模式 / mania 键数、星级区间、时长区间、年份区间、简易筛选的「严格」档、排除 tag 命中、推荐 tag 一个都不命中、已推荐或近期玩过的谱面。
-3. **打分**：星级越贴近区间中心越好（相对权重 62）、BPM 接近偏好（15）、时长接近偏好（10）、谱师匹配（13）；再叠加探索度随机项、tag 命中比例、简易筛选偏好命中率、`ranked` / `loved` 状态优先级。
+3. **打分**：星级越贴近区间中心越好（相对权重 62）、BPM 接近偏好（15）、时长接近偏好（10）、谱师匹配（13）；再叠加探索度随机项、tag 命中比例、简易筛选偏好命中率、`ranked` / `loved` 状态优先级，以及 mania 模式的**键型贴合度**。
 4. **排序**：严格筛选命中项数 → 状态优先级 → 综合分数，取前 N 个进推荐池。
 
-搜索范围最多 8 页、约 400 个候选 beatmapset。
+候选来源每次漫游会在 6 种搜索排序之间轮换（最新上架 / 评分高 / 最早上架 / 热门 / 收藏多 / 难度高），每轮两种排序各取 4 页，合计最多 8 页约 400 个 beatmapset。这样下一轮看到的候选和这一轮不一样，不容易反复推荐同一批谱面。
+
+---
+
+## 历史推荐
+
+标题栏的「历史」按钮打开历史推荐窗口，列出最近推荐过的 **50 首**谱面，卡片形态与推荐池一致：封面、曲名、难度、星级 / BPM / 时长、推荐理由和推荐时间。每张卡片下方的 **Tags** 可以展开看这首谱面的全部 tag，**双击任意 tag 直接加入推荐 tag**，已命中的会高亮。
+
+历史记录存在 `%LOCALAPPDATA%\OsuRoam\history.json`，同一张谱面再次被推荐时会移到最前。
+
+## 键型（mania）
+
+mania 模式下会用键型提高推荐针对性。分类体系移植自 [osumania_map_analyser](https://github.com/LeoBlackMT/osumania_map_analyser)（MIT，其 RC 键型算法源自 [Interlude](https://github.com/YAVSRG/YAVSRG)）：
+
+- 6 个核心型：`Stream 流` / `Chordstream 和弦流` / `Jacks 叠键` / `Coordination 协调` / `Density 密度` / `Wildcard 变速杂项`
+- 4K 子型：`Rolls` `Trills` `Minitrills` `Handstream` `Split Trill` `Jumptrill` `Jumpstream` `Longjacks` `Quadstream` `Gluts` `Chordjacks` `Minijacks` `Column Lock` `Release` `Shield` `Inverse` `JS Density` `HS Density` `Jacky WC` `Speedy WC`
+- 模式标签：`RC`（长条占比 ≤15%）、`LN`（≥90%）、`Mix`、`HB`（长条与普通键混排）
+
+工作方式：
+
+1. 推荐池里的谱面被下载后，直接从 `.osz` 里读 `.osu` 解析键型，结果存进键型库 `%LOCALAPPDATA%\OsuRoam\patterns.json`；推荐池卡片上的推荐理由会附带识别出的分类（如 `Jumpstream Tech`）。
+2. 用你 recent + best 里同键数的成绩，取这些谱面的键型平均，得到**键型偏好向量**。
+3. 排序时按候选键型与偏好向量的余弦贴合度加分，权重由 `PatternWeight` 控制（默认 0.12）。
+4. 还没下载过的候选谱面拿不到 `.osu`，先用 tag 粗略推断（`ln` / `rice` / `jack` / `chordjack` / `handstream` / `tech` / `sv` 等），真实键型入库后自动接管。
 
 ---
 
 ## 快速使用
 
-1. 解压 `osu-roam-v1.2.4-portable.zip`（从 [Releases](https://github.com/lEttEr93/OsuRoam/releases/latest) 下载；自包含 .NET 运行时，不用另装 .NET，包内已带 `tosu.exe`）。
+1. 解压 `osu-roam-v1.2.5-portable.zip`（从 [Releases](https://github.com/lEttEr93/OsuRoam/releases/latest) 下载；自包含 .NET 运行时，不用另装 .NET，包内已带 `tosu.exe`）。
 2. 双击 `OsuRoam.exe`。
 3. 在「账号与连接」填 OAuth Client ID、Client Secret 和玩家名。
 4. 选游戏模式（osu! / taiko / catch / mania 1K–10K）。
@@ -93,11 +116,14 @@ Tag 池内置预设曲风、mania 键型特征（含 `米` `面` `叠` `技` `�
 | 内容 | 位置 |
 |---|---|
 | 配置（含加密后的 Secret、tag 池、推荐历史） | `%LOCALAPPDATA%\OsuRoam\settings.json` |
+| 历史推荐记录（最近 50 首） | `%LOCALAPPDATA%\OsuRoam\history.json` |
+| 键型库（解析过的谱面键型） | `%LOCALAPPDATA%\OsuRoam\patterns.json` |
 | 谱面下载缓存 | `%LOCALAPPDATA%\OsuRoam\Beatmaps` |
 | 日志 | `%LOCALAPPDATA%\OsuRoam\Logs\osu-roam-YYYYMMDD-HHmmss.log` |
 
 - 推荐历史最多保留 500 条，用于减少重复推荐。
 - 下载缓存**不会自动清理**，长期用记得手动清 `Beatmaps` 目录。
+- 删掉 `patterns.json` 只会丢掉键型记录，重新下载谱面会重新解析。
 - `settings.json` 里有 OAuth Secret（已用当前 Windows 用户加密），不要分享给别人，也别拷到别的用户环境里。
 
 ## 构建
@@ -109,7 +135,7 @@ dotnet build OsuRoam.csproj -c Release
 
 # 单文件自包含便携包
 dotnet publish OsuRoam.csproj -c Release -r win-x64 --self-contained true `
-  -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o bin\v1.2.4
+  -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o bin\v1.2.5
 ```
 
 发布前确认没有正在运行的 `OsuRoam.exe`，单文件发布会因文件占用失败。
@@ -118,10 +144,14 @@ dotnet publish OsuRoam.csproj -c Release -r win-x64 --self-contained true `
 
 ```
 MainWindow.xaml(.cs)          主窗口与交互、漫游循环
+HistoryWindow.xaml(.cs)       历史推荐窗口
 Models/AppSettings.cs         配置模型、tag 解析、简易筛选语义
 Models/OsuData.cs             osu! API 数据结构
-Services/OsuApiClient.cs      OAuth、用户 / 成绩 / 搜索
+Services/OsuApiClient.cs      OAuth、用户 / 成绩 / 搜索（排序轮换）
 Services/RecommendationEngine.cs  候选过滤与排序
+Services/ManiaPatternAnalyzer.cs  mania 键型分类（移植 MMA / Interlude 算法）
+Services/PatternLibrary.cs    键型库、tag 推断、键型偏好
+Services/ArchiveStore.cs      历史推荐记录
 Services/BeatmapDownloadService.cs  .osz 下载与导入
 Services/TosuClient.cs        tosu WebSocket 状态
 Services/TosuProcessManager.cs     tosu 进程托管
