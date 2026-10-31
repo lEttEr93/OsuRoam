@@ -342,7 +342,9 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
     /// <summary>只有「导入」或「开始游玩」才记入历史，单纯进推荐池不算。</summary>
     private void recordArchive(RecommendationItem item)
     {
-        archiveStore.Add(item);
+        RecommendationArchiveEntry entry = archiveStore.Add(item);
+        entry.RefreshTagInclusion(settings.IncludedTags);
+        entry.LoadCover();
         _ = archiveStore.SaveAsync();
     }
 
@@ -423,25 +425,28 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
                 refreshTagList();
                 foreach (RecommendationItem item in recommendations)
                     item.RefreshTagInclusion(settings.IncludedTags);
+                historyWindow?.RefreshEntries(archiveStore.Entries);
             };
             historyWindow.Closed += (_, _) => historyWindow = null;
             historyWindow.DockTo(this);
         }
 
-        historyWindow.SetEntries(archiveStore.Entries);
+        // 集合本身实时绑定，这里只重算 tag 高亮/补封面。
+        historyWindow.RefreshEntries(archiveStore.Entries);
         historyWindow.Show();
         historyWindow.Activate();
     }
 
-    private async Task downloadItemAsync(RecommendationItem item, bool importAfterDownload, string status)
+    /// <summary>下载（需要时）并按需导入，返回是否已经真正触发 osu! 导入。</summary>
+    private async Task<bool> downloadItemAsync(RecommendationItem item, bool importAfterDownload, string status)
     {
         if (item.DownloadState == DownloadState.Importing)
-            return;
+            return false;
         if (item.DownloadState == DownloadState.Imported)
         {
             if (importAfterDownload)
                 setCurrentRoamItem(item);
-            return;
+            return true;
         }
         try
         {
@@ -473,15 +478,19 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
             {
                 StatusText.Text = $"下一首已下载：{item.DisplayTitle}";
             }
+
+            return item.DownloadState == DownloadState.Imported;
         }
         catch (OperationCanceledException)
         {
             item.DownloadState = DownloadState.Waiting;
+            return false;
         }
         catch (Exception exception)
         {
             AppLog.Error($"下载或导入失败：{item.DisplayTitle}", exception);
             StatusText.Text = $"下载失败：{conciseMessage(exception)}";
+            return false;
         }
     }
 
@@ -533,8 +542,8 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
             }
 
             MiniTrackDetailText.Text = "正在下载并导入...";
-            await downloadItemAsync(next, importAfterDownload: true, "正在安装下一首");
-            if (next.DownloadState != DownloadState.Imported)
+            // downloadItemAsync 内部已经把失败原因写进状态栏，这里只需要判断是否真的导入成功。
+            if (!await downloadItemAsync(next, importAfterDownload: true, "正在安装下一首"))
                 return;
 
             if (previous is not null && !ReferenceEquals(previous, next))
@@ -739,6 +748,8 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
         settings.NormalizeTags();
         await settingsStore.SaveAsync(settings);
         refreshTagList();
+        // 历史面板里同名 tag 的高亮也要跟着变，否则两个界面会看起来不一致。
+        historyWindow?.RefreshEntries(archiveStore.Entries);
         e.Handled = true;
     }
 
@@ -781,24 +792,26 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
         StatusText.Text = $"成功结算：{played.DisplayTitle}";
         try
         {
+            // 结算完成时间比「开始游玩」更有意义，历史里按这个时间排。
+            recordArchive(played);
             recommendations.Remove(played);
             RecommendationItem? next = preparedNextItem is not null && recommendations.Contains(preparedNextItem)
                 ? preparedNextItem
                 : recommendations.FirstOrDefault();
             if (next is not null && settings.AutoImport)
             {
-                if (settings.AutoDownload && next.DownloadState is not (DownloadState.Downloaded or DownloadState.Imported))
-                    await downloader.DownloadAsync(next, settings, sessionCancellation.Token);
-                if (next.DownloadState == DownloadState.Downloaded)
-                {
-                    StatusText.Text = $"成功结算，正在导入：{next.DisplayTitle}";
-                    await downloader.ImportAsync(next, settings, sessionCancellation.Token);
-                    recordSessionImport(next);
-                    setCurrentRoamItem(next);
-                }
+                // 缺文件就先补下载再导入；失败时不要写成「已导入」，那条消息会误导排查。
+                bool imported = await downloadItemAsync(next, importAfterDownload: true, "结算后安装下一首");
+                StatusText.Text = imported
+                    ? $"下一首已导入：{next.DisplayTitle}"
+                    : $"下一首未能导入，可手动点 ↓ 重试：{next.DisplayTitle}";
             }
+            else if (next is null)
+            {
+                StatusText.Text = "成功结算，推荐池暂无下一首";
+            }
+
             await refillPoolAsync();
-            StatusText.Text = next is null ? "成功结算，推荐池暂无下一首" : "下一首已导入";
             playingItem = null;
             preparedNextItem = null;
         }
@@ -889,7 +902,7 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
         value.AutoDownload = AutoDownloadCheck.IsChecked == true;
         value.AutoImport = AutoImportCheck.IsChecked == true;
         value.OsuClient = (OsuClientBox.SelectedItem as ComboBoxItem)?.Tag?.ToString() ?? "lazer";
-        value.OsuExecutablePath = OsuPathBox.Text.Trim();
+        value.OsuExecutablePath = BeatmapDownloadService.NormalizeExecutablePath(OsuPathBox.Text);
         value.DownloadMirrorTemplates = DownloadTemplateBox.Text.Trim();
         value.DownloadUrlTemplate = value.DownloadMirrorTemplates.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries).FirstOrDefault()?.Trim()
             ?? value.DownloadUrlTemplate;
@@ -918,7 +931,7 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
         ExcludeRecentCheck.IsChecked = settings.ExcludeRecentlyPlayed;
         AutoDownloadCheck.IsChecked = settings.AutoDownload;
         AutoImportCheck.IsChecked = settings.AutoImport;
-        OsuPathBox.Text = settings.OsuExecutablePath;
+        OsuPathBox.Text = BeatmapDownloadService.NormalizeExecutablePath(settings.OsuExecutablePath);
         string osuClient = string.Equals(settings.OsuClient, "stable", StringComparison.OrdinalIgnoreCase) ? "stable" : "lazer";
         foreach (ComboBoxItem item in OsuClientBox.Items)
             if (Equals(item.Tag?.ToString(), osuClient)) OsuClientBox.SelectedItem = item;

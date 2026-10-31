@@ -187,15 +187,6 @@ public sealed class BeatmapDownloadService : IDisposable
 
     private static void import(RecommendationItem item, string path, string configuredExecutable, string osuClient)
     {
-#if false
-        item.DownloadState = DownloadState.Importing;
-        string? executable = resolveOsuExecutable(configuredExecutable);
-        ProcessStartInfo startInfo = executable is null
-            ? new ProcessStartInfo(path) { UseShellExecute = true }
-            : new ProcessStartInfo(executable, $"\"{path}\"") { UseShellExecute = true };
-        _ = Process.Start(startInfo) ?? throw new InvalidOperationException("无法启动 osu!lazer 导入谱面。");
-        item.DownloadState = DownloadState.Imported;
-#endif
         importCore(item, path, configuredExecutable, osuClient);
     }
 
@@ -222,13 +213,42 @@ public sealed class BeatmapDownloadService : IDisposable
         item.DownloadState = DownloadState.Imported;
     }
 
+    /// <summary>
+    /// 清理「复制文件地址」带进来的引号、首尾空白和 %VAR%，否则 File.Exists 永远失败，
+    /// 表现为每次导入都报「设置中的 osu!.exe 路径不存在」。
+    /// </summary>
+    internal static string NormalizeExecutablePath(string? raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw))
+            return string.Empty;
+
+        string value = raw.Trim().Trim('"', '\'', ' ');
+        if (value.Length == 0)
+            return string.Empty;
+
+        try
+        {
+            value = Environment.ExpandEnvironmentVariables(value);
+        }
+        catch (ArgumentException)
+        {
+            // 环境变量写法不合法时保留原文，交给后面的存在性判断。
+        }
+
+        return value.Trim().Trim('"', '\'', ' ');
+    }
+
     private static string? resolveOsuExecutable(string configured, string osuClient)
     {
-        if (!string.IsNullOrWhiteSpace(configured))
+        string normalized = NormalizeExecutablePath(configured);
+        if (normalized.Length > 0)
         {
-            if (!File.Exists(configured))
-                throw new FileNotFoundException("设置中的 osu!.exe 路径不存在。", configured);
-            return configured;
+            if (File.Exists(normalized))
+                return normalized;
+
+            // 不能直接抛：配置里可能是旧版本写进去的脏路径，或者用户挪了安装目录。
+            // 抛异常会让之后每一次导入都失败，回退到自动探测更安全。
+            AppLog.Info($"设置里的 osu! 路径不可用，改用自动探测：{normalized}");
         }
 
         return GetOsuExecutableCandidates(

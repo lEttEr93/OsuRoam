@@ -25,6 +25,9 @@ public sealed class TosuClient : IAsyncDisposable
     private bool resultHandled;
     private int lastPlayedBeatmapId;
     private int lastPlayedBeatmapsetId;
+    // tosu 会把上一局的成绩一直留在 payload 里，用它区分「本局新打出来的成绩」和残留数据。
+    private string playStartResultsSignature = string.Empty;
+    private string lastResultsSignature = string.Empty;
 
     public event Action<string>? StatusChanged;
     public event Action<TosuSnapshot>? SnapshotReceived;
@@ -131,6 +134,7 @@ public sealed class TosuClient : IAsyncDisposable
                     playStartedRaised = false;
                     playFailed = false;
                     resultHandled = false;
+                    playStartResultsSignature = resultsSignature(resultRank, resultScore);
                 }
                 lastPlayedBeatmapId = beatmapId;
                 lastPlayedBeatmapsetId = beatmapsetId;
@@ -143,27 +147,39 @@ public sealed class TosuClient : IAsyncDisposable
                 return;
             }
 
-            if (state == "resultScreen" && playSessionActive && !resultHandled &&
-                !string.IsNullOrWhiteSpace(resultRank) && resultScore > 0)
+            // 结算判定不再强依赖 state 名称：快速跳过结算界面时 tosu 会直接从 play 跳到
+            // selectPlay，lazer 下 resultsScreen 也可能整体缺失。只要本局还在进行中、
+            // 还没处理过结算，且拿到的成绩不是开局时残留的那份，就按结算处理。
+            string signature = resultsSignature(resultRank, resultScore);
+            bool hasResults = resultScore > 0 && !string.IsNullOrWhiteSpace(resultRank);
+            if (playSessionActive && !resultHandled && hasResults &&
+                !string.Equals(signature, playStartResultsSignature, StringComparison.Ordinal) &&
+                !string.Equals(signature, lastResultsSignature, StringComparison.Ordinal))
             {
                 resultHandled = true;
+                lastResultsSignature = signature;
                 TosuSnapshot completed = snapshot with
                 {
                     BeatmapId = lastPlayedBeatmapId,
                     BeatmapsetId = lastPlayedBeatmapsetId,
                     Failed = playFailed
                 };
-                if (!playFailed && !string.Equals(resultRank, "F", StringComparison.OrdinalIgnoreCase) && resultScore > 0)
+                if (!playFailed && !string.Equals(resultRank, "F", StringComparison.OrdinalIgnoreCase))
+                {
+                    AppLog.Info($"结算判定：state={state}, rank={resultRank}, score={resultScore}");
                     PlaySucceeded?.Invoke(completed);
+                }
                 else
-                    AppLog.Info($"本局未成功完成，不导入下一首：failed={playFailed}, rank={resultRank}, score={resultScore}");
+                {
+                    AppLog.Info($"本局未成功完成，不导入下一首：state={state}, failed={playFailed}, rank={resultRank}, score={resultScore}");
+                }
                 return;
             }
 
             if (state != "resultScreen" && playSessionActive)
             {
                 if (!resultHandled)
-                    AppLog.Info($"游玩未进入成功结算，不导入下一首：state={state}, failed={playFailed}");
+                    AppLog.Info($"游玩未进入成功结算，不导入下一首：state={state}, failed={playFailed}, rank={resultRank}, score={resultScore}");
                 playSessionActive = false;
                 playStartedRaised = false;
                 playFailed = false;
@@ -175,6 +191,8 @@ public sealed class TosuClient : IAsyncDisposable
             StatusChanged?.Invoke("tosu 数据格式暂不可读");
         }
     }
+
+    private static string resultsSignature(string rank, long score) => $"{rank}|{score}";
 
     private static string readString(JsonElement root, string objectName, string propertyName)
     {

@@ -1,3 +1,4 @@
+using System.Collections.ObjectModel;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
@@ -16,35 +17,35 @@ public partial class HistoryWindow : Window
     private Window? dockOwner;
     private bool hiddenByOwner;
 
-    public HistoryWindow(IReadOnlyList<RecommendationArchiveEntry> entries, AppSettings settings, SettingsStore settingsStore)
+    public HistoryWindow(ObservableCollection<RecommendationArchiveEntry> entries, AppSettings settings, SettingsStore settingsStore)
     {
         InitializeComponent();
         this.settings = settings;
         this.settingsStore = settingsStore;
 
-        foreach (RecommendationArchiveEntry entry in entries)
-        {
-            entry.RefreshTagInclusion(settings.IncludedTags);
-            entry.LoadCover();
-        }
+        // 直接绑 store 的可观察集合：新增、替换、超限淘汰都会实时反映到面板上。
         HistoryList.ItemsSource = entries;
-        EmptyHint.Visibility = entries.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+        entries.CollectionChanged += (_, _) => updateEmptyHint(entries.Count);
+        updateEmptyHint(entries.Count);
+        RefreshEntries(entries);
     }
 
     /// <summary>双击 tag 加入偏好后通知主窗口刷新高亮。</summary>
     public event Action? TagsChanged;
 
-    /// <summary>重新绑定记录（每次打开面板时刷新，避免看到旧列表）。</summary>
-    public void SetEntries(IReadOnlyList<RecommendationArchiveEntry> entries)
+    /// <summary>重新计算 tag 高亮并补齐封面；集合本身是实时绑定的，不需要重绑 ItemsSource。</summary>
+    public void RefreshEntries(IReadOnlyList<RecommendationArchiveEntry> entries)
     {
         foreach (RecommendationArchiveEntry entry in entries)
         {
             entry.RefreshTagInclusion(settings.IncludedTags);
-            entry.LoadCover();
+            if (entry.Cover is null)
+                entry.LoadCover();
         }
-        HistoryList.ItemsSource = entries;
-        EmptyHint.Visibility = entries.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
     }
+
+    private void updateEmptyHint(int count) =>
+        EmptyHint.Visibility = count == 0 ? Visibility.Visible : Visibility.Collapsed;
 
     /// <summary>贴在目标窗口右侧，跟随它移动/缩放，并在它最小化时一起隐藏。</summary>
     public void DockTo(Window target)

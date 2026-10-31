@@ -36,6 +36,7 @@ public sealed class RecommendationArchiveEntry : INotifyPropertyChanged
     private System.Windows.Media.ImageSource? cover;
 
     /// <summary>由 CoverLoader 用程序自己的 HttpClient 拉下来的封面。</summary>
+    [JsonIgnore]
     public System.Windows.Media.ImageSource? Cover
     {
         get => cover;

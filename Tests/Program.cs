@@ -5,6 +5,10 @@ testSuccessfulCompletion();
 testAbortDoesNotComplete();
 testFailureDoesNotComplete();
 testPauseDoesNotStartOrComplete();
+testResultsDetectedWithoutResultScreenState();
+testStaleResultsFromPreviousPlayAreIgnored();
+testQuotedExecutablePathIsNormalized();
+await testArchiveStorePublishesCollectionChangesAsync();
 testDifficultyProfilesAreIndependent();
 testUnlimitedDifficultyRange();
 testManiaKeysAreFiltered();
@@ -81,6 +85,99 @@ static void testPauseDoesNotStartOrComplete()
     client.ProcessSnapshotJson(snapshot("selectPlay"));
     assertEqual(0, started, "暂停状态不能触发开始预下载");
     assertEqual(0, succeeded, "暂停后退出不能触发成功结算");
+}
+
+static void testResultsDetectedWithoutResultScreenState()
+{
+    // 跳过结算界面时 tosu 会直接从 play 跳到 selectPlay，结算数据仍在 payload 里。
+    TosuClient client = new();
+    int succeeded = 0;
+    client.PlaySucceeded += _ => succeeded++;
+    client.ProcessSnapshotJson(snapshot("play", paused: false, failed: false));
+    client.ProcessSnapshotJson(snapshot("selectPlay", rank: "A", score: 123456));
+    assertEqual(1, succeeded, "跳过结算界面后仍应判定本局成功");
+}
+
+static void testStaleResultsFromPreviousPlayAreIgnored()
+{
+    TosuClient client = new();
+    int succeeded = 0;
+    client.PlaySucceeded += _ => succeeded++;
+
+    client.ProcessSnapshotJson(snapshot("play"));
+    client.ProcessSnapshotJson(snapshot("resultScreen", rank: "A", score: 111111));
+    assertEqual(1, succeeded, "第一局正常结算应触发一次");
+
+    // 第二局中途退出：tosu 仍保留上一局的成绩，不能当成新结算。
+    client.ProcessSnapshotJson(snapshot("selectPlay"));
+    client.ProcessSnapshotJson(snapshot("play", rank: "A", score: 111111));
+    client.ProcessSnapshotJson(snapshot("selectPlay", rank: "A", score: 111111));
+    assertEqual(1, succeeded, "上一局残留的成绩不能重复触发结算");
+}
+
+static void testQuotedExecutablePathIsNormalized()
+{
+    string expected = @"C:\Users\me\AppData\Local\osulazer\osu!.exe";
+    assertText(expected,
+        BeatmapDownloadService.NormalizeExecutablePath("\"C:\\Users\\me\\AppData\\Local\\osulazer\\osu!.exe\""),
+        "带引号的路径必须去掉引号");
+    assertText(expected,
+        BeatmapDownloadService.NormalizeExecutablePath("  \"C:\\Users\\me\\AppData\\Local\\osulazer\\osu!.exe\"  "),
+        "首尾空白和引号都要清掉");
+    assertText(string.Empty, BeatmapDownloadService.NormalizeExecutablePath(null), "null 应清理成空串");
+    assertText(string.Empty, BeatmapDownloadService.NormalizeExecutablePath("   "), "空白应清理成空串");
+
+    string expanded = BeatmapDownloadService.NormalizeExecutablePath("\"%LOCALAPPDATA%\\osulazer\\osu!.exe\"");
+    assertText(
+        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "osulazer", "osu!.exe"),
+        expanded,
+        "环境变量应展开");
+}
+
+static async Task testArchiveStorePublishesCollectionChangesAsync()
+{
+    string directory = Path.Combine(Path.GetTempPath(), "osuroam-archive-" + Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(directory);
+    try
+    {
+        ArchiveStore store = new(directory);
+        int changes = 0;
+        store.Entries.CollectionChanged += (_, _) => changes++;
+
+        RecommendationItem item = new()
+        {
+            BeatmapId = 11,
+            BeatmapsetId = 22,
+            Artist = "artist",
+            Title = "title",
+            DifficultyName = "4K",
+            Mapper = "mapper",
+            Stars = 3,
+            Bpm = 180,
+            LengthSeconds = 120,
+            RankedYear = 2024,
+            Score = 0,
+            Reason = "test"
+        };
+        RecommendationArchiveEntry entry = store.Add(item);
+        assertEqual(1, changes, "新增历史必须通知已绑定的面板");
+        assertEqual(1, store.Entries.Count, "新增后应有一条记录");
+        assertTrue(ReferenceEquals(entry, store.Entries[0]), "Add 应返回刚插入的那条记录");
+
+        store.Add(item);
+        assertEqual(1, store.Entries.Count, "同一张谱面不应重复记录");
+        assertEqual(3, changes, "重复推荐应先删除再插入，两次都要通知面板");
+
+        await store.SaveAsync();
+        ArchiveStore reloaded = new(directory);
+        await reloaded.LoadAsync();
+        assertEqual(1, reloaded.Entries.Count, "重新读取后应保留记录");
+        assertEqual(11, reloaded.Entries[0].BeatmapId, "重新读取后内容应一致");
+    }
+    finally
+    {
+        Directory.Delete(directory, true);
+    }
 }
 
 static void testDifficultyProfilesAreIndependent()
@@ -503,6 +600,12 @@ static void assertNear(double expected, double actual, string message)
 {
     if (Math.Abs(expected - actual) > 0.0001)
         throw new InvalidOperationException($"{message}：expected={expected}, actual={actual}");
+}
+
+static void assertText(string expected, string actual, string message)
+{
+    if (!string.Equals(expected, actual, StringComparison.Ordinal))
+        throw new InvalidOperationException($"{message}：expected=[{expected}], actual=[{actual}]");
 }
 
 static void assertSequence(IReadOnlyList<int> expected, IReadOnlyList<int> actual, string message)

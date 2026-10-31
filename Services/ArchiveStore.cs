@@ -1,3 +1,4 @@
+using System.Collections.ObjectModel;
 using System.IO;
 using System.Text.Json;
 using OsuRoam.Models;
@@ -9,13 +10,17 @@ public sealed class ArchiveStore
 {
     public const int MaximumEntries = 50;
 
-    private readonly string directory = StoragePaths.Root;
+    private readonly string directory;
 
-    private List<RecommendationArchiveEntry> entries = [];
+    // 面板直接绑定这个集合：RecommendationItem 那边也是 ObservableCollection，
+    // 换掉普通 List 之后新记录才能实时出现在已经打开的历史面板里。
+    private readonly ObservableCollection<RecommendationArchiveEntry> entries = [];
+
+    public ArchiveStore(string? directory = null) => this.directory = directory ?? StoragePaths.Root;
 
     private string FilePath => Path.Combine(directory, "history.json");
 
-    public IReadOnlyList<RecommendationArchiveEntry> Entries => entries;
+    public ObservableCollection<RecommendationArchiveEntry> Entries => entries;
 
     public async Task LoadAsync()
     {
@@ -24,22 +29,31 @@ public sealed class ArchiveStore
             if (!File.Exists(FilePath))
                 return;
             await using FileStream stream = File.OpenRead(FilePath);
-            entries = await JsonSerializer.DeserializeAsync<List<RecommendationArchiveEntry>>(stream) ?? [];
-            trim();
+            List<RecommendationArchiveEntry> loaded =
+                await JsonSerializer.DeserializeAsync<List<RecommendationArchiveEntry>>(stream) ?? [];
+            entries.Clear();
+            foreach (RecommendationArchiveEntry entry in loaded.Take(MaximumEntries))
+                entries.Add(entry);
         }
         catch (Exception exception)
         {
             AppLog.Error("读取历史推荐失败", exception);
-            entries = [];
+            entries.Clear();
         }
     }
 
-    public void Add(RecommendationItem item)
+    /// <summary>记一条推荐并返回它，方便调用方补封面和 tag 高亮。</summary>
+    public RecommendationArchiveEntry Add(RecommendationItem item)
     {
         // 同一张谱面再次被推荐时，用新记录替换旧记录并移动到最前。
-        entries.RemoveAll(entry => entry.BeatmapId == item.BeatmapId);
-        entries.Insert(0, RecommendationArchiveEntry.FromItem(item));
+        RecommendationArchiveEntry? existing = entries.FirstOrDefault(entry => entry.BeatmapId == item.BeatmapId);
+        if (existing is not null)
+            entries.Remove(existing);
+
+        RecommendationArchiveEntry entry = RecommendationArchiveEntry.FromItem(item);
+        entries.Insert(0, entry);
         trim();
+        return entry;
     }
 
     public async Task SaveAsync()
@@ -48,7 +62,7 @@ public sealed class ArchiveStore
         {
             Directory.CreateDirectory(directory);
             await using FileStream stream = File.Create(FilePath);
-            await JsonSerializer.SerializeAsync(stream, entries, new JsonSerializerOptions { WriteIndented = false });
+            await JsonSerializer.SerializeAsync(stream, entries.ToList(), new JsonSerializerOptions { WriteIndented = false });
         }
         catch (Exception exception)
         {
@@ -58,7 +72,7 @@ public sealed class ArchiveStore
 
     private void trim()
     {
-        if (entries.Count > MaximumEntries)
-            entries.RemoveRange(MaximumEntries, entries.Count - MaximumEntries);
+        while (entries.Count > MaximumEntries)
+            entries.RemoveAt(entries.Count - 1);
     }
 }
