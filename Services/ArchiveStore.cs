@@ -9,8 +9,7 @@ public sealed class ArchiveStore
 {
     public const int MaximumEntries = 50;
 
-    private readonly string directory = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "OsuRoam");
+    private readonly string directory = StoragePaths.Root;
 
     private List<RecommendationArchiveEntry> entries = [];
 

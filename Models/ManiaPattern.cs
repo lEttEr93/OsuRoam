@@ -58,6 +58,33 @@ public sealed class ManiaPattern
         "流", "和弦流", "叠键", "协调", "密度", "变速/杂项"
     ];
 
+    /// <summary>雷达图标签：控制在 2–3 个字，既看得懂又能在小图里放下。</summary>
+    public static readonly string[] CorePatternShortLabels =
+    [
+        "流", "和弦流", "叠键", "协调", "密度", "杂项"
+    ];
+
+    public static readonly string[] SkillPatternShortLabels =
+    [
+        "流", "跳流", "交互", "耐力", "叠速", "叠和弦", "技巧"
+    ];
+
+    /// <summary>
+    /// 七轴技能画像，轴名沿用 Etterna 的七个 skillset，数值由本地谱面数据推导，
+    /// **不是 MinaCalc 结果**，只用于看谱面的难度倾向形状。
+    /// </summary>
+    public double[] SkillAxes { get; set; } = [];
+
+    public static readonly string[] SkillPatterns =
+    [
+        "Stream", "Jumpstream", "Handstream", "Stamina", "JackSpeed", "Chordjack", "Technical"
+    ];
+
+    public static readonly string[] SkillPatternLabels =
+    [
+        "流", "跳流", "交互", "耐力", "叠速", "叠和弦", "技巧"
+    ];
+
     /// <summary>6 维核心型占比向量，缺失的按 0 处理。</summary>
     public double[] ToVector() => CorePatterns
         .Select(name => CoreShares.TryGetValue(name, out double share) ? share : 0)

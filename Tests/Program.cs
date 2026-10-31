@@ -17,6 +17,7 @@ testPatternAnalyzerDetectsStream();
 testPatternAnalyzerDetectsJacks();
 testPatternAnalyzerDetectsLnChart();
 testPatternPreferenceShapesRanking();
+testCacheCleanerSkipsPoolItems();
 testDirtyTagsAreFiltered();
 testCompoundTagsRemainTogether();
 testCommonCompoundTagsUseLongestMatches();
@@ -562,6 +563,31 @@ static void testPatternPreferenceShapesRanking()
     IReadOnlyList<RecommendationItem> withPattern = new RecommendationEngine().RankAvoidingHistory(
         sets, profile, settings, 1, 10, new HashSet<int>(), [], 1, lookup, preference, 0.3);
     assertEqual(600, withPattern[0].BeatmapsetId, "有键型偏好时命中的流谱应排到前面");
+}
+
+static void testCacheCleanerSkipsPoolItems()
+{
+    string directory = Path.Combine(Path.GetTempPath(), "osuroam-cache-" + Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(directory);
+    try
+    {
+        for (int setId = 1; setId <= 3; setId++)
+        {
+            string path = Path.Combine(directory, $"{setId}.osz");
+            File.WriteAllBytes(path, new byte[1024 * 1024]);
+            File.SetLastWriteTimeUtc(path, DateTime.UtcNow.AddMinutes(-setId));
+        }
+
+        // 共 3 MB，上限 2 MB；最旧的 3.osz 在推荐池里，必须跳过
+        BeatmapCacheCleaner.Result result = BeatmapCacheCleaner.Clean(directory, 2L * 1024 * 1024, new HashSet<int> { 3 });
+        assertEqual(1, result.DeletedFiles, "超限时应删除一个最旧的谱面");
+        assertTrue(File.Exists(Path.Combine(directory, "3.osz")), "推荐池里的谱面不能被删除");
+        assertEqual(2, Directory.GetFiles(directory, "*.osz").Length, "删除后应剩下两个谱面");
+    }
+    finally
+    {
+        Directory.Delete(directory, true);
+    }
 }
 
 static void assertTrue(bool actual, string message)

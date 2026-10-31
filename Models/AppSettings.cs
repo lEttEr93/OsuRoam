@@ -81,6 +81,8 @@ public sealed class AppSettings
     public string DownloadUrlTemplate { get; set; } = "https://dl.sayobot.cn/beatmaps/download/full/{setId}";
     public string DownloadMirrorTemplates { get; set; } = DefaultDownloadMirrors;
     public string OsuExecutablePath { get; set; } = string.Empty;
+    /// <summary>谱面缓存上限（MB），只裁剪 Beatmaps 里的 .osz，其他数据不动。</summary>
+    public int CacheLimitMegabytes { get; set; } = 1024;
     public string OsuClient { get; set; } = "lazer";
     public string TosuWebSocketUrl { get; set; } = "ws://127.0.0.1:24050/websocket/v2";
     public string TosuExecutablePath { get; set; } = string.Empty;

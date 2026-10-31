@@ -11,8 +11,7 @@ namespace OsuRoam.Services;
 /// </summary>
 public sealed class PatternLibrary
 {
-    private readonly string directory = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "OsuRoam");
+    private readonly string directory = StoragePaths.Root;
 
     private Dictionary<int, ManiaPattern> patterns = [];
     private bool dirty;
@@ -89,17 +88,52 @@ public sealed class PatternLibrary
         try
         {
             using ZipArchive archive = ZipFile.OpenRead(oszPath);
-            ZipArchiveEntry? entry = archive.Entries
+            List<ZipArchiveEntry> candidates = archive.Entries
                 .Where(item => item.FullName.EndsWith(".osu", StringComparison.OrdinalIgnoreCase))
-                .FirstOrDefault(item => beatmapId <= 0 || item.FullName.Contains($"[{beatmapId}]", StringComparison.Ordinal));
-            if (entry is null)
+                .ToList();
+            if (candidates.Count == 0)
+            {
+                AppLog.Error($"谱面压缩包里没有 .osu：{Path.GetFileName(oszPath)}");
                 return false;
+            }
 
-            using StreamReader reader = new(entry.Open());
-            ManiaPattern? pattern = ManiaPatternAnalyzer.Analyze(reader.ReadToEnd(), beatmapId, beatmapsetId);
+            // .osu 文件名通常是难度名（[Peko]、[1.1x]），不含 beatmap id；
+            // 可靠做法是读文件里的 BeatmapID 元数据字段。
+            string? text = null;
+            string? matchedName = null;
+            foreach (ZipArchiveEntry candidate in candidates)
+            {
+                using StreamReader reader = new(candidate.Open());
+                string content = reader.ReadToEnd();
+                if (beatmapId <= 0 || hasBeatmapId(content, beatmapId))
+                {
+                    text = content;
+                    matchedName = candidate.FullName;
+                    break;
+                }
+            }
+
+            if (text is null && candidates.Count == 1)
+            {
+                using StreamReader reader = new(candidates[0].Open());
+                text = reader.ReadToEnd();
+                matchedName = candidates[0].FullName;
+            }
+
+            if (text is null)
+            {
+                AppLog.Error($"包里没有 BeatmapID={beatmapId} 的 .osu（共 {candidates.Count} 个）：{Path.GetFileName(oszPath)}");
+                return false;
+            }
+
+            ManiaPattern? pattern = ManiaPatternAnalyzer.Analyze(text, beatmapId, beatmapsetId);
             if (pattern is null)
+            {
+                AppLog.Error($"键型解析返回空（键数或音符不足）：{matchedName}");
                 return false;
+            }
 
+            AppLog.Info($"键型入库：set={beatmapsetId} beatmap={beatmapId} {pattern.KeyCount}K {pattern.Category}（{matchedName}）");
             Put(pattern);
             return true;
         }
@@ -108,6 +142,18 @@ public sealed class PatternLibrary
             AppLog.Error($"解析谱面键型失败：{Path.GetFileName(oszPath)}", exception);
             return false;
         }
+    }
+
+    /// <summary>在 .osu 文本里找 BeatmapID 元数据行。</summary>
+    private static bool hasBeatmapId(string osuText, int beatmapId)
+    {
+        foreach (string line in osuText.Split('\n'))
+        {
+            if (!line.StartsWith("BeatmapID:", StringComparison.Ordinal))
+                continue;
+            return int.TryParse(line.AsSpan(10).Trim(), out int value) && value == beatmapId;
+        }
+        return false;
     }
 
     /// <summary>候选谱面的键型：优先真实数据，退回 tag 推断（推断结果不入库，避免污染库）。</summary>

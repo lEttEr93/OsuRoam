@@ -80,7 +80,37 @@ public static class ManiaPatternAnalyzer
             Category = buildCategory(coreShares, specificShares, matches),
             Source = PatternSource.Osu
         };
+        pattern.SkillAxes = buildSkillAxes(pattern);
         return pattern;
+    }
+
+    /// <summary>把键型占比与密度折算成七轴"技能形状"。仅用于展示倾向，不是 MinaCalc。</summary>
+    private static double[] buildSkillAxes(ManiaPattern pattern)
+    {
+        double share(string name) => pattern.CoreShares.TryGetValue(name, out double value) ? value : 0;
+        double specific(string name) => pattern.SpecificShares.TryGetValue(name, out double value) ? value : 0;
+
+        double nps = pattern.NotesPerSecond;
+        double seconds = pattern.ChartsDurationMs / 1000.0;
+        double speed = Math.Clamp(nps / 10.0, 0, 1);
+        double endurance = Math.Clamp(seconds / 180.0, 0, 1) * Math.Clamp(nps / 6.0, 0, 1);
+        double trills = specific("Trills") + specific("Minitrills") + specific("Rolls");
+
+        double[] raw =
+        [
+            share("Stream") * 0.8 + trills * 0.6 + speed * 0.4,
+            specific("Jumpstream") * 1.2 + share("Chordstream") * 0.35 + speed * 0.2,
+            specific("Handstream") * 1.2 + share("Chordstream") * 0.25,
+            endurance * 1.2,
+            share("Jacks") * 0.8 + specific("Minijacks") * 1.0 + speed * 0.3,
+            specific("Chordjacks") * 1.4 + share("Jacks") * 0.3,
+            share("Wildcard") * 0.6 + pattern.MixedShare * 0.8 + Math.Clamp(pattern.SvAmount / 4.0, 0, 1) * 0.4
+        ];
+
+        double max = raw.Max();
+        if (max <= 0)
+            return new double[raw.Length];
+        return [.. raw.Select(value => Math.Round(Math.Clamp(value / max, 0, 1), 4))];
     }
 
     private static readonly HashSet<string> LnCorePatterns = ["Coordination", "Density", "Wildcard"];

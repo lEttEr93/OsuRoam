@@ -29,6 +29,7 @@ public partial class MainWindow : Window
     private readonly PatternLibrary patternLibrary = new();
     private readonly ArchiveStore archiveStore = new();
     private HistoryWindow? historyWindow;
+    private bool prefetching;
     private AppSettings settings = new();
     private PlayerProfile? profile;
     private double[]? patternPreference;
@@ -100,7 +101,16 @@ public partial class MainWindow : Window
     {
         AppLog.Info("osu! Roam 启动");
         AppLog.Info($"日志文件：{AppLog.CurrentPath}");
+        if (StoragePaths.Note is not null)
+            AppLog.Info($"存储位置：{StoragePaths.Note}");
         settings = await settingsStore.LoadAsync();
+        if (settingsStore.LoadFailure is not null)
+        {
+            string message = $"配置读取失败，当前显示的是默认值。\n\n{settingsStore.LoadFailure}\n\n配置文件位置：{settingsStore.SettingsPathForDisplay}";
+            AppLog.Error(message);
+            StatusText.Text = "配置读取失败，请查看弹窗信息";
+            MessageBox.Show(message, "osu! Roam", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
         await patternLibrary.LoadAsync();
         await archiveStore.LoadAsync();
         AppLog.Info($"键型库：{patternLibrary.ParsedCount} 条真实解析 / {patternLibrary.Count} 条总计");
@@ -294,7 +304,7 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
             {
                 recommendations.Add(item);
                 settings.RecordRecommendation(item.BeatmapsetId);
-                archiveStore.Add(item);
+                item.LoadCover();
                 historyChanged = true;
             }
         }
@@ -313,10 +323,90 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
                 AppLog.Error("Failed to save recommendation history", exception);
             }
         }
+        _ = prefetchPoolAsync();
     }
 
-    private void HistoryButton_Click(object sender, RoutedEventArgs e)
+    private void DetailButton_Click(object sender, RoutedEventArgs e)
     {
+        if (sender is FrameworkElement { Tag: RecommendationItem item })
+            item.ToggleDetail();
+    }
+
+    private void RadarToggleButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement { Tag: RecommendationItem item })
+            item.ToggleRadar();
+    }
+
+    /// <summary>只有「导入」或「开始游玩」才记入历史，单纯进推荐池不算。</summary>
+    private void recordArchive(RecommendationItem item)
+    {
+        archiveStore.Add(item);
+        _ = archiveStore.SaveAsync();
+    }
+
+    /// <summary>
+    /// 预下载整个推荐池：键型分析需要完整 .osu，只有提前下好，
+    /// 详情页的雷达和子型占比才对池内每一首都有数据。
+    /// </summary>
+    private async Task prefetchPoolAsync()
+    {
+        if (!settings.AutoDownload || prefetching)
+            return;
+
+        RecommendationItem[] pending = recommendations
+            .Where(item => item.DownloadState is DownloadState.Waiting or DownloadState.Failed)
+            .ToArray();
+        if (pending.Length == 0)
+            return;
+
+        prefetching = true;
+        try
+        {
+            for (int index = 0; index < pending.Length; index++)
+            {
+                RecommendationItem item = pending[index];
+                if (!recommendations.Contains(item))
+                    continue;
+                StatusText.Text = $"正在预下载推荐池 {index + 1}/{pending.Length}：{item.DisplayTitle}";
+                await downloadItemAsync(item, importAfterDownload: false, "预下载");
+            }
+            StatusText.Text = $"推荐池已全部下载（{pending.Length} 首）";
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception exception)
+        {
+            AppLog.Error("预下载推荐池失败", exception);
+            StatusText.Text = $"预下载失败：{conciseMessage(exception)}";
+        }
+        finally
+        {
+            prefetching = false;
+            trimBeatmapCache();
+        }
+    }
+
+    /// <summary>超出缓存上限时从旧到新删 .osz，推荐池里的谱面不删。</summary>
+    private void trimBeatmapCache()
+    {
+        try
+        {
+            long limit = Math.Max(0, settings.CacheLimitMegabytes) * 1024L * 1024L;
+            if (limit <= 0)
+                return;
+
+            HashSet<int> keep = BeatmapCacheCleaner.KeepSet(recommendations, playingItem ?? currentRoamItem);
+            BeatmapCacheCleaner.Result result = BeatmapCacheCleaner.Clean(settingsStore.CacheDirectory, limit, keep);
+            if (result.DeletedFiles > 0)
+                AppLog.Info($"缓存裁剪：删除 {result.DeletedFiles} 个谱面，释放 {result.FreedBytes / 1024 / 1024} MB，剩余 {result.RemainingBytes / 1024 / 1024} MB");
+        }
+        catch (Exception exception)
+        {
+            AppLog.Error("缓存裁剪失败", exception);
+        }
+    }
+
+    private void HistoryButton_Click(object sender, RoutedEventArgs e)    {
         if (historyWindow is { IsVisible: true })
         {
             historyWindow.Activate();
@@ -360,6 +450,7 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
                     if (patternLibrary.TryIngestOsz(oszPath, item.BeatmapId, item.BeatmapsetId))
                     {
                         refreshPatternCache();
+                        item.ApplyPattern(patternLibrary.TryGet(item.BeatmapId));
                         await patternLibrary.SaveAsync();
                     }
                 }
@@ -369,6 +460,7 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
                 await downloader.ImportAsync(item, settings, sessionCancellation.Token);
                 recordSessionImport(item);
                 setCurrentRoamItem(item);
+                recordArchive(item);
                 StatusText.Text = $"已交给 {osuClientDisplayName()} 导入";
             }
             else
@@ -665,6 +757,7 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
 
         int index = recommendations.IndexOf(playingItem);
         preparedNextItem = index >= 0 && index + 1 < recommendations.Count ? recommendations[index + 1] : null;
+        recordArchive(playingItem);
         AppLog.Info($"开始游玩：{playingItem.DisplayTitle}；下一首：{preparedNextItem?.DisplayTitle ?? "无"}");
         if (settings.AutoDownload && preparedNextItem is not null)
             await downloadItemAsync(preparedNextItem, importAfterDownload: false, "游玩中预下载下一首");
@@ -785,6 +878,7 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
         value.MaximumLengthSeconds = parseInt(MaximumLengthBox, value.MinimumLengthSeconds, 7200);
         value.Exploration = ExplorationSlider.Value;
         value.PoolSize = int.TryParse((PoolSizeBox.SelectedItem as ComboBoxItem)?.Content?.ToString(), out int size) ? size : 5;
+        value.CacheLimitMegabytes = parseInt(CacheLimitBox, 128, 65536);
         value.ExcludeRecentlyPlayed = ExcludeRecentCheck.IsChecked == true;
         value.AutoDownload = AutoDownloadCheck.IsChecked == true;
         value.AutoImport = AutoImportCheck.IsChecked == true;
@@ -835,6 +929,7 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
             if (Equals(item.Tag?.ToString(), settings.Mode)) ModeBox.SelectedItem = item;
         foreach (ComboBoxItem item in PoolSizeBox.Items)
             if (Equals(item.Content?.ToString(), settings.PoolSize.ToString())) PoolSizeBox.SelectedItem = item;
+        CacheLimitBox.Text = settings.CacheLimitMegabytes.ToString();
         applySimpleFilterControls();
         updateDifficultyControls();
         updateExplorationText();

@@ -6,14 +6,19 @@ namespace OsuRoam.Services;
 
 public sealed class SettingsStore
 {
-    private readonly string directory = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "OsuRoam");
+    private readonly string directory = StoragePaths.Root;
 
     public string CacheDirectory => Path.Combine(directory, "Beatmaps");
     private string SettingsPath => Path.Combine(directory, "settings.json");
 
+    public string SettingsPathForDisplay => SettingsPath;
+
+    /// <summary>读取失败时的原因；界面用它提示，避免静默变成空配置。</summary>
+    public string? LoadFailure { get; private set; }
+
     public async Task<AppSettings> LoadAsync()
     {
+        LoadFailure = null;
         try
         {
             if (!File.Exists(SettingsPath))
@@ -38,9 +43,30 @@ public sealed class SettingsStore
             }
             return settings;
         }
-        catch (Exception)
+        catch (Exception exception)
         {
+            // 读取失败不能当"没有配置"处理：那会让界面空白，用户重填后
+            // 一保存就把原配置覆盖掉。这里记录原因，并把旧文件备份一份。
+            LoadFailure = $"{exception.GetType().Name}: {exception.Message}";
+            AppLog.Error($"读取配置失败：{SettingsPath}", exception);
+            backupBrokenSettings();
             return new AppSettings();
+        }
+    }
+
+    private void backupBrokenSettings()
+    {
+        try
+        {
+            if (!File.Exists(SettingsPath))
+                return;
+            string backup = $"{SettingsPath}.unreadable-{DateTime.Now:yyyyMMdd-HHmmss}";
+            File.Copy(SettingsPath, backup, overwrite: true);
+            AppLog.Info($"已备份读取失败的配置：{backup}");
+        }
+        catch (Exception exception)
+        {
+            AppLog.Error("备份配置失败", exception);
         }
     }
 
@@ -49,8 +75,31 @@ public sealed class SettingsStore
         settings.NormalizeDifficultyRanges();
         settings.NormalizeSimpleFilters();
         Directory.CreateDirectory(directory);
-        await using FileStream stream = File.Create(SettingsPath);
-        await JsonSerializer.SerializeAsync(stream, settings, new JsonSerializerOptions { WriteIndented = true });
+
+        // 先写临时文件再原子替换：另一个实例/杀软短暂占用时不会把配置写坏，
+        // 独占打开被拒也能靠重试躲过去。
+        string tempPath = SettingsPath + ".tmp";
+        byte[] payload = JsonSerializer.SerializeToUtf8Bytes(settings, new JsonSerializerOptions { WriteIndented = true });
+
+        Exception? last = null;
+        for (int attempt = 0; attempt < 4; attempt++)
+        {
+            try
+            {
+                await using (FileStream stream = new(tempPath, FileMode.Create, FileAccess.Write, FileShare.None))
+                    await stream.WriteAsync(payload);
+                File.Move(tempPath, SettingsPath, overwrite: true);
+                return;
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+                last = exception;
+                AppLog.Error($"写入配置失败（第 {attempt + 1} 次）：{SettingsPath}", exception);
+                await Task.Delay(150 * (attempt + 1));
+            }
+        }
+
+        throw new IOException($"无法保存配置到 {SettingsPath}：{last?.Message}", last);
     }
 
     public string ReadSecret(AppSettings settings) => SecretProtector.Unprotect(settings.ProtectedClientSecret);

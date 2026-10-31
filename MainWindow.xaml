@@ -70,6 +70,7 @@
                                 <Border Background="{StaticResource SurfaceBrush}" BorderBrush="{StaticResource BorderBrush}"
                                         BorderThickness="1" CornerRadius="6" Margin="0,0,0,8" Padding="9">
                                     <Grid>
+                                        <Grid Visibility="{Binding IsSummaryVisible, Converter={StaticResource BoolToVis}}">
                                         <Grid.RowDefinitions>
                                             <RowDefinition Height="Auto" />
                                             <RowDefinition Height="Auto" />
@@ -81,7 +82,7 @@
                                         </Grid.ColumnDefinitions>
                                         <Grid Width="64" Height="64">
                                             <Border CornerRadius="4" ClipToBounds="True" Background="#30353A">
-                                                <Image Source="{Binding CoverUrl}" Stretch="UniformToFill" />
+                                                <Image Source="{Binding Cover}" Stretch="UniformToFill" />
                                             </Border>
                                             <Button x:Name="PreviewButton" Width="64" Height="64" Padding="0"
                                                     Tag="{Binding}"
@@ -140,6 +141,7 @@
                                         <StackPanel Grid.Column="2" Grid.Row="0">
                                             <Button Content="↓" Height="29" Padding="0" Tag="{Binding}" Click="DownloadButton_Click" ToolTip="下载并导入" />
                                             <Button Content="↷" Height="29" Margin="0,6,0,0" Padding="0" Tag="{Binding}" Click="SkipButton_Click" ToolTip="跳过" />
+                                            <Button Content="..." Height="29" Margin="0,6,0,0" Padding="0" Tag="{Binding}" Click="DetailButton_Click" ToolTip="详情" />
                                         </StackPanel>
                                         <Expander Grid.Row="1" Grid.ColumnSpan="3" Header="Tags" Margin="72,7,42,0">
                                             <ItemsControl ItemsSource="{Binding TagItems}">
@@ -167,6 +169,33 @@
                                                 </ItemsControl.ItemTemplate>
                                             </ItemsControl>
                                         </Expander>
+                                        </Grid>
+                                        <Grid Visibility="{Binding IsDetailVisible, Converter={StaticResource BoolToVis}}">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="150" />
+                                                <ColumnDefinition Width="*" />
+                                            </Grid.ColumnDefinitions>
+                                            <StackPanel>
+                                                <controls:RadarChart Width="132" Height="132" HorizontalAlignment="Center"
+                                                                     Labels="{Binding RadarLabels}" Values="{Binding RadarValues}" />
+                                                <Button Content="{Binding RadarToggleLabel}" Tag="{Binding}" Click="RadarToggleButton_Click"
+                                                        HorizontalAlignment="Center" Padding="10,2" FontSize="10" ToolTip="切换雷达图" />
+                                            </StackPanel>
+                                            <StackPanel Grid.Column="1" Margin="8,0,0,0">
+                                                <TextBlock Text="{Binding DetailTitle}" FontWeight="SemiBold" FontSize="12"
+                                                           TextTrimming="CharacterEllipsis" />
+                                                <ItemsControl ItemsSource="{Binding DetailLines}">
+                                                    <ItemsControl.ItemTemplate>
+                                                        <DataTemplate>
+                                                            <TextBlock Text="{Binding}" FontSize="11" Margin="0,2,0,0"
+                                                                       Foreground="{StaticResource MutedTextBrush}" TextTrimming="CharacterEllipsis" />
+                                                        </DataTemplate>
+                                                    </ItemsControl.ItemTemplate>
+                                                </ItemsControl>
+                                                <Button Content="‹ 返回" Tag="{Binding}" Click="DetailButton_Click"
+                                                        HorizontalAlignment="Left" Margin="0,8,0,0" Padding="12,2" FontSize="10" />
+                                            </StackPanel>
+                                        </Grid>
                                     </Grid>
                                 </Border>
                             </DataTemplate>
@@ -371,6 +400,8 @@
                                 <ComboBoxItem Content="3" /><ComboBoxItem Content="4" /><ComboBoxItem Content="5" />
                                 <ComboBoxItem Content="6" /><ComboBoxItem Content="8" /><ComboBoxItem Content="10" />
                             </ComboBox>
+                            <TextBlock Text="谱面缓存上限（MB，超出后从最旧的谱面开始删）" Foreground="{StaticResource MutedTextBrush}" FontSize="11" Margin="0,9,0,0" />
+                            <TextBox x:Name="CacheLimitBox" />
                             <TextBlock Text="osu!.exe 路径（留空自动查找所选客户端）" Foreground="{StaticResource MutedTextBrush}" FontSize="11" Margin="0,9,0,0" />
                             <TextBox x:Name="OsuPathBox" />
                             <TextBlock Text="下载镜像（每行一个，包含 {setId}）" Foreground="{StaticResource MutedTextBrush}" FontSize="11" Margin="0,9,0,0" />

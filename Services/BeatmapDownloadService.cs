@@ -216,6 +216,9 @@ public sealed class BeatmapDownloadService : IDisposable
         Process? started = Process.Start(startInfo);
         if (started is null)
             throw new InvalidOperationException("无法启动 osu!lazer 导入谱面。");
+        AppLog.Info(executable is null
+            ? $"导入：没有找到 osu 可执行文件，交给系统关联打开 {Path.GetFileName(path)}"
+            : $"导入：启动 {executable}，参数 {path}，PID={started.Id}");
         item.DownloadState = DownloadState.Imported;
     }
 

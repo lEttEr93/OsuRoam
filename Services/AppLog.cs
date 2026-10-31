@@ -8,7 +8,7 @@ public static class AppLog
     private static readonly object Sync = new();
     private static string? currentPath;
     public static event Action<string>? EntryAdded;
-    public static string LogDirectory => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "OsuRoam", "Logs");
+    public static string LogDirectory => Path.Combine(StoragePaths.Root, "Logs");
     public static string CurrentPath { get { lock (Sync) { currentPath ??= createPath(); return currentPath; } } }
     public static void Info(string message) => write("INFO", message, null);
     public static void Error(string message, Exception? exception = null) => write("ERROR", message, exception);
