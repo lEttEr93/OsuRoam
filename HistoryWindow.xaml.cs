@@ -6,11 +6,15 @@ using OsuRoam.Services;
 
 namespace OsuRoam;
 
-/// <summary>历史推荐窗口：展示最近推荐过的谱面，卡片形态与推荐池一致。</summary>
+/// <summary>
+/// 历史推荐面板：贴在主窗口右侧的二级界面，跟随主窗口移动/缩放，不单独占任务栏。
+/// </summary>
 public partial class HistoryWindow : Window
 {
     private readonly AppSettings settings;
     private readonly SettingsStore settingsStore;
+    private Window? dockOwner;
+    private bool hiddenByOwner;
 
     public HistoryWindow(IReadOnlyList<RecommendationArchiveEntry> entries, AppSettings settings, SettingsStore settingsStore)
     {
@@ -19,20 +23,83 @@ public partial class HistoryWindow : Window
         this.settingsStore = settingsStore;
 
         foreach (RecommendationArchiveEntry entry in entries)
+        {
             entry.RefreshTagInclusion(settings.IncludedTags);
+            entry.LoadCover();
+        }
         HistoryList.ItemsSource = entries;
+        EmptyHint.Visibility = entries.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
     }
 
-    /// <summary>历史上双击 tag 加入偏好后通知主窗口刷新高亮。</summary>
+    /// <summary>双击 tag 加入偏好后通知主窗口刷新高亮。</summary>
     public event Action? TagsChanged;
 
-    private void TitleBar_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    /// <summary>重新绑定记录（每次打开面板时刷新，避免看到旧列表）。</summary>
+    public void SetEntries(IReadOnlyList<RecommendationArchiveEntry> entries)
     {
-        if (e.ButtonState == MouseButtonState.Pressed)
-            DragMove();
+        foreach (RecommendationArchiveEntry entry in entries)
+        {
+            entry.RefreshTagInclusion(settings.IncludedTags);
+            entry.LoadCover();
+        }
+        HistoryList.ItemsSource = entries;
+        EmptyHint.Visibility = entries.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
     }
 
-    private void Close_Click(object sender, RoutedEventArgs e) => Close();
+    /// <summary>贴在目标窗口右侧，跟随它移动/缩放，并在它最小化时一起隐藏。</summary>
+    public void DockTo(Window target)
+    {
+        dockOwner = target;
+        Owner = target;
+        reposition();
+        Height = target.ActualHeight;
+        target.LocationChanged += (_, _) => reposition();
+        target.SizeChanged += (_, _) => reposition();
+        target.StateChanged += (_, _) => syncWithOwner();
+        target.IsVisibleChanged += (_, _) => syncWithOwner();
+        target.Closed += (_, _) => Close();
+    }
+
+    private void syncWithOwner()
+    {
+        if (dockOwner is null)
+            return;
+
+        bool ownerUsable = dockOwner.IsVisible && dockOwner.WindowState != WindowState.Minimized;
+        if (!ownerUsable)
+        {
+            if (IsVisible)
+            {
+                hiddenByOwner = true;
+                Hide();
+            }
+            return;
+        }
+
+        if (hiddenByOwner)
+        {
+            hiddenByOwner = false;
+            Show();
+        }
+        reposition();
+    }
+
+    private void reposition()
+    {
+        if (dockOwner is null)
+            return;
+
+        Left = dockOwner.Left + dockOwner.ActualWidth + 6;
+        Top = dockOwner.Top;
+        Height = dockOwner.ActualHeight;
+
+        // 右侧放不下就挪到左边
+        Rect workArea = SystemParameters.WorkArea;
+        if (Left + ActualWidth > workArea.Right)
+            Left = Math.Max(workArea.Left, dockOwner.Left - ActualWidth - 6);
+        if (Top + Height > workArea.Bottom)
+            Top = Math.Max(workArea.Top, workArea.Bottom - Height);
+    }
 
     private async void Tag_MouseDoubleClick(object sender, MouseButtonEventArgs e)
     {

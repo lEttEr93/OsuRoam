@@ -81,12 +81,58 @@ public static class ManiaPatternAnalyzer
             Source = PatternSource.Osu
         };
         pattern.SkillAxes = buildSkillAxes(pattern);
+        SkillResult skills = computeSkills(chart, pattern);
+        pattern.SkillAxes = skills.Axes;
+        pattern.SkillSource = skills.Source;
         return pattern;
     }
 
-    /// <summary>把键型占比与密度折算成七轴"技能形状"。仅用于展示倾向，不是 MinaCalc。</summary>
-    private static double[] buildSkillAxes(ManiaPattern pattern)
+    private sealed record SkillResult(double[] Axes, string Source);
+
+    /// <summary>
+    /// 优先用 MinaCalc 算真 MSD（Overall + 七个 skillset）；wasm 不可用时退回本地估算。
+    /// 归一化按最大值缩放，保证雷达图半径范围稳定。
+    /// </summary>
+    private static SkillResult computeSkills(Chart chart, ManiaPattern pattern)
     {
+        // 只取"有音符起点"的行：长条结束时间在我这里会生成空行（掩码 0），
+        // 而 MinaCalc 收到空行会当作 junk 直接返回全 0。MMA 的 buildRows 也只收集起点时间。
+        List<uint> masks = [];
+        List<float> times = [];
+        foreach (Row row in chart.Rows)
+        {
+            uint mask = 0;
+            foreach (int column in row.Heads.Concat(row.Normals))
+                mask |= 1u << column;
+            if (mask == 0)
+                continue;
+            masks.Add(mask);
+            times.Add((float)(row.Time / 1000.0));
+        }
+
+        double[]? msd = MinaCalc.Compute(chart.Keys, masks.ToArray(), times.ToArray());
+        if (msd is { Length: >= 8 })
+        {
+            double[] skills = new double[7];
+            double max = 0;
+            for (int index = 0; index < 7; index++)
+            {
+                skills[index] = Math.Max(0, msd[index + 1]);
+                max = Math.Max(max, skills[index]);
+            }
+            if (max > 0)
+            {
+                for (int index = 0; index < 7; index++)
+                    skills[index] = Math.Round(skills[index] / max, 4);
+                return new SkillResult(skills, $"MinaCalc {msd[0]:0.0}");
+            }
+        }
+
+        return new SkillResult(buildSkillAxes(pattern), "本地估算");
+    }
+
+    /// <summary>把键型占比与密度折算成七轴"技能形状"。仅用于展示倾向，不是 MinaCalc。</summary>
+    private static double[] buildSkillAxes(ManiaPattern pattern)    {
         double share(string name) => pattern.CoreShares.TryGetValue(name, out double value) ? value : 0;
         double specific(string name) => pattern.SpecificShares.TryGetValue(name, out double value) ? value : 0;
 

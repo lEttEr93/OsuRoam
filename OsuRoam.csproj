@@ -22,5 +22,10 @@
   <ItemGroup>
     <PackageReference Include="NAudio" Version="2.2.1" />
     <PackageReference Include="NAudio.Vorbis" Version="1.5.0" />
+    <PackageReference Include="Wasmtime" Version="48.0.2" />
+  </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="Resources\minacalc.wasm" />
+    <EmbeddedResource Include="Resources\minacalc-75.wasm" />
   </ItemGroup>
 </Project>

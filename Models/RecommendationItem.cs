@@ -147,12 +147,13 @@ public sealed class RecommendationItem : INotifyPropertyChanged
             ];
             if (pattern is null)
             {
-                lines.Add("键型数据未就绪（下载后自动解析）");
+                lines.Add("详情仅对 mania 模式有效");
+                lines.Add("（切到 mania 并下载谱面后才有键型与技能雷达）");
                 return lines;
             }
 
             lines.Add($"模式 {pattern.ModeTag}  LN {pattern.LnRatio:P0}  NPS {pattern.NotesPerSecond:0.0}");
-            lines.Add(showSkillRadar ? "技能轴为本地估算，非 MinaCalc" : $"主导键型 {pattern.Category}");
+            lines.Add(showSkillRadar ? $"技能轴 {pattern.SkillSource}" : $"主导键型 {pattern.Category}");
             foreach (KeyValuePair<string, double> pair in pattern.SpecificShares.Take(4))
                 lines.Add($"{pair.Key} {pair.Value:P0}");
             return lines;

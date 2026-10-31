@@ -33,6 +33,21 @@ public sealed class RecommendationArchiveEntry : INotifyPropertyChanged
     [JsonIgnore]
     public string CoverUrl => $"https://assets.ppy.sh/beatmaps/{BeatmapsetId}/covers/cover.jpg";
 
+    private System.Windows.Media.ImageSource? cover;
+
+    /// <summary>由 CoverLoader 用程序自己的 HttpClient 拉下来的封面。</summary>
+    public System.Windows.Media.ImageSource? Cover
+    {
+        get => cover;
+        private set
+        {
+            cover = value;
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Cover)));
+        }
+    }
+
+    public void LoadCover() => Services.CoverLoader.Load(BeatmapsetId, image => Cover = image);
+
     [JsonIgnore]
     public string RecommendedLabel => RecommendedAtUtc.ToLocalTime().ToString("MM-dd HH:mm");
 

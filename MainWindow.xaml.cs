@@ -29,6 +29,7 @@ public partial class MainWindow : Window
     private readonly PatternLibrary patternLibrary = new();
     private readonly ArchiveStore archiveStore = new();
     private HistoryWindow? historyWindow;
+    private bool historyWasVisible;
     private bool prefetching;
     private AppSettings settings = new();
     private PlayerProfile? profile;
@@ -406,25 +407,30 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
         }
     }
 
-    private void HistoryButton_Click(object sender, RoutedEventArgs e)    {
+    private void HistoryButton_Click(object sender, RoutedEventArgs e)
+    {
         if (historyWindow is { IsVisible: true })
         {
-            historyWindow.Activate();
+            historyWindow.Hide();
             return;
         }
 
-        historyWindow = new HistoryWindow(archiveStore.Entries, settings, settingsStore)
+        if (historyWindow is null)
         {
-            Owner = this
-        };
-        historyWindow.TagsChanged += () =>
-        {
-            refreshTagList();
-            foreach (RecommendationItem item in recommendations)
-                item.RefreshTagInclusion(settings.IncludedTags);
-        };
-        historyWindow.Closed += (_, _) => historyWindow = null;
+            historyWindow = new HistoryWindow(archiveStore.Entries, settings, settingsStore);
+            historyWindow.TagsChanged += () =>
+            {
+                refreshTagList();
+                foreach (RecommendationItem item in recommendations)
+                    item.RefreshTagInclusion(settings.IncludedTags);
+            };
+            historyWindow.Closed += (_, _) => historyWindow = null;
+            historyWindow.DockTo(this);
+        }
+
+        historyWindow.SetEntries(archiveStore.Entries);
         historyWindow.Show();
+        historyWindow.Activate();
     }
 
     private async Task downloadItemAsync(RecommendationItem item, bool importAfterDownload, string status)
@@ -1323,6 +1329,11 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
         isCollapsed = !isCollapsed;
         if (isCollapsed)
         {
+            if (historyWindow is { IsVisible: true })
+            {
+                historyWasVisible = true;
+                historyWindow.Hide();
+            }
             expandedHeight = Height;
             expandedWidth = Width;
             MainContent.Visibility = Visibility.Collapsed;
@@ -1344,6 +1355,11 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
             Footer.Visibility = Visibility.Visible;
             NormalHeader.Visibility = Visibility.Visible;
             MiniPlayerHeader.Visibility = Visibility.Collapsed;
+            if (historyWasVisible && historyWindow is not null)
+            {
+                historyWasVisible = false;
+                historyWindow.Show();
+            }
             ResizeMode = ResizeMode.CanResizeWithGrip;
             MinHeight = 300;
             MinWidth = 390;

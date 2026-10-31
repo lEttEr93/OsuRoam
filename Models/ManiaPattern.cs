@@ -75,6 +75,9 @@ public sealed class ManiaPattern
     /// </summary>
     public double[] SkillAxes { get; set; } = [];
 
+    /// <summary>技能轴来源：MinaCalc 真值，或本地估算。</summary>
+    public string SkillSource { get; set; } = "估算";
+
     public static readonly string[] SkillPatterns =
     [
         "Stream", "Jumpstream", "Handstream", "Stamina", "JackSpeed", "Chordjack", "Technical"
