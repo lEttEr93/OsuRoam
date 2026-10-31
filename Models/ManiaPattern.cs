@@ -1,0 +1,85 @@
+using System.Text.Json.Serialization;
+
+namespace OsuRoam.Models;
+
+/// <summary>
+/// 一张 mania 谱面的键型指纹。分类体系沿用 osumania_map_analyser（MIT）：
+/// 6 个核心型 + 各键数的子型 + RC/LN/Mix/HB 模式标签。
+/// </summary>
+public sealed class ManiaPattern
+{
+    public int BeatmapId { get; set; }
+    public int BeatmapsetId { get; set; }
+    public int KeyCount { get; set; }
+    public int TotalNotes { get; set; }
+    public int TotalHolds { get; set; }
+    public double NotesPerSecond { get; set; }
+    public double ChartsDurationMs { get; set; }
+
+    /// <summary>长条占比：LN 音符 / 全部音符，决定 RC/LN 模式标签。</summary>
+    public double LnRatio { get; set; }
+
+    /// <summary>同一行同时有长条头和普通音符的比例，用于区分 HB（混合）谱。</summary>
+    public double HbRowRatio { get; set; }
+
+    /// <summary>RC / LN / Mix / HB。</summary>
+    public string ModeTag { get; set; } = "Mix";
+
+    /// <summary>主导分类，如 "Jumpstream Tech"。</summary>
+    public string Category { get; set; } = "Uncategorised";
+
+    /// <summary>变速强度（非 1 的 SV 点数量），>0 即为有 SV。</summary>
+    public double SvAmount { get; set; }
+
+    /// <summary>核心型时长占比（0–1，按匹配时长归一）。</summary>
+    public Dictionary<string, double> CoreShares { get; set; } = [];
+
+    /// <summary>子型时长占比，键名与 MMA 一致：Jumpstream / Handstream / Minijacks …</summary>
+    public Dictionary<string, double> SpecificShares { get; set; } = [];
+
+    /// <summary>匹配区间里节奏不稳定的比例，越高越"tech"。</summary>
+    public double MixedShare { get; set; }
+
+    public PatternSource Source { get; set; } = PatternSource.Osu;
+
+    public DateTimeOffset AnalyzedAtUtc { get; set; } = DateTimeOffset.UtcNow;
+
+    [JsonIgnore]
+    public bool IsInferred => Source == PatternSource.Tags;
+
+    /// <summary>核心型固定顺序，向量与权重都按这个顺序对齐。</summary>
+    public static readonly string[] CorePatterns =
+    [
+        "Stream", "Chordstream", "Jacks", "Coordination", "Density", "Wildcard"
+    ];
+
+    public static readonly string[] CorePatternLabels =
+    [
+        "流", "和弦流", "叠键", "协调", "密度", "变速/杂项"
+    ];
+
+    /// <summary>6 维核心型占比向量，缺失的按 0 处理。</summary>
+    public double[] ToVector() => CorePatterns
+        .Select(name => CoreShares.TryGetValue(name, out double share) ? share : 0)
+        .ToArray();
+
+    /// <summary>两个键型指纹的相似度，0–1；模式标签不同会先打折。</summary>
+    public double SimilarityTo(ManiaPattern other)
+    {
+        double[] left = ToVector();
+        double[] right = other.ToVector();
+        double diff = 0;
+        for (int index = 0; index < left.Length; index++)
+            diff += Math.Abs(left[index] - right[index]);
+
+        double similarity = Math.Max(0, 1 - diff / left.Length);
+        similarity *= 1 - Math.Min(0.4, Math.Abs(LnRatio - other.LnRatio) * 0.4);
+        return similarity;
+    }
+}
+
+public enum PatternSource
+{
+    Osu,
+    Tags
+}

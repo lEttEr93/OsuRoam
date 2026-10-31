@@ -197,6 +197,8 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
                 },
                 sessionCancellation.Token);
 
+            // 每次漫游推进排序轮换，让下一次的候选集合与这次不同。
+            settings.SearchRotation++;
             await settingsStore.SaveAsync(settings);
             if (firstPreparation is not null)
                 await firstPreparation;
@@ -255,6 +257,8 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
             }
         }
         updatePoolVisibility();
+        if (missing > 0 && recommendations.Count > 0 && recommendations.All(item => item.IsRecycled))
+            StatusText.Text = "当前区间候选已基本推荐完，本轮为历史回收（可放宽星级/年份，或降低探索度后重试）";
         if (historyChanged)
         {
             try
@@ -934,7 +938,7 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
         string query = TagSearchBox?.Text?.Trim() ?? string.Empty;
         visibleTags.Clear();
         foreach (string tag in settings.TagPool.Where(tag => query.Length == 0 || tag.Contains(query, StringComparison.OrdinalIgnoreCase)))
-            visibleTags.Add(tag);
+            visibleTags.Add(tag);
         IncludedTagsItems.ItemsSource = null;
         IncludedTagsItems.ItemsSource = settings.IncludedTags;
         ExcludedTagsItems.ItemsSource = null;

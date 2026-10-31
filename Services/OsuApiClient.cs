@@ -94,6 +94,29 @@ public sealed class OsuApiClient : IDisposable
         return results;
     }
 
+    /// <summary>
+    /// 搜索排序轮换表。单一排序 + 固定 8 页会让候选池长期只有同一批 400 条
+    /// 谱面，推荐几轮后就只能回收历史，表现为每次启动都是那几首。
+    /// </summary>
+    internal static readonly string[] CandidateSorts =
+    [
+        "ranked_desc", "rating_desc", "ranked_asc", "plays_desc", "favourites_desc", "difficulty_desc"
+    ];
+
+    /// <summary>把一次漫游的页数预算拆给两种排序，并按轮次整体滑动。</summary>
+    internal static string[] BuildSortPlan(int rotation, int pageCount)
+    {
+        if (pageCount <= 0)
+            return [];
+        int sortCount = CandidateSorts.Length;
+        int start = ((rotation % sortCount) + sortCount) % sortCount;
+        int perSort = Math.Max(1, pageCount / 2);
+        string[] plan = new string[pageCount];
+        for (int page = 0; page < pageCount; page++)
+            plan[page] = CandidateSorts[(start + page / perSort) % sortCount];
+        return plan;
+    }
+
     public async Task SearchCandidatesInBatchesAsync(
         AppSettings settings,
         double minimumStars,
@@ -113,9 +136,21 @@ public sealed class OsuApiClient : IDisposable
         if (settings.Mode == "mania")
             query += $" keys={settings.ManiaKeys}";
 
-        for (int page = 0; page < 8 && resultCount < 400; page++)
+        const int pageBudget = 8;
+        string[] sortPlan = BuildSortPlan(settings.SearchRotation, pageBudget);
+        string? activeSort = null;
+
+        for (int page = 0; page < pageBudget && resultCount < 400; page++)
         {
-            string path = $"api/v2/beatmapsets/search?m={mode}&s={status}&sort=ranked_desc&q={Uri.EscapeDataString(query)}";
+            string sort = sortPlan[page];
+            if (!string.Equals(sort, activeSort, StringComparison.Ordinal))
+            {
+                // cursor_string 绑定在具体查询（含 sort）上，换排序必须重置游标。
+                activeSort = sort;
+                cursor = null;
+            }
+
+            string path = $"api/v2/beatmapsets/search?m={mode}&s={status}&sort={sort}&q={Uri.EscapeDataString(query)}";
             if (!string.IsNullOrEmpty(cursor))
                 path += $"&cursor_string={Uri.EscapeDataString(cursor)}";
 
@@ -129,7 +164,6 @@ public sealed class OsuApiClient : IDisposable
             if (string.IsNullOrEmpty(cursor))
                 break;
         }
-
     }
 
     private async Task authorizeAsync(CancellationToken cancellationToken)

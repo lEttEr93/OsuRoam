@@ -26,7 +26,7 @@ public sealed class RecommendationEngine
         foreach (int beatmapsetId in recommendationHistory)
         {
             if (beatmapsetId <= 0 || !checkedHistoryIds.Add(beatmapsetId) || selectedIds.Contains(beatmapsetId)) continue;
-            RecommendationItem? reusable = Rank(source.Where(set => set.Id == beatmapsetId), profile, settings, minimumStars, maximumStars, selectedIds, 1).FirstOrDefault();
+            RecommendationItem? reusable = Rank(source.Where(set => set.Id == beatmapsetId), profile, settings, minimumStars, maximumStars, selectedIds, 1, isRecycled: true).FirstOrDefault();
             if (reusable is null) continue;
             result.Add(reusable);
             selectedIds.Add(reusable.BeatmapsetId);
@@ -42,7 +42,8 @@ public sealed class RecommendationEngine
         double minimumStars,
         double maximumStars,
         ISet<int> excludedBeatmapsetIds,
-        int count)
+        int count,
+        bool isRecycled = false)
     {
         double starCenter = (minimumStars + maximumStars) / 2;
         double starRadius = Math.Max(0.2, (maximumStars - minimumStars) / 2);
@@ -95,7 +96,8 @@ public sealed class RecommendationEngine
                     BeatmapId = beatmap.Id, BeatmapsetId = set.Id, Artist = set.Artist, Title = set.Title,
                     DifficultyName = beatmap.Version, Mapper = set.Creator, Stars = beatmap.DifficultyRating,
                     Bpm = beatmap.Bpm, LengthSeconds = beatmap.TotalLength, RankedYear = year, Score = score,
-                    Reason = reason, Tags = setTags, TagItems = setTags.Select(tag => new RecommendationTag(tag, settings.IncludedTags.Contains(tag, StringComparer.OrdinalIgnoreCase))).ToList(), KeyCount = settings.Mode == "mania" ? (int)Math.Round(beatmap.CircleSize) : 0
+                    Reason = reason, Tags = setTags, TagItems = setTags.Select(tag => new RecommendationTag(tag, settings.IncludedTags.Contains(tag, StringComparer.OrdinalIgnoreCase))).ToList(), KeyCount = settings.Mode == "mania" ? (int)Math.Round(beatmap.CircleSize) : 0,
+                    IsRecycled = isRecycled
                 };
                 if (bestDifficulty is null || item.Score > bestDifficulty.Score) bestDifficulty = item;
             }

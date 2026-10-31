@@ -23,6 +23,9 @@ public sealed class RecommendationItem : INotifyPropertyChanged
     public IReadOnlyList<string> Tags { get; init; } = [];
     public IReadOnlyList<RecommendationTag> TagItems { get; init; } = [];
     public int KeyCount { get; init; }
+
+    /// <summary>该条目来自推荐历史回收，而不是本次新抓到的候选。</summary>
+    public bool IsRecycled { get; init; }
     public string CoverUrl => $"https://assets.ppy.sh/beatmaps/{BeatmapsetId}/covers/cover.jpg";
     public string PreviewUrl => $"https://b.ppy.sh/preview/{BeatmapsetId}.mp3";
     public string DisplayTitle => $"{Artist} - {Title}";

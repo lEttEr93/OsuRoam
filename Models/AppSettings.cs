@@ -85,6 +85,11 @@ public sealed class AppSettings
     public bool AutoStartTosu { get; set; } = true;
     public bool StopManagedTosuOnExit { get; set; } = true;
     public List<int> RecommendationHistory { get; set; } = [];
+    /// <summary>
+    /// 每次漫游递增，用于轮换候选谱面的搜索排序，避免每次都只看到
+    /// 同样那 400 条结果（池子耗干后就会大量回收历史谱面）。
+    /// </summary>
+    public int SearchRotation { get; set; }
     public List<string> TagPool { get; set; } = [];
     public List<string> IncludedTags { get; set; } = [];
     public List<string> ExcludedTags { get; set; } = [];

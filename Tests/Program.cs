@@ -11,6 +11,11 @@ testManiaKeysAreFiltered();
 testDuplicateBeatmapsetsAreCollapsed();
 testRecommendationHistoryPrefersFreshCandidates();
 testRecommendationHistoryIsNormalizedAndBounded();
+testRecycledCandidatesAreFlagged();
+testSearchSortPlanRotates();
+testPatternAnalyzerDetectsStream();
+testPatternAnalyzerDetectsJacks();
+testPatternAnalyzerDetectsLnChart();
 testDirtyTagsAreFiltered();
 testCompoundTagsRemainTogether();
 testCommonCompoundTagsUseLongestMatches();
@@ -487,8 +492,7 @@ static OsuBeatmapset filteredSet(int id, string status, string genre, string lan
     Language = new OsuLookupValue { Name = language }
 };
 
-static void assertEqual(int expected, int actual, string message)
-{
+static void assertEqual(int expected, int actual, string message){
     if (expected != actual)
         throw new InvalidOperationException($"{message}：expected={expected}, actual={actual}");
 }
@@ -509,4 +513,125 @@ static void assertSequenceStrings(IReadOnlyList<string> expected, IReadOnlyList<
 {
     if (!expected.SequenceEqual(actual, StringComparer.OrdinalIgnoreCase))
         throw new InvalidOperationException($"{message}：expected=[{string.Join(',', expected)}], actual=[{string.Join(',', actual)}]");
+}
+
+static void assertTrue(bool actual, string message)
+{
+    if (!actual)
+        throw new InvalidOperationException(message);
+}
+
+static string osuFile(int keys, IEnumerable<string> hitObjects) =>
+    string.Join("\n",
+        "osu file format v14",
+        "",
+        "[General]",
+        "Mode: 3",
+        "",
+        "[Difficulty]",
+        $"CircleSize:{keys}",
+        "ApproachRate:5",
+        "",
+        "[TimingPoints]",
+        "0,500,4,2,1,60,1,0",
+        "",
+        "[HitObjects]",
+        string.Join("\n", hitObjects));
+
+static string note(int keys, int column, int time, int? endTime = null)
+{
+    int x = (int)((column + 0.5) * 512 / keys);
+    return endTime is int end
+        ? $"{x},192,{time},128,0,{end}:0:0:0:0:"
+        : $"{x},192,{time},1,0,0:0:0:0:";
+}
+
+static void testPatternAnalyzerDetectsStream()
+{
+    // 20 个 100ms 间隔的单键，来回换列 → 纯流
+    int[] pattern = [0, 1, 2, 3, 2, 1, 0, 1];
+    List<string> notes = [];
+    for (int index = 0; index < 20; index++)
+        notes.Add(note(4, pattern[index % pattern.Length], 1000 + index * 100));
+
+    ManiaPattern? result = ManiaPatternAnalyzer.Analyze(osuFile(4, notes), 1001, 100);
+    assertTrue(result is not null, "4K 谱面应能解析出键型");
+    assertEqual(4, result!.KeyCount, "键数应来自 CircleSize");
+    assertEqual(20, result.TotalNotes, "音符总数应等于 hit object 数量");
+    assertTrue(result.CoreShares.TryGetValue("Stream", out double stream) && stream > 0.5,
+        $"纯流谱面应主导 Stream，实际={string.Join('|', result.CoreShares.Select(pair => $"{pair.Key}:{pair.Value}"))}");
+    assertTrue(result.ModeTag == "RC", $"没有长条时应标为 RC，实际={result.ModeTag}");
+}
+
+static void testPatternAnalyzerDetectsJacks()
+{
+    // 8 行双键和弦，同两列反复 → 叠键/叠和弦
+    List<string> notes = [];
+    for (int index = 0; index < 8; index++)
+    {
+        notes.Add(note(4, 0, 1000 + index * 100));
+        notes.Add(note(4, 1, 1000 + index * 100));
+    }
+
+    ManiaPattern? result = ManiaPatternAnalyzer.Analyze(osuFile(4, notes), 1002, 200);
+    assertTrue(result is not null, "叠键谱面应能解析");
+    assertTrue(result!.CoreShares.ContainsKey("Jacks"), "叠键谱面必须产出 Jacks 核心型");
+    assertTrue(result.CoreShares.TryGetValue("Jacks", out double jackShare) && jackShare > 0.2,
+        $"叠键谱面 Jacks 占比应明显，实际={jackShare}");
+}
+
+static void testPatternAnalyzerDetectsLnChart()
+{
+    // 半程长条 + 半程普通键 → LN 占比 0.5，模式标签应为 Mix 而非 RC
+    List<string> notes = [];
+    for (int index = 0; index < 8; index++)
+        notes.Add(note(4, index % 4, 1000 + index * 200, 1000 + index * 200 + 150));
+    for (int index = 0; index < 8; index++)
+        notes.Add(note(4, index % 4, 3000 + index * 200));
+
+    ManiaPattern? result = ManiaPatternAnalyzer.Analyze(osuFile(4, notes), 1003, 300);
+    assertTrue(result is not null, "长条谱面应能解析");
+    assertTrue(result!.LnRatio > 0.4, $"LN 占比应接近 0.5，实际={result.LnRatio}");
+    assertTrue(result.ModeTag != "RC", $"有大量长条时不应标为 RC，实际={result.ModeTag}");
+    assertEqual(8, result.TotalHolds, "长条数量应与 hold 头一致");
+}
+
+static void testRecycledCandidatesAreFlagged()
+{
+    AppSettings settings = recommendationSettings();
+    PlayerProfile profile = emptyProfile();
+    List<OsuBeatmapset> sets =
+    [
+        maniaSet(100, 1001, 4),
+        maniaSet(200, 2001, 4),
+        maniaSet(300, 3001, 4)
+    ];
+
+    IReadOnlyList<RecommendationItem> result = new RecommendationEngine().RankAvoidingHistory(
+        sets, profile, settings, 1, 10, new HashSet<int>(), [100, 200], 2);
+
+    assertEqual(2, result.Count, "推荐池应由新谱和回收谱补满");
+    assertTrue(!result[0].IsRecycled, "新抓到的候选不应标记为回收");
+    assertTrue(result[1].IsRecycled, "历史补位条目应标记为回收");
+}
+
+static void testSearchSortPlanRotates()
+{
+    string[] plan0 = OsuApiClient.BuildSortPlan(0, 8);
+    assertEqual(8, plan0.Length, "排序计划应覆盖整个页数预算");
+    assertTrue(plan0.Take(4).All(sort => sort == OsuApiClient.CandidateSorts[0]), "前四页应沿用同一种排序");
+    assertTrue(plan0.Skip(4).All(sort => sort == OsuApiClient.CandidateSorts[1]), "后四页应切换到下一种排序");
+
+    string[] plan1 = OsuApiClient.BuildSortPlan(1, 8);
+    assertTrue(plan1[0] == OsuApiClient.CandidateSorts[1], "轮换一次后起始排序应后移一位");
+    assertTrue(!plan0.SequenceEqual(plan1), "不同轮次必须产出不同排序计划");
+
+    foreach (int rotation in new[] { 0, 1, 2, 3, 5, 6, 12, 99 })
+    {
+        assertTrue(
+            OsuApiClient.BuildSortPlan(rotation, 8).All(sort => OsuApiClient.CandidateSorts.Contains(sort)),
+            "排序计划只能使用受支持的排序值");
+    }
+
+    assertEqual(0, OsuApiClient.BuildSortPlan(0, 0).Length, "页数为 0 时应得到空计划");
 }
