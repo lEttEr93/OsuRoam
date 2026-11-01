@@ -436,6 +436,7 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
         historyWindow.RefreshEntries(archiveStore.Entries);
         historyWindow.Show();
         historyWindow.Activate();
+        historyWindow.PlayEntrance();
     }
 
     /// <summary>下载（需要时）并按需导入，返回是否已经真正触发 osu! 导入。</summary>
@@ -1430,7 +1431,7 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
             refreshMiniPlayer();
             MinHeight = 64;
             MinWidth = 390;
-            Height = 64;
+            animateWindowHeight(64);
             Width = Math.Max(390, expandedWidth);
             ResizeMode = ResizeMode.NoResize;
             CollapseButton.Content = "+";
@@ -1446,14 +1447,39 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
             {
                 historyWasVisible = false;
                 historyWindow.Show();
+                historyWindow.PlayEntrance();
             }
             ResizeMode = ResizeMode.CanResizeWithGrip;
             MinHeight = 300;
             MinWidth = 390;
-            Height = Math.Max(300, expandedHeight);
+            animateWindowHeight(Math.Max(300, expandedHeight));
             Width = Math.Max(390, expandedWidth);
             CollapseButton.Content = "−";
             CollapseButton.ToolTip = "迷你播放器";
+        }
+    }
+
+    /// <summary>折叠/展开时的高度过渡；结束后停在目标值，不把动画值留在属性上。</summary>
+    private void animateWindowHeight(double target, double milliseconds = 190)
+    {
+        double from = ActualHeight > 0 ? ActualHeight : Height;
+        Height = target;
+        if (!SystemParameters.ClientAreaAnimation || double.IsNaN(from) || Math.Abs(from - target) < 0.5)
+            return;
+
+        try
+        {
+            BeginAnimation(HeightProperty, null);
+            BeginAnimation(HeightProperty, new DoubleAnimation(from, target, TimeSpan.FromMilliseconds(milliseconds))
+            {
+                EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut },
+                FillBehavior = FillBehavior.Stop
+            });
+        }
+        catch (Exception exception)
+        {
+            AppLog.Error("窗口高度动画失败", exception);
+            BeginAnimation(HeightProperty, null);
         }
     }
 

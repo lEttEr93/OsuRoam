@@ -59,7 +59,8 @@
                 </StackPanel>
             </Grid>
 
-            <ScrollViewer x:Name="MainContent" Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+            <ScrollViewer x:Name="MainContent" Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
+                          controls:SmoothScroll.IsEnabled="True">
                 <StackPanel Margin="14,12,14,16">
                     <Grid Margin="0,0,0,10">
                         <Grid.ColumnDefinitions>

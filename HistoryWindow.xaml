@@ -6,8 +6,11 @@
         WindowStyle="None" AllowsTransparency="True" Background="Transparent"
         ShowInTaskbar="False" ShowActivated="False" ResizeMode="NoResize"
         Icon="/OsuRoam;component/Assets/OsuRoam.ico">
-    <Border Margin="8" Background="{StaticResource BackgroundBrush}" BorderBrush="{StaticResource BorderBrush}"
+    <Border x:Name="RootCard" Margin="8" Background="{StaticResource BackgroundBrush}" BorderBrush="{StaticResource BorderBrush}"
             BorderThickness="1" CornerRadius="7">
+        <Border.RenderTransform>
+            <TranslateTransform x:Name="RootSlide" />
+        </Border.RenderTransform>
         <Grid>
             <Grid.RowDefinitions>
                 <RowDefinition Height="44" />
@@ -22,7 +25,8 @@
                            Foreground="{StaticResource MutedTextBrush}" />
             </Grid>
 
-            <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" Margin="0,6,0,0">
+            <ScrollViewer x:Name="HistoryScroll" Grid.Row="1" VerticalScrollBarVisibility="Auto" Margin="0,6,0,0"
+                          controls:SmoothScroll.IsEnabled="True">
                 <ItemsControl x:Name="HistoryList" Margin="10,0,10,10">
                     <ItemsControl.ItemTemplate>
                         <DataTemplate>

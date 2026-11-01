@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
+using System.Windows.Media;
 using OsuRoam.Models;
 using OsuRoam.Services;
 
@@ -53,6 +54,33 @@ public partial class HistoryWindow : Window
             {
                 entry.ApplyPattern(pattern);
             }
+        }
+    }
+
+    /// <summary>
+    /// 面板出现动画：窗口整体淡入 + 卡片从左侧滑入。
+    /// 这两个 Transform 声明在 Window 里（不在 DataTemplate 中），不会被冻结，可以直接动画。
+    /// </summary>
+    public void PlayEntrance()
+    {
+        if (!SystemParameters.ClientAreaAnimation)
+            return;
+
+        try
+        {
+            BeginAnimation(OpacityProperty, null);
+            SetCurrentValue(OpacityProperty, 1.0);
+            BeginAnimation(OpacityProperty, Controls.Motion.tween(0, 1, 170));
+
+            RootSlide.BeginAnimation(TranslateTransform.XProperty, null);
+            RootSlide.SetCurrentValue(TranslateTransform.XProperty, 0.0);
+            RootSlide.BeginAnimation(TranslateTransform.XProperty, Controls.Motion.tween(14, 0, 220));
+        }
+        catch (Exception exception)
+        {
+            Services.AppLog.Error("历史面板入场动画失败", exception);
+            BeginAnimation(OpacityProperty, null);
+            SetCurrentValue(OpacityProperty, 1.0);
         }
     }
 
