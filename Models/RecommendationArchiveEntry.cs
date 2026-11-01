@@ -19,9 +19,41 @@ public sealed class RecommendationArchiveEntry : INotifyPropertyChanged
     public int LengthSeconds { get; set; }
     public int RankedYear { get; set; }
     public int KeyCount { get; set; }
-    public string Reason { get; set; } = string.Empty;
+
+    /// <summary>
+    /// 0.9 之前的记录只存了整串理由。留着它，旧历史才不会丢理由；
+    /// 新记录走下面的结构化字段，换语言时会跟着变。
+    /// </summary>
+    [JsonPropertyName("Reason")]
+    public string LegacyReason { get; set; } = string.Empty;
+
+    public ReasonKind ReasonKind { get; set; } = ReasonKind.Explore;
+    public double ReasonTagFit { get; set; }
+    public double ReasonStarFit { get; set; }
+    public string ReasonCategory { get; set; } = string.Empty;
+
     public List<string> Tags { get; set; } = [];
     public DateTimeOffset RecommendedAtUtc { get; set; }
+
+    [JsonIgnore]
+    public string Reason
+    {
+        get
+        {
+            // 结构化字段全空 → 老记录，原样显示当年那句。
+            if (ReasonStarFit <= 0 && ReasonCategory.Length == 0)
+                return LegacyReason;
+
+            string reason = ReasonKind switch
+            {
+                ReasonKind.Tags => Services.Loc.F("reason.tags", ReasonTagFit.ToString("P0"), ReasonStarFit.ToString("P0")),
+                ReasonKind.Mapper => Services.Loc.F("reason.mapper", ReasonStarFit.ToString("P0")),
+                ReasonKind.Rhythm => Services.Loc.F("reason.rhythm", ReasonStarFit.ToString("P0")),
+                _ => Services.Loc.F("reason.explore", ReasonStarFit.ToString("P0"))
+            };
+            return ReasonCategory.Length == 0 ? reason : $"{reason} · {ReasonCategory}";
+        }
+    }
 
     [JsonIgnore]
     public string DisplayTitle => $"{Artist} - {Title}";
@@ -132,7 +164,7 @@ public sealed class RecommendationArchiveEntry : INotifyPropertyChanged
 
     /// <summary>只保留 7 轴技能雷达；6 个核心键型占比改用直方图（占比和为 1，雷达图会误导）。</summary>
     [JsonIgnore]
-    public IReadOnlyList<string> RadarLabels => ManiaPattern.SkillPatternShortLabels;
+    public IReadOnlyList<string> RadarLabels => Services.Loc.SkillPatternLabels();
 
     [JsonIgnore]
     public IReadOnlyList<double> RadarValues =>
@@ -144,7 +176,7 @@ public sealed class RecommendationArchiveEntry : INotifyPropertyChanged
     public IReadOnlyList<double> PatternBars => Pattern?.ToVector() ?? [];
 
     [JsonIgnore]
-    public IReadOnlyList<string> PatternBarLabels => ManiaPattern.CorePatternLabels;
+    public IReadOnlyList<string> PatternBarLabels => Services.Loc.CorePatternLabels();
 
     [JsonIgnore]
     public IReadOnlyList<string> DetailLines
@@ -153,19 +185,21 @@ public sealed class RecommendationArchiveEntry : INotifyPropertyChanged
         {
             List<string> lines =
             [
-                $"谱师 {Mapper}",
+                Services.Loc.F("detail.mapper", Mapper),
                 $"{Stars:0.00}*  {Bpm:0} BPM  {TimeSpan.FromSeconds(LengthSeconds):m\\:ss}  {RankedYear}",
-                $"推荐于 {RecommendedLabel}"
+                Services.Loc.F("detail.recommendedat", RecommendedLabel)
             ];
             if (Pattern is null)
             {
-                lines.Add("该记录没有键型数据");
-                lines.Add("（切到 mania 模式并重新下载谱面后才会记录）");
+                lines.Add(Services.Loc.T("detail.nopattern"));
+                lines.Add(Services.Loc.T("detail.nopattern.hint"));
                 return lines;
             }
 
-            lines.Add($"模式 {Pattern.ModeTag}  LN {Pattern.LnRatio:P0}  NPS {Pattern.NotesPerSecond:0.0}");
-            lines.Add($"主导 {Pattern.Category} · {Pattern.SkillSource}");
+            lines.Add(Services.Loc.F("detail.pattern", Pattern.ModeTag,
+                Pattern.LnRatio.ToString("P0"), Pattern.NotesPerSecond.ToString("0.0")));
+            lines.Add(Services.Loc.F("detail.dominant", Pattern.Category,
+                Services.Loc.SkillSourceText(Pattern.SkillSource)));
             return lines;
         }
     }
@@ -190,7 +224,9 @@ public sealed class RecommendationArchiveEntry : INotifyPropertyChanged
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(RadarLabels)));
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(RadarValues)));
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(PatternBars)));
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(PatternBarLabels)));
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(DetailLines)));
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Reason)));
     }
 
     public static RecommendationArchiveEntry FromItem(RecommendationItem item) => new()
@@ -206,11 +242,21 @@ public sealed class RecommendationArchiveEntry : INotifyPropertyChanged
         LengthSeconds = item.LengthSeconds,
         RankedYear = item.RankedYear,
         KeyCount = item.KeyCount,
-        Reason = item.Reason,
+        ReasonKind = item.ReasonKind,
+        ReasonTagFit = item.ReasonTagFit,
+        ReasonStarFit = item.ReasonStarFit,
+        ReasonCategory = item.ReasonCategory,
         Tags = [.. item.Tags],
         Pattern = item.Pattern,
         RecommendedAtUtc = DateTimeOffset.UtcNow
     };
+
+    /// <summary>界面语言换了：详情行和雷达标签是现拼的。</summary>
+    public void NotifyLanguage()
+    {
+        notifyDetail();
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Reason)));
+    }
 
     public event PropertyChangedEventHandler? PropertyChanged;
 

@@ -1,8 +1,282 @@
-# osu! Roam v1.4.0
+# osu! Roam v1.5.0
 
-osu! 谱面漫游推荐工具。Windows / WPF / .NET 8。
+[English](#english) · [中文](#中文)
 
-通过 osu! Web API 读取玩家资料和成绩样本，建立「星级 / BPM / 时长 / 谱师」偏好画像，再按星级区间、年份、时长、简易筛选和 tag 生成一个有上限的推荐池。配合 [tosu](https://github.com/KotRikD/tosu) 可以做到 **开局预下载下一首、结算后自动导入下一首** 的连续漫游。
+---
+
+# English
+
+A beatmap roaming recommendation tool for osu!. Windows / WPF / .NET 8. **One repository, two builds:**
+
+| Build | UI language | Default download source |
+|---|---|---|
+| `osu-roam-v1.5.0-en-portable.zip` | English | catboy / beatconnect (international) |
+| `osu-roam-v1.5.0-portable.zip` | follows the system language | sayobot mirrors (China) |
+
+The code is identical; only a compile-time constant (`EN_BUILD`) and the download defaults differ. The Chinese
+mirrors are a liability outside China and the international sources are the wrong choice on Chinese networks,
+so each audience gets its own build instead of a settings decision. Both builds can switch language at runtime
+(**Interface → Language**) — only the factory default differs. Each build keeps its own `data` folder, so install
+them side by side rather than on top of each other.
+
+osu! Roam reads player profile and score samples through the osu! Web API to build a "star rating / BPM / length / mapper" preference profile, then generates a capped recommendation pool by star rating range, year, length, quick filters and tags. Together with [tosu](https://github.com/KotRikD/tosu) it can do continuous roaming: **pre-download the next map at play start, auto-import the next map after results**.
+
+No password needed — only your player name plus an OAuth Client ID / Secret that you register yourself.
+
+---
+
+## How recommendations are computed
+
+1. **Profile**: pull the current mode's `recent` + `best` scores (mania filters by the selected key count), and compute the 62nd percentile star rating (±0.45 as the suggested range), median BPM, median length, mapper frequency, and the set of recently played beatmaps.
+2. **Hard filtering** (fail any one and it is out): mode / mania key count, star rating range, length range, year range, the "strict" tier of quick filters, an excluded tag hit, none of the recommended tags hit, beatmaps already recommended or recently played.
+3. **Scoring**: the closer the star rating to the range center the better (relative weight 62), BPM close to preference (15), length close to preference (10), mapper match (13); on top of that an exploration random term, tag hit ratio, quick filter preference hit rate, `ranked` / `loved` status priority, and for mania the **pattern fit**.
+4. **Sorting**: strict filter hit count → status priority → composite score, take the top N into the recommendation pool.
+
+The candidate source rotates between 6 search sort orders on every roam (newest / highest rated / oldest / most played / most favourited / highest difficulty); each round takes 4 pages of two sort orders, up to 8 pages totalling roughly 400 beatmapsets. That way the next round's candidates differ from this round's, so the same batch of maps is not recommended over and over.
+
+---
+
+## Recommendation history
+
+The **History** button in the title bar opens the recommendation history window, listing the last **50** recommended beatmaps with the same card layout as the recommendation pool: cover, title, difficulty, star rating / BPM / length, recommendation reason and recommendation time. The **Tags** below each card can be expanded to show all tags of that beatmap; **double-click any tag to add it directly to the recommended tags**, and already matched ones are highlighted.
+
+History is stored in `%LOCALAPPDATA%\OsuRoam\history.json`; when the same beatmap is recommended again it moves to the front.
+
+## Key patterns (mania)
+
+In mania mode, key patterns are used to make recommendations more targeted. The classification system is ported from [osumania_map_analyser](https://github.com/LeoBlackMT/osumania_map_analyser) (MIT; its RC pattern algorithm originates from [Interlude](https://github.com/YAVSRG/YAVSRG)):
+
+- 6 core types: `Stream` / `Chordstream` / `Jacks` / `Coordination` / `Density` / `Wildcard (variable-speed misc)`
+- 4K subtypes: `Rolls` `Trills` `Minitrills` `Handstream` `Split Trill` `Jumptrill` `Jumpstream` `Longjacks` `Quadstream` `Gluts` `Chordjacks` `Minijacks` `Column Lock` `Release` `Shield` `Inverse` `JS Density` `HS Density` `Jacky WC` `Speedy WC`
+- Mode tags: `RC` (LN ratio ≤15%), `LN` (≥90%), `Mix`, `HB` (long notes and normal notes mixed)
+
+How it works:
+
+1. After a beatmap in the recommendation pool is downloaded, its pattern is parsed by reading the `.osu` directly out of the `.osz`, and the result is stored in the pattern library `%LOCALAPPDATA%\OsuRoam\patterns.json`; the recommendation reason on the pool card carries the recognized classification (e.g. `Jumpstream Tech`).
+2. Using the scores with the same key count from your recent + best, average the patterns of those beatmaps to get a **pattern preference vector**.
+3. When sorting, points are added by the cosine fit between the candidate's pattern and the preference vector, with the weight controlled by `PatternWeight` (default 0.12).
+4. Candidates that have not been downloaded yet have no `.osu`, so tags are used for a rough inference first (`ln` / `rice` / `jack` / `chordjack` / `handstream` / `tech` / `sv` etc.); the real pattern takes over automatically once it is in the library.
+
+---
+
+## Quick start
+
+1. Extract `osu-roam-v1.5.0-en-portable.zip` (download from [Releases](https://github.com/lEttEr93/OsuRoam/releases/latest); it is self-contained with the .NET runtime, no separate .NET install needed). For the pre-download / auto-advance flow also grab [tosu](https://github.com/tosuapp/tosu) and drop `tosu.exe` next to `OsuRoam.exe`, or point at it in the settings later.
+2. Double-click `OsuRoam.exe`.
+3. Under "Account & connection" fill in the OAuth Client ID, Client Secret and player name.
+4. Choose the game mode (osu! / taiko / catch / mania 1K–10K).
+5. Drag the star rating double slider, or click "Suggested star rating" to compute it once from your scores.
+6. Click "Start roaming".
+
+## OAuth credentials
+
+- Create an application in [osu! account settings → OAuth](https://osu.ppy.sh/home/account/edit#oauth) and grab the **Client ID** and **Client Secret**.
+- It uses the `client_credentials` flow with `scope=public`, so it can only read public data.
+- The Client Secret is encrypted with Windows user credentials (DPAPI) and stored in the local configuration, **so re-entering is required after switching Windows users or machines**.
+- Access to `osu.ppy.sh` is required.
+
+## Recommendation range
+
+- **Difficulty star rating**: double slider, 0–11; dragging to "∞" means no upper bound.
+- **Suggested star rating**: computed once from recent score samples, writing `center ± 0.45` into the current mode / key count range. **Starting a roam does not overwrite manual settings**; after you drag manually, the automatic mark for that range is turned off.
+- Star rating ranges are **stored separately for 13 groups**: `osu` / `taiko` / `catch` / `mania-1k` … `mania-10k`.
+- **Earliest / latest year** (default 2007–current year), **shortest / longest seconds** (default 45–360).
+- **Exploration** (default 0.45, 0–1): the higher, the more it favours beatmaps you have not heard (the random discovery term gains weight and familiarity loses weight); the lower, the closer it stays to the mappers / BPM / length you usually play.
+- **Recommendation pool size** (default 5), **exclude recently played** (on by default).
+
+## Quick filters (three-state)
+
+Each of "category (status) / genre / language" is a three-state checkbox:
+
+| State | Meaning |
+|---|---|
+| Checked | **Preference** — a hit adds points, a miss does not exclude |
+| Intermediate | **Strict filter** — a mismatch is excluded outright |
+| Unchecked | No restriction |
+
+By default only `ranked` / `approved` / `qualified` / `loved` are preferred, and genre and language are unrestricted.
+
+## Tag filtering
+
+The tag pool ships with preset genres, mania pattern characteristics (including `米` `面` `叠` `技` `乱` `切`) and common multi-word combinations, and it keeps collecting new tags from API search results, **storing them permanently in the local configuration**.
+
+- **Recommended tags**: once set, a candidate **must hit at least one of them** to be selected (not a pure bonus); the higher the hit ratio the higher it sorts. Leaving it empty means no restriction.
+- **Excluded tags**: absolute exclusion — a hit on any one of them means no recommendation.
+- The search box allows multi-select; click "Add to recommended tags" / "Exclude these tags"; clicking a tag in the selected area removes it.
+- Every card in the recommendation pool has an expandable **Tags** button that shows all tags of that beatmap; **double-click any tag to add it directly to the recommended tags**, and already matched ones are highlighted.
+- Dirty tags are filtered out automatically: length < 2 or > 40, containing replacement characters / question marks / control characters, or too low an alphanumeric ratio are all dropped; known combinations such as `drum and bass` and `video game music` are merged longest-first so they are not split apart by spaces.
+
+## Preview and mini player
+
+- "Play preview" on a card fetches osu!'s official preview audio (`b.ppy.sh/preview/{setId}.mp3`) and plays it while downloading; it can be paused / resumed, and switching tracks stops it automatically and cleans up the temporary file.
+- The "mini player" (`−` in the title bar) collapses the window into a 64px-high strip with only cover, title and "Next", convenient to park beside the game; `+` restores it.
+- The window periodically re-asserts itself on top so osu!lazer does not push it behind; the window position is restored automatically on the next launch.
+
+## Download and import
+
+- This build fetches `.osz` files from `catboy.best` and `beatconnect.io`, with `{setId}` in the template substituted; the standard build uses sayobot's Chinese mirrors instead. The list is editable in "Downloads & advanced".
+- Some international mirrors reject an empty `User-Agent`, so requests carry `osu-roam/<version>`.
+- **Auto download** / **Auto import** can be switched off separately; ↓ on a card is "download and import", ↷ is "skip".
+- The client can be `osu!lazer` or `osu!stable`, or an exe path can be specified manually; when left empty the install location is auto-detected.
+- Import hands the `.osz` to osu! to handle itself (import by launching the process); the download cache stays local.
+
+## tosu integration
+
+- The WebSocket defaults to `ws://127.0.0.1:24050/websocket/v2` and can be changed.
+- **Auto-start tosu** (can be off; if not found, leave it empty to auto-locate `tosu.exe`), **end it when Roam closes** (can be off).
+- Recognizes `song select / playing / paused / failed this run / results`:
+  - Play start → pre-download the **next** beatmap in the recommendation pool;
+  - Successful results → move the just-played map out of the pool, auto-import the next one, and top the pool back up.
+- It works fine without tosu, just without pre-download and auto-advance; you click "Next" manually.
+
+## Configuration, cache and logs
+
+| Content | Location |
+|---|---|
+| Configuration (encrypted Secret, tag pool, recommendation history) | `%LOCALAPPDATA%\OsuRoam\settings.json` |
+| Recommendation history records (last 50) | `%LOCALAPPDATA%\OsuRoam\history.json` |
+| Pattern library (parsed beatmap patterns) | `%LOCALAPPDATA%\OsuRoam\patterns.json` |
+| Beatmap download cache | `%LOCALAPPDATA%\OsuRoam\Beatmaps` |
+| Logs | `%LOCALAPPDATA%\OsuRoam\Logs\osu-roam-YYYYMMDD-HHmmss.log` |
+
+- Recommendation history keeps at most 500 entries, used to reduce duplicate recommendations.
+- The download cache **is not cleaned automatically**; for long-term use remember to clear the `Beatmaps` directory by hand.
+- Deleting `patterns.json` only loses the pattern records; re-downloading beatmaps parses them again.
+- `settings.json` contains the OAuth Secret (encrypted for the current Windows user); do not share it with others, and do not copy it into another user's environment.
+
+## Cover art display
+
+osu!'s cover art is a **900×250 banner** (3.6:1). When squeezed into a square thumbnail with `UniformToFill`, WPF scales the image larger than the container and pins it to the top-left, so **only the leftmost 28% is visible** (measured: a 230×64 image in a 64×64 frame).
+So cards no longer use thumbnails:
+
+- The cover art **in full** (`Stretch=Uniform`, no cropping) is laid over the lowest layer of the card, top-aligned, `Opacity 0.5`;
+- **The alpha of the bottom edge is baked straight into the bitmap**: the lower 70% fades to fully transparent with a smoothstep (`t²(3−2t)`).
+  An overlaid gradient cannot cover a hard edge (the image's bottom edge is a horizontal line on screen whose position varies with the card's aspect ratio); only writing alpha into the pixels truly removes the edge;
+- Then a **blurred copy filling the whole card** (`Stretch=UniformToFill`, 0.18) is overlaid,
+  so the lower half of the card also carries the cover art's colors instead of pure black;
+- Finally a 44%→86% darkening gradient is layered on to guarantee text contrast (it no longer goes fully opaque, otherwise the lower half would be crushed to black);
+- The blur does not use `BlurEffect`: the cover art is first scaled down to **96px wide** and then up to the card width; the upscale itself is the blur.
+  That way the card corners stay precisely rounded (`BlurEffect` blurs the rounded clipping into square corners), and there is no per-frame offscreen rendering cost;
+- A 40px ▶ preview button is left on the left side of the card (it used to sit on the thumbnail, so with the thumbnail gone it has to show itself).
+
+The mini player (the whole 64px-high strip) and the info window (the entire panel) use the same logic and no longer carry a small square image either:
+
+- **Mini player**: the cover art fills the whole title bar strip. This strip is only 64px high, so the full image is filled by **height alignment** and leaves gaps on the left and right; that layer therefore uses the version with "22% horizontal feather on each side" (`BackdropBar`), and the edges blend into the blurred layer behind it; there is no vertical fade.
+- **Info window**: the cover art fills the whole panel, same as the card — "blurred base + full image at the top (vertical alpha fade) + darkening".
+
+All three backdrop bitmaps are generated at once in `CoverLoader` (96px wide): `Backdrop` (vertical fade), `BackdropBar` (horizontal feather), `Cover` (256px sharp version); the fade and the feather are both baked into the pixels with smoothstep.
+
+## Beatmap info window
+
+After Roam initiates an import, an info window pops up **below** the main window (usually the mini player), so there is no need to open or restore the window by hand:
+
+- Header: cover, `title - mapper`, difficulty name, mapper / year / key count
+- Data capsules: star rating (colored by the osu! difficulty color scale), BPM, length, plus mode, OD / AR / CS / HP and object count parsed out of the `.osz`
+- **7-axis skill radar** + **core pattern share histogram** (the bars grow horizontally on entry; patterns whose share rounds to 0% get no row)
+  - Why not draw a radar for the core patterns as well: those 6 shares always sum to exactly 1 — it is "as one grows the other shrinks" data, and putting it into a radar would be read as mutually independent dimensions; horizontal bars can be compared by length directly and use less space.
+- The card detail layer and the history detail layer are likewise changed to "7-axis skill radar + histogram"; the pattern shares previously listed as text next to the radar have been replaced by the histogram (non-share information such as mapper / star rating / mode·LN·NPS is kept)
+- Details: object composition (circles / long notes / sliders / spinners), mode tags (RC / LN / HB / Mix), LN ratio, NPS, dominant pattern, and the top four specific subtypes by share
+- Bottom: the recommendation reason for this pick
+
+Behavior:
+
+- **Auto-closes on the next play start** (when tosu reports PlayStarted); the `×` in the top-right closes it at any time too; after closing it appears again on the next import. Both entering and leaving are animated (180ms fade-in + rise / 170ms fade-out + sink + slight shrink).
+- "Downloads & advanced" → "Show the beatmap info window after import" turns it off entirely (on by default).
+- The window does not steal focus (`ShowActivated=false`) and does not affect osu!'s input; it sticks below the main window, follows it when it moves or resizes, and falls back to the right side of the main window when there is no room.
+
+Data source: `CS / OD / AR / HP / object count / actual BPM` are parsed at import time from the `.osu` header inside the `.osz` (the osu! API's beatmapset endpoint does not provide these directly); parsing happens on a background thread and shares a single extraction with the pattern analysis.
+
+## Interface language
+
+The UI is fully bilingual (Chinese / English) and switches at runtime — no restart:
+
+- **Interface → Language**: `System default` / `简体中文` / `English`. "System default" picks Chinese on a
+  Chinese Windows and English everywhere else.
+- The English build ships with `English` pre-selected, the standard build with `System default`; the choice is
+  saved to `settings.json`.
+- Everything follows the switch: buttons, tooltips, the status line, card details, skill radar labels and the
+  beatmap info window. Logs and code comments stay Chinese — they are for troubleshooting, not for the UI.
+
+## UI font
+
+Numbers and Latin letters in the UI use **Outfit** (`Fonts/`, three faces — Regular / SemiBold / Bold — compiled into the assembly as WPF Resources). Like the Torus used by osu!(lazer) it is a geometric sans-serif with a similar look, but it is licensed under **SIL OFL 1.1** and can be freely distributed with the program (Torus is a commercial font and needs a license to be embedded in a release package).
+
+Outfit only has Latin letters and digits and **has no CJK glyphs**: Chinese is still rendered by the system font `Microsoft YaHei UI` (WPF falls back per character), the same idea as osu!lazer using Noto to cover CJK.
+
+- "Downloads & advanced" → "Use the bundled font (Outfit)" can be switched off at any time; it **takes effect immediately, no restart needed**.
+- The startup log has a line `字体：内置 Outfit（N 字形）；汉字回退 Microsoft YaHei UI` ("font: bundled Outfit (N glyphs); CJK fallback Microsoft YaHei UI");
+  if the font fails to load it prints `不可用` ("unavailable") and automatically falls back to the system font (the UI will not turn into boxes).
+- `google/fonts` only ships variable fonts, and WPF does not honor variable axes, so the repository contains static faces cut with fonttools `varLib.instancer`; see `Fonts/ATTRIBUTION.md` for how they were cut.
+
+## Build
+
+Requires the .NET 8 SDK:
+
+```powershell
+dotnet build OsuRoam.csproj -c Release
+
+# standard build (self-contained, not single-file; Fonts\*.ttf compiled into the assembly as WPF Resources)
+dotnet publish OsuRoam.csproj -c Release -r win-x64 --self-contained true `
+  -p:PublishSingleFile=false -p:RoamFlavor=zh -o bin\v1.5.0-zh
+
+# English build
+dotnet publish OsuRoam.csproj -c Release -r win-x64 --self-contained true `
+  -p:PublishSingleFile=false -p:RoamFlavor=en -o bin\v1.5.0-en
+```
+
+`-p:RoamFlavor=en` only adds the `EN_BUILD` constant, which flips the default UI language and the download
+sources. Delete `obj\` and `bin\Release\` when switching flavors: incremental compilation does not reliably
+notice a `DefineConstants` change, and a release package must not accidentally ship the other flavor's defaults.
+
+Before publishing, make sure no `OsuRoam.exe` is running; publishing will fail on a file lock.
+
+## Project structure
+
+```
+MainWindow.xaml(.cs)          Main window and interaction, roam loop
+HistoryWindow.xaml(.cs)       Recommendation history window
+Models/AppSettings.cs         Settings model, tag parsing, quick filter semantics
+Models/OsuData.cs             osu! API data structures
+Services/OsuApiClient.cs      OAuth, user / scores / search (sort rotation)
+Services/RecommendationEngine.cs  Candidate filtering and sorting
+Services/ManiaPatternAnalyzer.cs  mania pattern classification (ported MMA / Interlude algorithm)
+Services/PatternLibrary.cs    Pattern library, tag inference, pattern preference
+Services/ArchiveStore.cs      Recommendation history records
+Services/BeatmapDownloadService.cs  .osz download and import
+Services/TosuClient.cs        tosu WebSocket state
+Services/TosuProcessManager.cs    tosu process management
+Services/SettingsStore.cs     Settings read/write
+Services/SecretProtector.cs   DPAPI encryption
+Services/AppLog.cs            Logging
+Services/Loc.cs               UI language switching (DynamicResource based)
+Services/LocTable.cs          Chinese / English strings
+Services/Flavor.cs            Build flavor: default language and download sources
+Tests/                        Console project for local verification
+```
+
+## Known limitations
+
+- Search is capped at 8 pages / roughly 400 candidates; if the pool is too small, widen the star rating range or lower exploration.
+- API tags are free text written by mappers, not a strict music classification field, so dirty data and inconsistent spellings are common.
+- Windows only (WPF / `net8.0-windows`).
+- The download sources are third-party mirrors; when a site goes down you need to switch the mirror template in "Downloads & advanced".
+
+---
+
+# 中文
+
+osu! 谱面漫游推荐工具。Windows / WPF / .NET 8。**一个仓库，两个构建**：
+
+| 构建 | 界面语言 | 默认下载源 |
+|---|---|---|
+| `osu-roam-v1.5.0-portable.zip` | 跟随系统（中文系统即中文） | sayobot 镜像（国内） |
+| `osu-roam-v1.5.0-en-portable.zip` | 英文 | catboy / beatconnect（国际） |
+
+两份代码完全一致，只有编译期常量（`EN_BUILD`）和下载源默认值不同 —— 国内镜像对国外玩家是负担，
+国际源对国内网络也不合适，所以干脆各给一份，省得用户在设置里纠结。两个版本都自带语言切换
+（「界面」→「界面语言」），只是出厂默认不同；各自的 `data` 目录互不相干，**分开放、别覆盖安装**。
+
+osu! Roam 通过 osu! Web API 读取玩家资料和成绩样本，建立「星级 / BPM / 时长 / 谱师」偏好画像，再按星级区间、年份、时长、简易筛选和 tag 生成一个有上限的推荐池。配合 [tosu](https://github.com/KotRikD/tosu) 可以做到 **开局预下载下一首、结算后自动导入下一首** 的连续漫游。
 
 不需要密码，只需要玩家名 + 自己申请的 OAuth Client ID / Secret。
 
@@ -44,7 +318,7 @@ mania 模式下会用键型提高推荐针对性。分类体系移植自 [osuman
 
 ## 快速使用
 
-1. 解压 `osu-roam-v1.2.5-portable.zip`（从 [Releases](https://github.com/lEttEr93/OsuRoam/releases/latest) 下载；自包含 .NET 运行时，不用另装 .NET，包内已带 `tosu.exe`）。
+1. 解压 `osu-roam-v1.5.0-portable.zip`（从 [Releases](https://github.com/lEttEr93/OsuRoam/releases/latest) 下载；自包含 .NET 运行时，不用另装 .NET）。想用「开局预下载 / 结算自动推进」再单独下载 [tosu](https://github.com/tosuapp/tosu)，把 `tosu.exe` 放到 `OsuRoam.exe` 旁边，或之后在设置里填路径。
 2. 双击 `OsuRoam.exe`。
 3. 在「账号与连接」填 OAuth Client ID、Client Secret 和玩家名。
 4. 选游戏模式（osu! / taiko / catch / mania 1K–10K）。
@@ -97,7 +371,8 @@ Tag 池内置预设曲风、mania 键型特征（含 `米` `面` `叠` `技` `�
 
 ## 下载与导入
 
-- 默认从 sayobot 多镜像取 `.osz`（`dl.sayobot.cn` + `txy1.sayobot.cn`，模板里的 `{setId}` 会被替换），也可自定义镜像列表。
+- 中文版默认从 sayobot 多镜像取 `.osz`（`dl.sayobot.cn` + `txy1.sayobot.cn`，模板里的 `{setId}` 会被替换）；英文版默认是 `catboy.best` + `beatconnect.io`。两边都能在「下载与高级设置」里改。
+- 部分国际镜像会拒绝空 `User-Agent`，所以请求一律带 `osu-roam/<version>`。
 - **自动下载** / **自动导入** 可以分开关掉；卡片上的 ↓ 是「下载并导入」，↷ 是「跳过」。
 - 客户端可选 `osu!lazer` 或 `osu!stable`，也可以手动指定 exe 路径；留空时自动探测安装位置。
 - 导入是把 `.osz` 交给 osu! 自己处理（进程启动导入），下载缓存只在本地。
@@ -175,6 +450,15 @@ Roam 发起导入后，会在主窗口（通常是迷你播放器）**下方**�
 
 数据来源：`CS / OD / AR / HP / 物件数 / 实际 BPM` 是导入时从 `.osz` 里的 `.osu` 头解析的（osu! API 的 beatmapset 接口不直接给这些），解析在后台线程完成，和键型分析共用一次解压。
 
+## 界面语言
+
+界面中英双语，切换即时生效、不用重启：
+
+- 「界面」→「界面语言」：`跟随系统` / `简体中文` / `English`。跟随系统时，中文 Windows 显示中文，其余显示英文。
+- 英文版出厂预选 `English`，中文版预选 `跟随系统`；选择会存进 `settings.json`。
+- 按钮、提示、状态栏、卡片详情、技能雷达标签、谱面信息窗全都跟着切。
+- 日志和代码注释保持中文 —— 那是排障用的，不属于界面。
+
 ## 界面字体
 
 界面上的数字和英文字母用 **Outfit**（`Fonts/`，Regular / SemiBold / Bold 三个字面，
@@ -197,10 +481,18 @@ Outfit 只有拉丁字母和数字，**没有汉字字形**：中文照旧由系
 ```powershell
 dotnet build OsuRoam.csproj -c Release
 
-# 自包含便携包（非单文件；Fonts\*.otf 作为 WPF Resource 编进程序集）
+# 中文版（自包含，非单文件；Fonts\*.ttf 作为 WPF Resource 编进程序集）
 dotnet publish OsuRoam.csproj -c Release -r win-x64 --self-contained true `
-  -p:PublishSingleFile=false -o bin\v1.3.2
+  -p:PublishSingleFile=false -p:RoamFlavor=zh -o bin\v1.5.0-zh
+
+# 英文版
+dotnet publish OsuRoam.csproj -c Release -r win-x64 --self-contained true `
+  -p:PublishSingleFile=false -p:RoamFlavor=en -o bin\v1.5.0-en
 ```
+
+`-p:RoamFlavor=en` 只多加一个 `EN_BUILD` 常量，用来切换界面默认语言和下载源。
+**切风味前先删掉 `obj\` 和 `bin\Release\`**：增量编译不一定能察觉 `DefineConstants` 变了，
+而发布包里混进另一个风味的默认值是要命的。
 
 发布前确认没有正在运行的 `OsuRoam.exe`，发布会因文件占用失败。
 
@@ -222,6 +514,9 @@ Services/TosuProcessManager.cs     tosu 进程托管
 Services/SettingsStore.cs     配置读写
 Services/SecretProtector.cs   DPAPI 加密
 Services/AppLog.cs            日志
+Services/Loc.cs               界面语言切换（基于 DynamicResource）
+Services/LocTable.cs          中英文文案表
+Services/Flavor.cs            构建风味：默认语言与下载源
 Tests/                        本地验证用控制台工程
 ```
 

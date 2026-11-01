@@ -26,13 +26,13 @@ public sealed class TosuProcessManager
             if (await isEndpointReadyAsync(endpoint, cancellationToken))
             {
                 bool managed = managedProcess is { HasExited: false };
-                StatusChanged?.Invoke(managed ? "tosu 已就绪（由 Roam 管理）" : "tosu 已在运行");
+                StatusChanged?.Invoke(managed ? Loc.T("tosu.ready") : Loc.T("tosu.alreadyrunning"));
                 return new TosuStartResult(true, managed, managedProcess?.StartInfo.FileName);
             }
 
             if (!settings.AutoStartTosu)
             {
-                StatusChanged?.Invoke("等待手动启动 tosu");
+                StatusChanged?.Invoke(Loc.T("tosu.manual"));
                 return new TosuStartResult(false, false, null);
             }
 
@@ -45,10 +45,10 @@ public sealed class TosuProcessManager
                 Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
                 Environment.CurrentDirectory);
             if (executablePath is null)
-                throw new FileNotFoundException("未找到 tosu.exe，请在高级设置中填写路径。");
+                throw new FileNotFoundException(Loc.T("tosu.missing"));
 
             await disableDashboardAsync(executablePath, cancellationToken);
-            StatusChanged?.Invoke("正在静默启动 tosu...");
+            StatusChanged?.Invoke(Loc.T("tosu.starting"));
             AppLog.Info($"正在启动 tosu：{executablePath}");
 
             Process process = new()
@@ -73,13 +73,13 @@ public sealed class TosuProcessManager
                 int? exitCode = null;
                 try { exitCode = process.ExitCode; } catch { }
                 AppLog.Info($"由 Roam 启动的 tosu 已退出{(exitCode.HasValue ? $"，退出码 {exitCode}" : string.Empty)}");
-                StatusChanged?.Invoke("tosu 已退出");
+                StatusChanged?.Invoke(Loc.T("tosu.exited"));
             };
 
             if (!process.Start())
             {
                 process.Dispose();
-                throw new InvalidOperationException("tosu 进程未能启动。");
+                throw new InvalidOperationException(Loc.T("tosu.startfail"));
             }
 
             managedProcess = process;
@@ -114,7 +114,7 @@ public sealed class TosuProcessManager
                 }
                 catch (OperationCanceledException)
                 {
-                    AppLog.Info("等待 tosu 退出超时。");
+                    AppLog.Info(Loc.T("tosu.starttimeout"));
                 }
                 catch (Exception exception)
                 {
@@ -168,7 +168,7 @@ public sealed class TosuProcessManager
     {
         if (!Uri.TryCreate(url, UriKind.Absolute, out Uri? endpoint) ||
             endpoint.Scheme is not ("ws" or "wss"))
-            throw new InvalidOperationException("tosu WebSocket 地址无效。");
+            throw new InvalidOperationException(Loc.T("tosu.badurl"));
         return endpoint;
     }
 
@@ -193,16 +193,16 @@ public sealed class TosuProcessManager
         {
             cancellationToken.ThrowIfCancellationRequested();
             if (process.HasExited)
-                throw new InvalidOperationException($"tosu 启动后提前退出，退出码 {process.ExitCode}。请查看日志获取详情。");
+                throw new InvalidOperationException(Loc.F("tosu.earlyexit", process.ExitCode));
             if (await isEndpointReadyAsync(endpoint, cancellationToken))
             {
-                StatusChanged?.Invoke("tosu 已就绪（由 Roam 管理）");
+                StatusChanged?.Invoke(Loc.T("tosu.ready"));
                 AppLog.Info($"tosu WebSocket 已就绪，PID={process.Id}");
                 return new TosuStartResult(true, true, process.StartInfo.FileName);
             }
             await Task.Delay(300, cancellationToken);
         }
-        throw new TimeoutException($"tosu 在 {StartupTimeout.TotalSeconds:0} 秒内没有监听 {endpoint.Host}:{endpoint.Port}。");
+        throw new TimeoutException(Loc.F("tosu.nolisten", StartupTimeout.TotalSeconds.ToString("0"), endpoint.Host, endpoint.Port));
     }
 
     private static async Task<bool> isEndpointReadyAsync(Uri endpoint, CancellationToken cancellationToken)

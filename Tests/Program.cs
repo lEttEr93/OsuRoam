@@ -42,7 +42,10 @@ testSimpleFiltersOnlyStrictAreAbsolute();
 testSimpleFilterFitIsWeighted();
 testStrictSimpleFiltersFilterCandidates();
 testSimpleFilterSelectionStatesMatchSemantics();
-testSimpleFilterLabelsAreChinese();
+testSimpleFilterLabelsFollowLanguage();
+testLocalizationTablesAreInSync();
+testLocalizationSwitchesAtRuntime();
+testFlavorDownloadDefaults();
 testSimpleFiltersUseApiGenreAndLanguageIds();
 testTosuStringStateWorksInMultiplayerPayload();
 testTosuDashboardConfigIsDisabled();
@@ -170,7 +173,7 @@ static async Task testArchiveStorePublishesCollectionChangesAsync()
             LengthSeconds = 120,
             RankedYear = 2024,
             Score = 0,
-            Reason = "test"
+            ReasonStarFit = 0.5
         };
         RecommendationArchiveEntry entry = store.Add(item);
         assertEqual(1, changes, "新增历史必须通知已绑定的面板");
@@ -276,7 +279,7 @@ static RecommendationItem sampleRecommendationItem() => new()
     LengthSeconds = 120,
     RankedYear = 2024,
     Score = 0,
-    Reason = "test"
+    ReasonStarFit = 0.5
 };
 
 static void testChangeKindDetection()
@@ -1072,11 +1075,144 @@ static void testSimpleFilterSelectionStatesMatchSemantics()
     if (option.Selection != SimpleFilterSelection.Strict || !option.IsStrict)
         throw new InvalidOperationException("Indeterminate state should represent a strict filter");
 }
-static void testSimpleFilterLabelsAreChinese()
+static void testSimpleFilterLabelsFollowLanguage()
 {
-    if (new SimpleFilterOption("ranked", "Ranked").DisplayName != "\u4e0a\u67b6\u8c31\u9762" ||
-        new SimpleFilterOption("all", "All").DisplayName != "\u5168\u90e8")
-        throw new InvalidOperationException("简易筛选显示名必须使用中文");
+    try
+    {
+        Loc.Apply(UiLanguage.Chinese);
+        if (new SimpleFilterOption("ranked", "Ranked").DisplayName != "\u4e0a\u67b6\u8c31\u9762" ||
+            new SimpleFilterOption("all", "All").DisplayName != "\u5168\u90e8")
+            throw new InvalidOperationException("简易筛选的中文显示名不对");
+
+        Loc.Apply(UiLanguage.English);
+        if (new SimpleFilterOption("ranked", "Ranked").DisplayName != "Ranked" ||
+            new SimpleFilterOption("video game", "Video game").DisplayName != "Video game")
+            throw new InvalidOperationException("英文界面下简易筛选应该用 osu! 自己的叫法");
+    }
+    finally
+    {
+        Loc.Apply(UiLanguage.System);
+    }
+}
+
+/// <summary>
+/// 双语表必须成对：任何一边漏键都会让那一侧悄悄回退成中文或裸键名；
+/// 顺便检查 XAML 里 {DynamicResource L.xxx} 引用的键真的存在，以及 XAML 里不再有硬编码中文。
+/// </summary>
+static void testLocalizationTablesAreInSync()
+{
+    List<string> problems = [];
+
+    foreach (string key in LocTable.Chinese.Keys)
+        if (!LocTable.English.ContainsKey(key))
+            problems.Add($"英文表缺键：{key}");
+    foreach (string key in LocTable.English.Keys)
+        if (!LocTable.Chinese.ContainsKey(key))
+            problems.Add($"中文表缺键：{key}");
+
+    foreach ((string key, string value) in LocTable.Chinese)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            problems.Add($"中文表空值：{key}");
+        if (!LocTable.English.TryGetValue(key, out string? english))
+            continue;
+        if (string.IsNullOrWhiteSpace(english))
+            problems.Add($"英文表空值：{key}");
+        if (placeholderIndices(value) != placeholderIndices(english))
+            problems.Add($"占位符不一致：{key}");
+    }
+
+    string? root = findProjectRoot();
+    if (root is not null)
+    {
+        foreach (string file in Directory.EnumerateFiles(root, "*.xaml", SearchOption.AllDirectories))
+        {
+            if (file.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}", StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            string name = Path.GetFileName(file);
+            string text = File.ReadAllText(file);
+            foreach (System.Text.RegularExpressions.Match match in
+                     System.Text.RegularExpressions.Regex.Matches(text, @"\{DynamicResource\s+(L\.[A-Za-z0-9_.]+)\}"))
+            {
+                string key = match.Groups[1].Value["L.".Length..];
+                if (!LocTable.Chinese.ContainsKey(key))
+                    problems.Add($"{name} 引用了不存在的文案键：{key}");
+            }
+
+            int line = 0;
+            foreach (string row in text.Split('\n'))
+            {
+                line++;
+                if (!System.Text.RegularExpressions.Regex.IsMatch(row, "(Text|Content|ToolTip|Header|Title)=\"[^\"]*[\\u4e00-\\u9fff]"))
+                    continue;
+                problems.Add($"{name}:{line} 还有硬编码中文，应该用 {{DynamicResource L.xxx}}");
+            }
+        }
+    }
+
+    if (problems.Count > 0)
+        throw new InvalidOperationException("本地化表不一致：\n" + string.Join("\n", problems));
+}
+
+/// <summary>切语言必须真的换掉 T() 的结果，并且把 L. 前缀的资源重新挂到 Application 上。</summary>
+static void testLocalizationSwitchesAtRuntime()
+{
+    try
+    {
+        Loc.Apply(UiLanguage.Chinese);
+        if (Loc.IsEnglish || Loc.T("btn.next") != "下一首" || Loc.T("btn.start") != "开始漫游")
+            throw new InvalidOperationException("切到中文后文案没变");
+        if (Loc.T("mini.nobeatmap") != "尚未导入谱面")
+            throw new InvalidOperationException("切到中文后模板键取错");
+
+        Loc.Apply(UiLanguage.English);
+        if (!Loc.IsEnglish || Loc.T("btn.next") != "Next" || Loc.T("btn.start") != "Start roaming")
+            throw new InvalidOperationException("切到英文后文案没变");
+        if (Loc.F("status.built", 5) != "Pool ready — 5 picks")
+            throw new InvalidOperationException("带参数的文案格式不对：" + Loc.F("status.built", 5));
+
+        // 漏翻的键必须回退到中文，而不是把键名直接显示出来
+        if (Loc.T("no.such.key") != "no.such.key")
+            throw new InvalidOperationException("未知键应该原样返回");
+    }
+    finally
+    {
+        Loc.Apply(UiLanguage.System);
+    }
+}
+
+/// <summary>
+/// 两个风味只在默认值上分开：中文版走 sayobot 镜像，英文版走国际源。
+/// 这条测试保证 AppSettings 的默认值真的接到了 Flavor 上。
+/// </summary>
+static void testFlavorDownloadDefaults()
+{
+    AppSettings settings = new();
+    if (settings.DownloadUrlTemplate != Flavor.DefaultDownloadTemplate)
+        throw new InvalidOperationException("DownloadUrlTemplate 没有接 Flavor 默认值");
+    if (AppSettings.DefaultDownloadMirrors != Flavor.DefaultDownloadMirrors)
+        throw new InvalidOperationException("DefaultDownloadMirrors 没有接 Flavor 默认值");
+
+    string expected = Flavor.IsEnglish ? "catboy.best" : "sayobot";
+    if (!settings.DownloadUrlTemplate.Contains(expected, StringComparison.Ordinal))
+        throw new InvalidOperationException($"当前风味的默认下载源应该包含 {expected}，实际是 {settings.DownloadUrlTemplate}");
+    if (!AppSettings.DefaultDownloadMirrors.Contains("{setId}", StringComparison.Ordinal))
+        throw new InvalidOperationException("镜像模板必须包含 {setId}");
+
+    string expectedLanguage = Flavor.IsEnglish ? Loc.EnglishTag : Loc.AutoTag;
+    if (settings.Language != expectedLanguage)
+        throw new InvalidOperationException($"默认语言应为 {expectedLanguage}，实际是 {settings.Language}");
+}
+
+static string placeholderIndices(string value)
+{
+    List<int> indices = [];
+    foreach (System.Text.RegularExpressions.Match match in
+             System.Text.RegularExpressions.Regex.Matches(value, @"\{(\d+)(?:[,}])"))
+        indices.Add(int.Parse(match.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture));
+    indices.Sort();
+    return string.Join(",", indices);
 }
 
 static void testSimpleFiltersUseApiGenreAndLanguageIds()

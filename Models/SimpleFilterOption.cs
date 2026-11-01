@@ -5,15 +5,25 @@ namespace OsuRoam.Models;
 public sealed class SimpleFilterOption : INotifyPropertyChanged
 {
     private SimpleFilterSelection selection;
+    private readonly string englishName;
 
     public SimpleFilterOption(string value, string displayName)
     {
         Value = value;
-        DisplayName = chineseDisplayName(value) ?? displayName;
+        englishName = displayName;
     }
 
     public string Value { get; }
-    public string DisplayName { get; }
+
+    /// <summary>
+    /// 中文界面显示中文名，英文界面显示 osu! 自己的叫法（Ranked / Loved …），
+    /// 切换语言时要广播一次，见 <see cref="NotifyLanguage"/>。
+    /// </summary>
+    public string DisplayName => Services.Loc.IsEnglish
+        ? englishName
+        : chineseDisplayName(Value) ?? englishName;
+
+    public void NotifyLanguage() => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(DisplayName)));
 
     public SimpleFilterSelection Selection
     {

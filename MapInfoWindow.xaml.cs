@@ -38,6 +38,9 @@ public partial class MapInfoWindow : Window
         InitializeComponent();
         SizeChanged += (_, _) => reposition();
         Loaded += (_, _) => reposition();
+        // 换语言：胶囊、详情行、雷达标签全是代码拼的，得自己重算。
+        Loc.Changed += refresh;
+        Closed += (_, _) => Loc.Changed -= refresh;
     }
 
     /// <summary>挂在主窗口下面，跟随它移动/缩放，不单独占任务栏。</summary>
@@ -240,7 +243,7 @@ public partial class MapInfoWindow : Window
         if (item.KeyCount > 0)
             parts.Add($"{item.KeyCount}K");
         if (item.IsRecycled)
-            parts.Add("历史回收");
+            parts.Add(Loc.T("mapinfo.recycled"));
         return string.Join(" · ", parts);
     }
 
@@ -250,21 +253,21 @@ public partial class MapInfoWindow : Window
         BeatmapDetail? detail = item.Detail;
 
         addCapsule("BPM", item.Bpm > 0 ? item.Bpm.ToString("0") : "—");
-        addCapsule("时长", TimeSpan.FromSeconds(item.LengthSeconds).ToString(@"m\:ss"));
+        addCapsule(Loc.T("mapinfo.length"), TimeSpan.FromSeconds(item.LengthSeconds).ToString(@"m\:ss"));
 
         if (detail is not null)
         {
-            addCapsule("mode", detail.ModeDisplay);
+            addCapsule(Loc.T("mapinfo.mode"), detail.ModeDisplay);
             addCapsule("OD", detail.OverallDifficulty.ToString("0.0"));
             addCapsule("AR", detail.ApproachRate.ToString("0.0"));
             addCapsule("CS", detail.CircleSize.ToString("0.0"));
             addCapsule("HP", detail.HPDrainRate.ToString("0.0"));
             if (detail.HasObjects)
-                addCapsule("物件", detail.ObjectCount.ToString());
+                addCapsule(Loc.T("mapinfo.objects"), detail.ObjectCount.ToString());
         }
         else
         {
-            addCapsule("详情", "导入后解析", MutedBrush);
+            addCapsule(Loc.T("mapinfo.detail"), Loc.T("mapinfo.detailpending"), MutedBrush);
         }
     }
 
@@ -321,7 +324,7 @@ public partial class MapInfoWindow : Window
         if (pattern.SkillAxes.Length == ManiaPattern.SkillPatterns.Length)
         {
             RadarPanel.Visibility = Visibility.Visible;
-            Radar.Labels = ManiaPattern.SkillPatternShortLabels;
+            Radar.Labels = Loc.SkillPatternLabels();
             Radar.Values = pattern.SkillAxes;
         }
         else
@@ -333,7 +336,7 @@ public partial class MapInfoWindow : Window
         }
 
         // 6 个核心键型占比：加起来是 1，用直方图看长短（雷达图会误导）。
-        Bars.Labels = ManiaPattern.CorePatternLabels;
+        Bars.Labels = Loc.CorePatternLabels();
         Bars.Shares = pattern.ToVector();
     }
 
@@ -345,22 +348,22 @@ public partial class MapInfoWindow : Window
 
         if (detail is { HasObjects: true })
         {
-            List<string> objects = [$"物件 {detail.ObjectCount}"];
+            List<string> objects = [Loc.F("detail.objects", detail.ObjectCount)];
             if (detail.CircleCount > 0)
-                objects.Add($"单点 {detail.CircleCount}");
+                objects.Add(Loc.F("detail.circles", detail.CircleCount));
             if (detail.SliderCount > 0)
-                objects.Add($"滑条 {detail.SliderCount}");
+                objects.Add(Loc.F("detail.sliders", detail.SliderCount));
             if (detail.HoldCount > 0)
-                objects.Add($"长条 {detail.HoldCount}");
+                objects.Add(Loc.F("detail.holds", detail.HoldCount));
             if (detail.SpinnerCount > 0)
-                objects.Add($"转盘 {detail.SpinnerCount}");
+                objects.Add(Loc.F("detail.spinners", detail.SpinnerCount));
             parts.Add(string.Join(" · ", objects));
         }
 
         if (pattern is not null)
         {
-            parts.Add($"模式 {pattern.ModeTag} · LN {pattern.LnRatio:P0} · NPS {pattern.NotesPerSecond:0.0}");
-            parts.Add($"主导键型 {pattern.Category}（{pattern.SkillSource}技能轴）");
+            parts.Add(Loc.F("detail.pattern", pattern.ModeTag, pattern.LnRatio.ToString("P0"), pattern.NotesPerSecond.ToString("0.0")));
+            parts.Add(Loc.F("detail.dominantskill", pattern.Category, Loc.SkillSourceText(pattern.SkillSource)));
             KeyValuePair<string, double>[] top = pattern.SpecificShares
                 .OrderByDescending(pair => pair.Value)
                 .Take(4)
@@ -370,7 +373,7 @@ public partial class MapInfoWindow : Window
         }
         else if (item.KeyCount is 0 or 4)
         {
-            parts.Add("键型雷达只对 mania 谱面可用（切到 mania 模式并导入后才会出现）");
+            parts.Add(Loc.T("detail.maniaonly"));
         }
 
         return string.Join("\n", parts);

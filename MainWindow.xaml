@@ -52,7 +52,7 @@
 
                 <StackPanel x:Name="NormalHeader" Margin="14,0" VerticalAlignment="Center">
                     <TextBlock Text="osu! Roam" FontSize="16" FontWeight="SemiBold" />
-                    <TextBlock x:Name="ConnectionText" Text="尚未启动" Foreground="{StaticResource MutedTextBrush}" FontSize="11" />
+                    <TextBlock x:Name="ConnectionText" Text="{DynamicResource L.conn.idle}" Foreground="{StaticResource MutedTextBrush}" FontSize="11" />
                 </StackPanel>
                 <Grid x:Name="MiniPlayerHeader" Visibility="Collapsed" Margin="14,0,4,0" VerticalAlignment="Center">
                     <Grid.RenderTransform>
@@ -66,9 +66,9 @@
                         <ColumnDefinition Width="58" />
                     </Grid.ColumnDefinitions>
                     <StackPanel Margin="0,0,7,0" VerticalAlignment="Center">
-                        <TextBlock Text="{Binding DisplayTitle, FallbackValue=尚未导入谱面, TargetNullValue=尚未导入谱面}"
+                        <TextBlock x:Name="MiniTitleText"
                                    FontWeight="SemiBold" FontSize="12" TextTrimming="CharacterEllipsis" />
-                        <TextBlock x:Name="MiniTrackDetailText" Text="等待漫游"
+                        <TextBlock x:Name="MiniTrackDetailText" Text="{DynamicResource L.mini.waiting}"
                                    Foreground="{StaticResource MutedTextBrush}" FontSize="10" TextTrimming="CharacterEllipsis">
                             <TextBlock.RenderTransform>
                                 <TranslateTransform x:Name="MiniDetailSlide" />
@@ -76,13 +76,13 @@
                         </TextBlock>
                     </StackPanel>
                     <Button x:Name="MiniNextButton" Grid.Column="1" Width="58" Height="30" Padding="0"
-                            Content="下一首" Click="MiniNextButton_Click" ToolTip="下载并导入下一首" />
+                            Content="{DynamicResource L.btn.next}" Click="MiniNextButton_Click" ToolTip="{DynamicResource L.tip.next}" />
                 </Grid>
                 <StackPanel Grid.Column="1" Orientation="Horizontal" Margin="0,7,7,7">
-                    <Button x:Name="HistoryButton" Content="历史" Width="46" Padding="0" Margin="0,0,6,0"
-                            Click="HistoryButton_Click" ToolTip="历史推荐" />
-                    <Button x:Name="CollapseButton" Content="−" Width="34" Padding="0" Click="CollapseButton_Click" ToolTip="迷你播放器" />
-                    <Button Content="×" Width="34" Margin="6,0,0,0" Padding="0" Click="CloseButton_Click" ToolTip="关闭" />
+                    <Button x:Name="HistoryButton" Content="{DynamicResource L.btn.history}" MinWidth="46" Padding="8,0" Margin="0,0,6,0"
+                            Click="HistoryButton_Click" ToolTip="{DynamicResource L.tip.history}" />
+                    <Button x:Name="CollapseButton" Content="−" Width="34" Padding="0" Click="CollapseButton_Click" ToolTip="{DynamicResource L.tip.miniplayer}" />
+                    <Button Content="×" Width="34" Margin="6,0,0,0" Padding="0" Click="CloseButton_Click" ToolTip="{DynamicResource L.tip.close}" />
                 </StackPanel>
             </Grid>
 
@@ -95,10 +95,10 @@
                             <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
                         <StackPanel>
-                            <TextBlock Text="下一首" FontSize="18" FontWeight="SemiBold" />
-                            <TextBlock x:Name="ProfileText" Text="等待读取玩家画像" Foreground="{StaticResource MutedTextBrush}" FontSize="12" />
+                            <TextBlock Text="{DynamicResource L.section.next}" FontSize="18" FontWeight="SemiBold" />
+                            <TextBlock x:Name="ProfileText" Text="{DynamicResource L.profile.waiting}" Foreground="{StaticResource MutedTextBrush}" FontSize="12" />
                         </StackPanel>
-                        <Button x:Name="StartButton" Grid.Column="1" Content="开始漫游" Background="{StaticResource AccentBrush}"
+                        <Button x:Name="StartButton" Grid.Column="1" Content="{DynamicResource L.btn.start}" Background="{StaticResource AccentBrush}"
                                 BorderBrush="{StaticResource AccentBrush}" Click="StartButton_Click" />
                     </Grid>
 
@@ -173,7 +173,7 @@
                                         <Grid Width="40" Height="40" VerticalAlignment="Top" Margin="0,1,0,0">
                                             <Button x:Name="PreviewButton" Width="40" Height="40" Padding="0"
                                                     Tag="{Binding}"
-                                                    Click="PreviewButton_Click" ToolTip="播放预览"
+                                                    Click="PreviewButton_Click" ToolTip="{DynamicResource L.tip.preview}"
                                                     Background="#33FFFFFF" BorderBrush="#55FFFFFF">
                                                 <Button.Style>
                                                     <Style TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
@@ -220,15 +220,23 @@
                                             </TextBlock>
                                             <TextBlock Text="{Binding Reason}" FontSize="11" Foreground="{StaticResource WarningBrush}" />
                                             <Grid Margin="0,4,0,0">
-                                                <ProgressBar Height="3" Minimum="0" Maximum="1" Value="{Binding DownloadProgress}" />
-                                                <TextBlock Text="{Binding DownloadLabel}" HorizontalAlignment="Right" Margin="0,4,0,0"
-                                                           FontSize="10" Foreground="{StaticResource MutedTextBrush}" />
+                                                <!-- 进度条和状态文字分两列：叠在一起时中文「等待」还行，
+                                                     英文 Waiting/Downloading 会盖在条上还被右边裁掉。 -->
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="Auto" />
+                                                </Grid.ColumnDefinitions>
+                                                <ProgressBar Height="3" VerticalAlignment="Center"
+                                                             Minimum="0" Maximum="1" Value="{Binding DownloadProgress}" />
+                                                <TextBlock Grid.Column="1" Text="{Binding DownloadLabel}" Margin="6,0,0,0"
+                                                           VerticalAlignment="Center" FontSize="10"
+                                                           Foreground="{StaticResource MutedTextBrush}" />
                                             </Grid>
                                         </StackPanel>
                                         <StackPanel Grid.Column="2" Grid.Row="0">
-                                            <Button Content="↓" Height="29" Padding="0" Tag="{Binding}" Click="DownloadButton_Click" ToolTip="下载并导入" />
-                                            <Button Content="↷" Height="29" Margin="0,6,0,0" Padding="0" Tag="{Binding}" Click="SkipButton_Click" ToolTip="跳过" />
-                                            <Button Content="..." Height="29" Margin="0,6,0,0" Padding="0" Tag="{Binding}" Click="DetailButton_Click" ToolTip="详情" />
+                                            <Button Content="↓" Height="29" Padding="0" Tag="{Binding}" Click="DownloadButton_Click" ToolTip="{DynamicResource L.tip.download}" />
+                                            <Button Content="↷" Height="29" Margin="0,6,0,0" Padding="0" Tag="{Binding}" Click="SkipButton_Click" ToolTip="{DynamicResource L.tip.skip}" />
+                                            <Button Content="..." Height="29" Margin="0,6,0,0" Padding="0" Tag="{Binding}" Click="DetailButton_Click" ToolTip="{DynamicResource L.tip.detail}" />
                                         </StackPanel>
                                         <Expander Grid.Row="1" Grid.ColumnSpan="3" Header="Tags" Margin="54,7,42,0">
                                             <ItemsControl ItemsSource="{Binding TagItems}">
@@ -240,7 +248,7 @@
                                                 <ItemsControl.ItemTemplate>
                                                     <DataTemplate>
                                                         <Button Content="{Binding Name}" Tag="{Binding Name}" Padding="7,3" Margin="0,0,5,5"
-                                                                MouseDoubleClick="RecommendationTag_MouseDoubleClick" ToolTip="双击加入包含标签">
+                                                                MouseDoubleClick="RecommendationTag_MouseDoubleClick" ToolTip="{DynamicResource L.tip.taginclude}">
                                                             <Button.Style>
                                                                 <Style TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
                                                                     <Style.Triggers>
@@ -303,7 +311,7 @@
                                                 <controls:PatternBars Margin="0,6,0,0"
                                                                       Labels="{Binding PatternBarLabels}"
                                                                       Shares="{Binding PatternBars}" />
-                                                <Button Content="‹ 返回" Tag="{Binding}" Click="DetailButton_Click"
+                                                <Button Content="{DynamicResource L.btn.back}" Tag="{Binding}" Click="DetailButton_Click"
                                                         HorizontalAlignment="Left" Margin="0,8,0,0" Padding="12,2" FontSize="10" />
                                             </StackPanel>
                                         </Grid>
@@ -314,10 +322,10 @@
                         </ItemsControl.ItemTemplate>
                     </ItemsControl>
 
-                    <TextBlock x:Name="EmptyPoolText" Text="推荐池为空" Foreground="{StaticResource MutedTextBrush}"
+                    <TextBlock x:Name="EmptyPoolText" Text="{DynamicResource L.empty.pool}" Foreground="{StaticResource MutedTextBrush}"
                                HorizontalAlignment="Center" Margin="0,18" />
 
-                    <Expander Header="推荐范围" IsExpanded="True" Margin="0,8,0,0">
+                    <Expander x:Name="RangeExpander" Header="{DynamicResource L.section.range}" IsExpanded="True" Margin="0,8,0,0">
                         <Grid Margin="0,10,0,4">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="*" />
@@ -336,18 +344,18 @@
                                 <RowDefinition Height="Auto" />
                             <RowDefinition Height="Auto" />
                             </Grid.RowDefinitions>
-                            <Button x:Name="SuggestDifficultyButton" Grid.ColumnSpan="2" Content="建议星级" HorizontalAlignment="Left" Padding="10,4" Margin="0,0,0,9" Click="SuggestDifficultyButton_Click" />
+                            <Button x:Name="SuggestDifficultyButton" Grid.ColumnSpan="2" Content="{DynamicResource L.btn.suggest}" HorizontalAlignment="Left" Padding="10,4" Margin="0,0,0,9" Click="SuggestDifficultyButton_Click" />
                             <TextBlock x:Name="DifficultyProfileText" Grid.Column="2" HorizontalAlignment="Right"
                                        Foreground="{StaticResource SecondaryBrush}" FontSize="11" />
                             <StackPanel Grid.Row="1" Visibility="Collapsed">
-                                <TextBlock Text="最低星级" Foreground="{StaticResource MutedTextBrush}" FontSize="11" />
+                                <TextBlock Text="{DynamicResource L.label.minstar}" Foreground="{StaticResource MutedTextBrush}" FontSize="11" />
                             </StackPanel>
                             <StackPanel Grid.Row="1" Grid.Column="2" Visibility="Collapsed">
-                                <TextBlock Text="最高星级" Foreground="{StaticResource MutedTextBrush}" FontSize="11" />
+                                <TextBlock Text="{DynamicResource L.label.maxstar}" Foreground="{StaticResource MutedTextBrush}" FontSize="11" />
                             </StackPanel>
                             <Grid Grid.Row="1" Grid.ColumnSpan="3">
                                 <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="42" /></Grid.RowDefinitions>
-                                <TextBlock Text="难度星级" Foreground="{StaticResource MutedTextBrush}" FontSize="11" />
+                                <TextBlock Text="{DynamicResource L.label.stars}" Foreground="{StaticResource MutedTextBrush}" FontSize="11" />
                                 <Grid x:Name="StarRangeControl" Grid.Row="1" Height="42" SizeChanged="StarRangeControl_SizeChanged">
                                     <Canvas x:Name="StarRangeCanvas" Background="Transparent" MouseLeftButtonDown="StarRangeTrack_MouseLeftButtonDown" MouseMove="StarRangeCanvas_MouseMove" MouseLeftButtonUp="StarRangeCanvas_MouseLeftButtonUp">
                                         <Border x:Name="StarRangeTrack" Canvas.Top="15" Height="12" BorderBrush="#3F4951" BorderThickness="1" CornerRadius="4">
@@ -371,19 +379,19 @@
                                 </Grid>
                             </Grid>
                             <StackPanel Grid.Row="2" Margin="0,9,0,0">
-                                <TextBlock Text="最早年份" Foreground="{StaticResource MutedTextBrush}" FontSize="11" />
+                                <TextBlock Text="{DynamicResource L.label.minyear}" Foreground="{StaticResource MutedTextBrush}" FontSize="11" />
                                 <TextBox x:Name="MinimumYearBox" />
                             </StackPanel>
                             <StackPanel Grid.Row="2" Grid.Column="2" Margin="0,9,0,0">
-                                <TextBlock Text="最晚年份" Foreground="{StaticResource MutedTextBrush}" FontSize="11" />
+                                <TextBlock Text="{DynamicResource L.label.maxyear}" Foreground="{StaticResource MutedTextBrush}" FontSize="11" />
                                 <TextBox x:Name="MaximumYearBox" />
                             </StackPanel>
                             <StackPanel Grid.Row="3" Margin="0,9,0,0">
-                                <TextBlock Text="最短秒数" Foreground="{StaticResource MutedTextBrush}" FontSize="11" />
+                                <TextBlock Text="{DynamicResource L.label.minlength}" Foreground="{StaticResource MutedTextBrush}" FontSize="11" />
                                 <TextBox x:Name="MinimumLengthBox" />
                             </StackPanel>
                             <StackPanel Grid.Row="3" Grid.Column="2" Margin="0,9,0,0">
-                                <TextBlock Text="最长秒数" Foreground="{StaticResource MutedTextBrush}" FontSize="11" />
+                                <TextBlock Text="{DynamicResource L.label.maxlength}" Foreground="{StaticResource MutedTextBrush}" FontSize="11" />
                                 <TextBox x:Name="MaximumLengthBox" />
                             </StackPanel>
                             <StackPanel Grid.Row="4" Grid.ColumnSpan="3" Margin="0,10,0,0">
@@ -392,12 +400,12 @@
                                         <ColumnDefinition />
                                         <ColumnDefinition Width="Auto" />
                                     </Grid.ColumnDefinitions>
-                                    <TextBlock Text="简易筛选" Foreground="{StaticResource SecondaryBrush}" FontSize="12" FontWeight="SemiBold" />
+                                    <TextBlock Text="{DynamicResource L.label.simplefilter}" Foreground="{StaticResource SecondaryBrush}" FontSize="12" FontWeight="SemiBold" />
                                     <TextBlock Grid.Column="1" VerticalAlignment="Center"
-                                               Text="&#x52FE;&#x9009;&#xFF1A;&#x504F;&#x597D;  &#x4E2D;&#x95F4;&#x72B6;&#x6001;&#xFF1A;&#x4E25;&#x683C;&#x7B5B;&#x9009;"
+                                               Text="{DynamicResource L.hint.simplefilter}"
                                                Foreground="{StaticResource MutedTextBrush}" FontSize="10" Margin="8,0,0,0" />
                                 </Grid>
-                                <TextBlock Text="分类" Foreground="{StaticResource MutedTextBrush}" FontSize="11" Margin="0,7,0,1" />
+                                <TextBlock Text="{DynamicResource L.label.status}" Foreground="{StaticResource MutedTextBrush}" FontSize="11" Margin="0,7,0,1" />
                                 <ItemsControl x:Name="StatusFilterItems">
                                     <ItemsControl.ItemsPanel><ItemsPanelTemplate><WrapPanel /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
                                     <ItemsControl.ItemTemplate>
@@ -407,7 +415,7 @@
                                         </DataTemplate>
                                     </ItemsControl.ItemTemplate>
                                 </ItemsControl>
-                                <TextBlock Text="流派" Foreground="{StaticResource MutedTextBrush}" FontSize="11" Margin="0,4,0,1" />
+                                <TextBlock Text="{DynamicResource L.label.genre}" Foreground="{StaticResource MutedTextBrush}" FontSize="11" Margin="0,4,0,1" />
                                 <ItemsControl x:Name="GenreFilterItems">
                                     <ItemsControl.ItemsPanel><ItemsPanelTemplate><WrapPanel /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
                                     <ItemsControl.ItemTemplate>
@@ -417,7 +425,7 @@
                                         </DataTemplate>
                                     </ItemsControl.ItemTemplate>
                                 </ItemsControl>
-                                <TextBlock Text="语言" Foreground="{StaticResource MutedTextBrush}" FontSize="11" Margin="0,4,0,1" />
+                                <TextBlock Text="{DynamicResource L.label.language}" Foreground="{StaticResource MutedTextBrush}" FontSize="11" Margin="0,4,0,1" />
                                 <ItemsControl x:Name="LanguageFilterItems">
                                     <ItemsControl.ItemsPanel><ItemsPanelTemplate><WrapPanel /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
                                     <ItemsControl.ItemTemplate>
@@ -431,15 +439,15 @@
                                 <TextBox x:Name="TagSearchBox" Margin="0,3,0,4" TextChanged="TagSearchBox_TextChanged" />
                                 <ListBox x:Name="TagListBox" Height="90" SelectionMode="Extended" DisplayMemberPath="." Background="{StaticResource SurfaceRaisedBrush}" Foreground="{StaticResource TextBrush}" BorderBrush="{StaticResource BorderBrush}" />
                                 <WrapPanel Margin="0,4,0,0">
-                                    <Button Content="加入推荐标签" Click="IncludeTagsButton_Click" Margin="0,0,6,0" />
-                                    <Button Content="排除这些标签" Click="ExcludeTagsButton_Click" />
+                                    <Button Content="{DynamicResource L.btn.include}" Click="IncludeTagsButton_Click" Margin="0,0,6,0" />
+                                    <Button Content="{DynamicResource L.btn.exclude}" Click="ExcludeTagsButton_Click" />
                                 </WrapPanel>
-                                <TextBlock Text="已选推荐 tag" Margin="0,5,0,2" FontSize="11" Foreground="{StaticResource SecondaryBrush}" />
+                                <TextBlock Text="{DynamicResource L.label.includedtags}" Margin="0,5,0,2" FontSize="11" Foreground="{StaticResource SecondaryBrush}" />
                                 <ItemsControl x:Name="IncludedTagsItems">
                                     <ItemsControl.ItemsPanel><ItemsPanelTemplate><WrapPanel /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
                                     <ItemsControl.ItemTemplate><DataTemplate><Button Content="{Binding}" Tag="{Binding}" Click="RemoveIncludedTagButton_Click" Margin="0,0,4,3" Padding="7,2" /></DataTemplate></ItemsControl.ItemTemplate>
                                 </ItemsControl>
-                                <TextBlock Text="已选排除 tag" Margin="0,3,0,2" FontSize="11" Foreground="{StaticResource WarningBrush}" />
+                                <TextBlock Text="{DynamicResource L.label.excludedtags}" Margin="0,3,0,2" FontSize="11" Foreground="{StaticResource WarningBrush}" />
                                 <ItemsControl x:Name="ExcludedTagsItems">
                                     <ItemsControl.ItemsPanel><ItemsPanelTemplate><WrapPanel /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
                                     <ItemsControl.ItemTemplate><DataTemplate><Button Content="{Binding}" Tag="{Binding}" Click="RemoveExcludedTagButton_Click" Margin="0,0,4,3" Padding="7,2" /></DataTemplate></ItemsControl.ItemTemplate>
@@ -447,7 +455,7 @@
                             </StackPanel>
                             <StackPanel Grid.Row="5" Grid.ColumnSpan="3" Margin="0,10,0,0">
                                 <DockPanel>
-                                    <TextBlock Text="探索度" Foreground="{StaticResource MutedTextBrush}" FontSize="11" />
+                                    <TextBlock Text="{DynamicResource L.label.exploration}" Foreground="{StaticResource MutedTextBrush}" FontSize="11" />
                                     <TextBlock x:Name="ExplorationText" DockPanel.Dock="Right" HorizontalAlignment="Right" FontSize="11" />
                                 </DockPanel>
                                 <Slider x:Name="ExplorationSlider" Minimum="0" Maximum="1" TickFrequency="0.05"
@@ -456,9 +464,9 @@
                         </Grid>
                     </Expander>
 
-                    <Expander Header="账号与连接" Margin="0,8,0,0">
+                    <Expander x:Name="AccountExpander" Header="{DynamicResource L.section.account}" Margin="0,8,0,0">
                         <StackPanel Margin="0,10,0,4">
-                            <TextBlock Text="玩家名" Foreground="{StaticResource MutedTextBrush}" FontSize="11" />
+                            <TextBlock Text="{DynamicResource L.label.username}" Foreground="{StaticResource MutedTextBrush}" FontSize="11" />
                             <TextBox x:Name="UsernameBox" />
                             <Grid Margin="0,9,0,0">
                                 <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="12" /><ColumnDefinition Width="150" /></Grid.ColumnDefinitions>
@@ -467,7 +475,7 @@
                                     <TextBox x:Name="ClientIdBox" />
                                 </StackPanel>
                                 <StackPanel Grid.Column="2">
-                                    <TextBlock Text="游戏模式" Foreground="{StaticResource MutedTextBrush}" FontSize="11" />
+                                    <TextBlock Text="{DynamicResource L.label.mode}" Foreground="{StaticResource MutedTextBrush}" FontSize="11" />
                                     <ComboBox x:Name="ModeBox" SelectedIndex="0" SelectionChanged="ModeBox_SelectionChanged"
                                               DropDownOpened="ComboBox_DropDownOpened" DropDownClosed="ComboBox_DropDownClosed">
                                         <ComboBoxItem Content="osu!standard" Tag="osu" />
@@ -476,7 +484,7 @@
                                         <ComboBoxItem Content="mania" Tag="mania" />
                                     </ComboBox>
                                     <StackPanel x:Name="ManiaKeysPanel" Visibility="Collapsed" Margin="0,7,0,0">
-                                        <TextBlock Text="游戏模式" Foreground="{StaticResource MutedTextBrush}" FontSize="11" />
+                                        <TextBlock Text="{DynamicResource L.label.keys}" Foreground="{StaticResource MutedTextBrush}" FontSize="11" />
                                         <ComboBox x:Name="ManiaKeysBox" SelectedIndex="3" SelectionChanged="ManiaKeysBox_SelectionChanged"
                                                   DropDownOpened="ComboBox_DropDownOpened" DropDownClosed="ComboBox_DropDownClosed">
                                             <ComboBoxItem Content="1K" Tag="1" /><ComboBoxItem Content="2K" Tag="2" />
@@ -493,48 +501,60 @@
                         </StackPanel>
                     </Expander>
 
-                    <Expander Header="下载与高级设置" Margin="0,8,0,0">
+                    <Expander x:Name="InterfaceExpander" Header="{DynamicResource L.section.interface}" Margin="0,8,0,0">
+                        <StackPanel Margin="0,10,0,4">
+                            <TextBlock Text="{DynamicResource L.label.uilanguage}" Foreground="{StaticResource MutedTextBrush}" FontSize="11" />
+                            <ComboBox x:Name="LanguageBox" SelectedIndex="0" SelectionChanged="LanguageBox_SelectionChanged"
+                                      DropDownOpened="ComboBox_DropDownOpened" DropDownClosed="ComboBox_DropDownClosed">
+                                <ComboBoxItem Content="{DynamicResource L.lang.auto}" Tag="auto" />
+                                <ComboBoxItem Content="{DynamicResource L.lang.zh}" Tag="zh" />
+                                <ComboBoxItem Content="{DynamicResource L.lang.en}" Tag="en" />
+                            </ComboBox>
+                        </StackPanel>
+                    </Expander>
+
+                    <Expander x:Name="AdvancedExpander" Header="{DynamicResource L.section.advanced}" Margin="0,8,0,0">
                         <StackPanel Margin="0,10,0,4">
                             <WrapPanel Margin="0,0,0,9">
-                                <CheckBox x:Name="ExcludeRecentCheck" Content="排除近期玩过" />
+                                <CheckBox x:Name="ExcludeRecentCheck" Content="{DynamicResource L.check.excluderecent}" />
                             </WrapPanel>
                             <WrapPanel Margin="0,0,0,9">
-                                <CheckBox x:Name="AutoDownloadCheck" Content="自动下载" Margin="0,0,18,0" />
-                                <CheckBox x:Name="AutoImportCheck" Content="自动导入" />
+                                <CheckBox x:Name="AutoDownloadCheck" Content="{DynamicResource L.check.autodownload}" Margin="0,0,18,0" />
+                                <CheckBox x:Name="AutoImportCheck" Content="{DynamicResource L.check.autoimport}" />
                             </WrapPanel>
                             <WrapPanel Margin="0,0,0,9">
-                                <CheckBox x:Name="EmbeddedFontCheck" Content="使用内置字体（Outfit）" Click="EmbeddedFontCheck_Click"
-                                          ToolTip="数字和英文字母用内置的 Outfit；关掉回退系统字体" />
+                                <CheckBox x:Name="EmbeddedFontCheck" Content="{DynamicResource L.check.embeddedfont}" Click="EmbeddedFontCheck_Click"
+                                          ToolTip="{DynamicResource L.tip.embeddedfont}" />
                             </WrapPanel>
                             <WrapPanel Margin="0,0,0,9">
-                                <CheckBox x:Name="MapInfoCheck" Content="导入后显示谱面信息窗" Click="MapInfoCheck_Click"
-                                          ToolTip="在迷你播放器下方弹出谱面详情（雷达图 / CS·OD·AR·物件数），开局时自动关闭" />
+                                <CheckBox x:Name="MapInfoCheck" Content="{DynamicResource L.check.mapinfo}" Click="MapInfoCheck_Click"
+                                          ToolTip="{DynamicResource L.tip.mapinfo}" />
                             </WrapPanel>
-                            <TextBlock Text="osu! 客户端" Foreground="{StaticResource MutedTextBrush}" FontSize="11" />
+                            <TextBlock Text="{DynamicResource L.label.client}" Foreground="{StaticResource MutedTextBrush}" FontSize="11" />
                             <ComboBox x:Name="OsuClientBox" SelectedIndex="0"
                                       DropDownOpened="ComboBox_DropDownOpened" DropDownClosed="ComboBox_DropDownClosed">
                                 <ComboBoxItem Content="osu!lazer" Tag="lazer" />
                                 <ComboBoxItem Content="osu!stable" Tag="stable" />
                             </ComboBox>
-                            <TextBlock Text="推荐池大小" Foreground="{StaticResource MutedTextBrush}" FontSize="11" />
+                            <TextBlock Text="{DynamicResource L.label.poolsize}" Foreground="{StaticResource MutedTextBrush}" FontSize="11" />
                             <ComboBox x:Name="PoolSizeBox" SelectedIndex="2"
                                       DropDownOpened="ComboBox_DropDownOpened" DropDownClosed="ComboBox_DropDownClosed">
                                 <ComboBoxItem Content="3" /><ComboBoxItem Content="4" /><ComboBoxItem Content="5" />
                                 <ComboBoxItem Content="6" /><ComboBoxItem Content="8" /><ComboBoxItem Content="10" />
                             </ComboBox>
-                            <TextBlock Text="谱面缓存上限（MB，超出后从最旧的谱面开始删）" Foreground="{StaticResource MutedTextBrush}" FontSize="11" Margin="0,9,0,0" />
+                            <TextBlock Text="{DynamicResource L.label.cachelimit}" Foreground="{StaticResource MutedTextBrush}" FontSize="11" Margin="0,9,0,0" />
                             <TextBox x:Name="CacheLimitBox" />
-                            <TextBlock Text="osu!.exe 路径（留空自动查找所选客户端）" Foreground="{StaticResource MutedTextBrush}" FontSize="11" Margin="0,9,0,0" />
+                            <TextBlock Text="{DynamicResource L.label.osupath}" Foreground="{StaticResource MutedTextBrush}" FontSize="11" Margin="0,9,0,0" />
                             <TextBox x:Name="OsuPathBox" />
-                            <TextBlock Text="下载镜像（每行一个，包含 {setId}）" Foreground="{StaticResource MutedTextBrush}" FontSize="11" Margin="0,9,0,0" />
+                            <TextBlock Text="{DynamicResource L.label.mirrors}" Foreground="{StaticResource MutedTextBrush}" FontSize="11" Margin="0,9,0,0" />
                             <TextBox x:Name="DownloadTemplateBox" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="64" VerticalScrollBarVisibility="Auto" />
                             <TextBlock Text="tosu WebSocket" Foreground="{StaticResource MutedTextBrush}" FontSize="11" Margin="0,9,0,0" />
                             <TextBox x:Name="TosuUrlBox" />
                             <WrapPanel Margin="0,9,0,0">
-                                <CheckBox x:Name="AutoStartTosuCheck" Content="自动启动 tosu" Margin="0,0,18,0" />
-                                <CheckBox x:Name="StopManagedTosuCheck" Content="关闭 Roam 时结束 tosu" />
+                                <CheckBox x:Name="AutoStartTosuCheck" Content="{DynamicResource L.check.autotosu}" Margin="0,0,18,0" />
+                                <CheckBox x:Name="StopManagedTosuCheck" Content="{DynamicResource L.check.stoptosu}" />
                             </WrapPanel>
-                            <TextBlock Text="tosu.exe 路径（留空自动查找）" Foreground="{StaticResource MutedTextBrush}" FontSize="11" Margin="0,9,0,0" />
+                            <TextBlock Text="{DynamicResource L.label.tosupath}" Foreground="{StaticResource MutedTextBrush}" FontSize="11" Margin="0,9,0,0" />
                             <TextBox x:Name="TosuPathBox" />
                         </StackPanel>
                     </Expander>
@@ -543,11 +563,11 @@
 
             <Grid x:Name="Footer" Grid.Row="2" Background="{StaticResource SurfaceBrush}">
                 <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
-                <TextBox x:Name="StatusText" Text="就绪" Margin="14,6,8,6" VerticalContentAlignment="Center"
+                <TextBox x:Name="StatusText" Text="{DynamicResource L.status.ready}" Margin="14,6,8,6" VerticalContentAlignment="Center"
                          IsReadOnly="True" IsTabStop="True" TextWrapping="Wrap" AcceptsReturn="True"
-                         BorderThickness="0" Background="Transparent" ToolTip="可选中并复制完整状态" />
-                <Button Grid.Column="1" Content="复制" Margin="0,6,6,6" Padding="10,0" Click="CopyStatusButton_Click" />
-                <Button Grid.Column="2" Content="刷新" Margin="0,6,8,6" Padding="12,0" Click="RefreshButton_Click" />
+                         BorderThickness="0" Background="Transparent" ToolTip="{DynamicResource L.tip.status}" />
+                <Button Grid.Column="1" Content="{DynamicResource L.btn.copy}" Margin="0,6,6,6" Padding="10,0" Click="CopyStatusButton_Click" />
+                <Button Grid.Column="2" Content="{DynamicResource L.btn.refresh}" Margin="0,6,8,6" Padding="12,0" Click="RefreshButton_Click" />
             </Grid>
         </Grid>
     </Border>

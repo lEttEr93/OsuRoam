@@ -64,9 +64,9 @@ public sealed class TosuClient : IAsyncDisposable
             try
             {
                 using ClientWebSocket socket = new();
-                StatusChanged?.Invoke("正在连接 tosu...");
+                StatusChanged?.Invoke(Loc.T("tosu.connecting"));
                 await socket.ConnectAsync(new Uri(url), cancellationToken);
-                StatusChanged?.Invoke("tosu 已连接");
+                StatusChanged?.Invoke(Loc.T("tosu.connected"));
                 await receiveAsync(socket, cancellationToken);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -76,12 +76,12 @@ public sealed class TosuClient : IAsyncDisposable
             catch (Exception exception)
             {
                 AppLog.Error("tosu 连接或读取失败", exception);
-                StatusChanged?.Invoke("等待 tosu 启动");
+                StatusChanged?.Invoke(Loc.T("tosu.waiting"));
                 try { await Task.Delay(TimeSpan.FromSeconds(3), cancellationToken); }
                 catch (OperationCanceledException) { break; }
             }
         }
-        StatusChanged?.Invoke("tosu 已断开");
+        StatusChanged?.Invoke(Loc.T("tosu.disconnected"));
     }
 
     private async Task receiveAsync(ClientWebSocket socket, CancellationToken cancellationToken)
@@ -188,7 +188,7 @@ public sealed class TosuClient : IAsyncDisposable
         }
         catch (JsonException)
         {
-            StatusChanged?.Invoke("tosu 数据格式暂不可读");
+            StatusChanged?.Invoke(Loc.T("tosu.unreadable"));
         }
     }
 

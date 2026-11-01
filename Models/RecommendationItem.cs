@@ -19,7 +19,28 @@ public sealed class RecommendationItem : INotifyPropertyChanged
     public required int LengthSeconds { get; init; }
     public required int RankedYear { get; init; }
     public required double Score { get; init; }
-    public required string Reason { get; init; }
+
+    /// <summary>推荐理由的骨架（哪种匹配），实际文字按当前语言现拼，见 <see cref="Reason"/>。</summary>
+    public ReasonKind ReasonKind { get; init; } = ReasonKind.Explore;
+    public double ReasonTagFit { get; init; }
+    public double ReasonStarFit { get; init; }
+    /// <summary>键型匹配时附在理由后面的主导分类，如 "Jumpstream Tech"。</summary>
+    public string ReasonCategory { get; init; } = string.Empty;
+
+    public string Reason
+    {
+        get
+        {
+            string reason = ReasonKind switch
+            {
+                ReasonKind.Tags => Services.Loc.F("reason.tags", ReasonTagFit.ToString("P0"), ReasonStarFit.ToString("P0")),
+                ReasonKind.Mapper => Services.Loc.F("reason.mapper", ReasonStarFit.ToString("P0")),
+                ReasonKind.Rhythm => Services.Loc.F("reason.rhythm", ReasonStarFit.ToString("P0")),
+                _ => Services.Loc.F("reason.explore", ReasonStarFit.ToString("P0"))
+            };
+            return ReasonCategory.Length == 0 ? reason : $"{reason} · {ReasonCategory}";
+        }
+    }
     public IReadOnlyList<string> Tags { get; init; } = [];
     public IReadOnlyList<RecommendationTag> TagItems { get; init; } = [];
     public int KeyCount { get; init; }
@@ -105,13 +126,13 @@ public sealed class RecommendationItem : INotifyPropertyChanged
 
     public string DownloadLabel => DownloadState switch
     {
-        DownloadState.Queued => "Queued",
+        DownloadState.Queued => Services.Loc.T("download.queued"),
         DownloadState.Downloading => $"{DownloadProgress:P0}",
-        DownloadState.Downloaded => "Downloaded",
-        DownloadState.Importing => "Importing",
-        DownloadState.Imported => "Ready",
-        DownloadState.Failed => "Failed",
-        _ => "Waiting"
+        DownloadState.Downloaded => Services.Loc.T("download.downloaded"),
+        DownloadState.Importing => Services.Loc.T("download.importing"),
+        DownloadState.Imported => Services.Loc.T("download.imported"),
+        DownloadState.Failed => Services.Loc.T("download.failed"),
+        _ => Services.Loc.T("download.waiting")
     };
 
     private bool isPreviewPlaying;
@@ -179,7 +200,7 @@ public sealed class RecommendationItem : INotifyPropertyChanged
     /// 只保留 7 轴技能雷达。6 个核心键型的占比加起来是 1（此消彼长），
     /// 用雷达图会让人误读成相互独立，改由 <see cref="PatternBars"/> 的直方图表示。
     /// </summary>
-    public IReadOnlyList<string> RadarLabels => ManiaPattern.SkillPatternShortLabels;
+    public IReadOnlyList<string> RadarLabels => Services.Loc.SkillPatternLabels();
 
     public IReadOnlyList<double> RadarValues =>
         pattern is not null && pattern.SkillAxes.Length == ManiaPattern.SkillPatterns.Length
@@ -189,7 +210,7 @@ public sealed class RecommendationItem : INotifyPropertyChanged
     /// <summary>直方图的 6 个核心键型占比（顺序固定，和 <see cref="PatternBarLabels"/> 对齐）。</summary>
     public IReadOnlyList<double> PatternBars => pattern?.ToVector() ?? [];
 
-    public IReadOnlyList<string> PatternBarLabels => ManiaPattern.CorePatternLabels;
+    public IReadOnlyList<string> PatternBarLabels => Services.Loc.CorePatternLabels();
 
     public IReadOnlyList<string> DetailLines
     {
@@ -197,19 +218,21 @@ public sealed class RecommendationItem : INotifyPropertyChanged
         {
             List<string> lines =
             [
-                $"谱师 {Mapper}",
+                Services.Loc.F("detail.mapper", Mapper),
                 $"{Stars:0.00}*  {Bpm:0} BPM  {TimeSpan.FromSeconds(LengthSeconds):m\\:ss}  {RankedYear}"
             ];
             if (pattern is null)
             {
-                lines.Add("详情仅对 mania 模式有效");
-                lines.Add("（切到 mania 并下载谱面后才有键型与技能雷达）");
+                lines.Add(Services.Loc.T("detail.maniaonly"));
+                lines.Add(Services.Loc.T("detail.maniaonly.hint"));
                 return lines;
             }
 
             // 键型占比交给下面的直方图，这里只留比值型描述（雷达图看形状、条看占比）。
-            lines.Add($"模式 {pattern.ModeTag}  LN {pattern.LnRatio:P0}  NPS {pattern.NotesPerSecond:0.0}");
-            lines.Add($"主导 {pattern.Category} · {pattern.SkillSource}");
+            lines.Add(Services.Loc.F("detail.pattern", pattern.ModeTag,
+                pattern.LnRatio.ToString("P0"), pattern.NotesPerSecond.ToString("0.0")));
+            lines.Add(Services.Loc.F("detail.dominant", pattern.Category,
+                Services.Loc.SkillSourceText(pattern.SkillSource)));
             return lines;
         }
     }
@@ -233,8 +256,18 @@ public sealed class RecommendationItem : INotifyPropertyChanged
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(RadarLabels)));
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(RadarValues)));
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(PatternBars)));
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(PatternBarLabels)));
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(DetailLines)));
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(DetailTitle)));
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Reason)));
+    }
+
+    /// <summary>界面语言换了：所有现拼的文字重新广播一次。</summary>
+    public void NotifyLanguage()
+    {
+        notifyDetail();
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(DisplayTitle)));
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(DownloadLabel)));
     }
 
     private void setField<T>(ref T field, T value, [CallerMemberName] string? propertyName = null)
@@ -260,6 +293,15 @@ public enum DownloadState
     Importing,
     Imported,
     Failed
+}
+
+/// <summary>推荐理由的四种骨架，文字在 LocTable 里按语言取。</summary>
+public enum ReasonKind
+{
+    Tags,
+    Mapper,
+    Rhythm,
+    Explore
 }
 
 public sealed class RecommendationTag : INotifyPropertyChanged

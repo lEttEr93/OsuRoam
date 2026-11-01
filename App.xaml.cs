@@ -13,7 +13,11 @@ public partial class App : Application
 
     protected override void OnStartup(StartupEventArgs e)
     {
-        AppLog.Info($"启动 {typeof(App).Assembly.GetName().Version}｜参数：{string.Join(' ', e.Args)}");
+        // 先把默认语言（中文版跟随系统 / 英文版固定英文）装进 Application.Resources，
+        // XAML 里的 {DynamicResource L.xxx} 才有东西可解析；配置里的语言在 MainWindow 读到后再覆盖。
+        Loc.Apply(Flavor.IsEnglish ? UiLanguage.English : UiLanguage.System);
+
+        AppLog.Info($"启动 {typeof(App).Assembly.GetName().Version}｜参数：{string.Join(' ', e.Args)}｜语言：{Loc.Code}｜版本：{Flavor.Describe()}");
 
         // 配置和缓存是单写入设计（File.Create 独占），两个实例会互相报
         // "Access to the path ... settings.json is denied"，这里直接拦住第二个。
@@ -32,7 +36,7 @@ public partial class App : Application
         if (!createdNew)
         {
             AppLog.Info("另一个实例在运行，本次启动退出");
-            MessageBox.Show("已经有一个 osu! Roam 在运行了，先关掉它再启动。", "osu! Roam",
+            MessageBox.Show(Loc.T("dialog.alreadyrunning"), "osu! Roam",
                 MessageBoxButton.OK, MessageBoxImage.Information);
             Shutdown();
             return;

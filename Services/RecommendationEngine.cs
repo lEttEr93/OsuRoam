@@ -95,22 +95,26 @@ public sealed class RecommendationEngine
                 if (pattern is not null)
                     patternFit = PatternPreference.Fit(pattern, patternPreference!);
                 double score = familiarityWeight * (starFit * 0.62 + bpmFit * 0.15 + lengthFit * 0.10 + mapperFit * 0.13) + settings.Exploration * 0.55 * discovery + tagFit * 0.12 + simpleFilterBonus + patternFit * patternWeight;
-                string reason = tagFit > 0
-                    ? $"标签偏好 {tagFit:P0} · 星级匹配 {starFit:P0}"
+                // 理由只记「哪种匹配 + 两个数值」，具体文字按当前语言现拼，
+                // 这样切语言时卡片上的理由会跟着变。
+                ReasonKind reasonKind = tagFit > 0
+                    ? ReasonKind.Tags
                     : mapperFit > 0.3
-                        ? $"谱师匹配 · 星级匹配 {starFit:P0}"
+                        ? ReasonKind.Mapper
                         : bpmFit > 0.78
-                            ? $"节奏匹配 · 星级匹配 {starFit:P0}"
-                            : $"探索新曲 · 星级匹配 {starFit:P0}";
-                if (pattern is not null && pattern.Source == PatternSource.Osu)
-                    reason = $"{reason} · {pattern.Category}";
+                            ? ReasonKind.Rhythm
+                            : ReasonKind.Explore;
+                string reasonCategory = pattern is not null && pattern.Source == PatternSource.Osu
+                    ? pattern.Category
+                    : string.Empty;
 
                 RecommendationItem item = new()
                 {
                     BeatmapId = beatmap.Id, BeatmapsetId = set.Id, Artist = set.Artist, Title = set.Title,
                     DifficultyName = beatmap.Version, Mapper = set.Creator, Stars = beatmap.DifficultyRating,
                     Bpm = beatmap.Bpm, LengthSeconds = beatmap.TotalLength, RankedYear = year, Score = score,
-                    Reason = reason, Tags = setTags, TagItems = setTags.Select(tag => new RecommendationTag(tag, settings.IncludedTags.Contains(tag, StringComparer.OrdinalIgnoreCase))).ToList(), KeyCount = settings.Mode == "mania" ? (int)Math.Round(beatmap.CircleSize) : 0,
+                    ReasonKind = reasonKind, ReasonTagFit = tagFit, ReasonStarFit = starFit, ReasonCategory = reasonCategory,
+                    Tags = setTags, TagItems = setTags.Select(tag => new RecommendationTag(tag, settings.IncludedTags.Contains(tag, StringComparer.OrdinalIgnoreCase))).ToList(), KeyCount = settings.Mode == "mania" ? (int)Math.Round(beatmap.CircleSize) : 0,
                     IsRecycled = isRecycled
                 };
                 if (bestDifficulty is null || item.Score > bestDifficulty.Score) bestDifficulty = item;

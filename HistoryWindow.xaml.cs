@@ -65,6 +65,15 @@ public partial class HistoryWindow : Window
         }
     }
 
+    /// <summary>界面语言换了：标题由 DynamicResource 自动刷，条目里的详情行是现拼的，得通知一遍。</summary>
+    public void ApplyLanguage()
+    {
+        if (HistoryList.ItemsSource is not IEnumerable<RecommendationArchiveEntry> entries)
+            return;
+        foreach (RecommendationArchiveEntry entry in entries)
+            entry.NotifyLanguage();
+    }
+
     /// <summary>
     /// 在 Show() 之前调用：把面板内容设成入场起点。
     ///

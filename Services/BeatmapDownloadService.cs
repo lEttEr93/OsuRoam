@@ -24,6 +24,9 @@ public sealed class BeatmapDownloadService : IDisposable
     public BeatmapDownloadService(string cacheDirectory)
     {
         this.cacheDirectory = cacheDirectory;
+        // catboy.best 这类国际镜像对空 User-Agent 直接回 403，必须带上身份再请求。
+        string version = typeof(BeatmapDownloadService).Assembly.GetName().Version?.ToString(3) ?? "0.0.0";
+        http.DefaultRequestHeaders.UserAgent.ParseAdd($"osu-roam/{version}");
     }
 
     public async Task DownloadAndImportAsync(RecommendationItem item, AppSettings settings, CancellationToken cancellationToken)
@@ -71,7 +74,7 @@ public sealed class BeatmapDownloadService : IDisposable
         {
             string path = Path.Combine(cacheDirectory, $"{item.BeatmapsetId}.osz");
             if (!File.Exists(path) || new FileInfo(path).Length < 1024)
-                throw new FileNotFoundException("预下载的谱面文件不存在。", path);
+                throw new FileNotFoundException(Loc.T("download.missing"), path);
             await validateOszAsync(path, cancellationToken);
             import(item, path, settings.OsuExecutablePath, settings.OsuClient);
             // osu! receives the path asynchronously. Keep the file in place after
@@ -104,7 +107,7 @@ public sealed class BeatmapDownloadService : IDisposable
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();
         if (urls.Length == 0)
-            throw new InvalidOperationException("下载地址模板必须包含 {setId}。");
+            throw new InvalidOperationException(Loc.T("download.badtemplate"));
 
         Exception? lastException = null;
         foreach (string url in urls)
@@ -133,7 +136,7 @@ public sealed class BeatmapDownloadService : IDisposable
             }
         }
 
-        throw new HttpRequestException($"所有下载源均失败。最后错误：{lastException?.Message}", lastException);
+        throw new HttpRequestException(Loc.F("download.allfailed", lastException?.Message), lastException);
     }
 
     private async Task downloadAsync(RecommendationItem item, string url, string finalPath, CancellationToken cancellationToken)
@@ -162,7 +165,7 @@ public sealed class BeatmapDownloadService : IDisposable
             }
 
             if (received < 4)
-                throw new InvalidDataException("下载内容为空。");
+                throw new InvalidDataException(Loc.T("download.empty"));
             await validateOszAsync(partialPath, cancellationToken);
             File.Move(partialPath, finalPath, true);
             AppLog.Info($"下载完成：{url} -> {finalPath} ({received} bytes)");
@@ -182,7 +185,7 @@ public sealed class BeatmapDownloadService : IDisposable
         await using FileStream stream = new(path, FileMode.Open, FileAccess.Read, FileShare.Read, 4096, true);
         int read = await stream.ReadAsync(signature, cancellationToken);
         if (read != 4 || signature[0] != (byte)'P' || signature[1] != (byte)'K')
-            throw new InvalidDataException("镜像返回的不是有效 OSZ 文件。");
+            throw new InvalidDataException(Loc.T("download.badosz"));
     }
 
     private static void import(RecommendationItem item, string path, string configuredExecutable, string osuClient)
@@ -206,7 +209,7 @@ public sealed class BeatmapDownloadService : IDisposable
         }
         Process? started = Process.Start(startInfo);
         if (started is null)
-            throw new InvalidOperationException("无法启动 osu!lazer 导入谱面。");
+            throw new InvalidOperationException(Loc.T("download.nostart"));
         AppLog.Info(executable is null
             ? $"导入：没有找到 osu 可执行文件，交给系统关联打开 {Path.GetFileName(path)}"
             : $"导入：启动 {executable}，参数 {path}，PID={started.Id}");

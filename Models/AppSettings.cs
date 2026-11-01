@@ -1,3 +1,5 @@
+using OsuRoam.Services;
+
 namespace OsuRoam.Models;
 
 public sealed class AppSettings
@@ -6,7 +8,7 @@ public sealed class AppSettings
     public const double MinimumSelectableStars = 0.0;
     public const double MaximumFiniteSelectableStars = 11.0;
     public const double UnlimitedMaximumStars = 999.0;
-    public const string DefaultDownloadMirrors = "https://dl.sayobot.cn/beatmaps/download/full/{setId}\nhttps://txy1.sayobot.cn/beatmaps/download/full/{setId}";
+    public const string DefaultDownloadMirrors = Flavor.DefaultDownloadMirrors;
     public static readonly IReadOnlyList<string> StatusFilterValues = [
         "ranked", "approved", "qualified", "loved", "pending", "wip", "graveyard"
     ];
@@ -72,6 +74,8 @@ public sealed class AppSettings
     public bool IncludeLoved { get; set; } = true;
     /// <summary>界面用内置的 Outfit 字体（见 Fonts\ATTRIBUTION.md）。关掉则回退系统字体。</summary>
     public bool UseEmbeddedFont { get; set; } = true;
+    /// <summary>界面语言：auto（跟随系统）/ zh / en，见 Services\Loc.cs。</summary>
+    public string Language { get; set; } = Flavor.DefaultLanguage;
     /// <summary>导入谱面后自动弹出谱面信息窗。</summary>
     public bool ShowMapInfo { get; set; } = true;
     public bool ExcludeRecentlyPlayed { get; set; } = true;
@@ -82,7 +86,7 @@ public sealed class AppSettings
     public int ResultDelaySeconds { get; set; } = 5;
     public bool AutoDownload { get; set; } = true;
     public bool AutoImport { get; set; } = true;
-    public string DownloadUrlTemplate { get; set; } = "https://dl.sayobot.cn/beatmaps/download/full/{setId}";
+    public string DownloadUrlTemplate { get; set; } = Flavor.DefaultDownloadTemplate;
     public string DownloadMirrorTemplates { get; set; } = DefaultDownloadMirrors;
     public string OsuExecutablePath { get; set; } = string.Empty;
     /// <summary>谱面缓存上限（MB），只裁剪 Beatmaps 里的 .osz，其他数据不动。</summary>

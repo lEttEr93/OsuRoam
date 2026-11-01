@@ -69,9 +69,17 @@ public partial class MainWindow : Window
     private const double starSliderHandleWidth = 30.0;
     private StarRangeHandle activeStarRangeHandle;
 
+    // 状态栏文字：存"键 + 参数"而不是成品字符串，换语言时能原地重画（见 setStatus/renderStatus）。
+    private string? statusKey;
+    private object?[]? statusArgs;
+    private string? statusRaw;
+    private TosuSnapshot? lastSnapshot;
+
     public MainWindow()
     {
         InitializeComponent();
+        MiniTitleText.Text = Loc.T("mini.nobeatmap");
+        Loc.Changed += applyLanguage;
         applyDiagnosticWindowMode();
         topmostKeeper = new TopmostKeeper(this);
         downloader = new BeatmapDownloadService(settingsStore.CacheDirectory);
@@ -114,9 +122,9 @@ public partial class MainWindow : Window
         settings = await settingsStore.LoadAsync();
         if (settingsStore.LoadFailure is not null)
         {
-            string message = $"配置读取失败，当前显示的是默认值。\n\n{settingsStore.LoadFailure}\n\n配置文件位置：{settingsStore.SettingsPathForDisplay}";
+            string message = Loc.F("dialog.loadfail", settingsStore.LoadFailure, settingsStore.SettingsPathForDisplay);
             AppLog.Error(message);
-            StatusText.Text = "配置读取失败，请查看弹窗信息";
+            setStatus("status.readfail");
             MessageBox.Show(message, "osu! Roam", MessageBoxButton.OK, MessageBoxImage.Warning);
         }
         await patternLibrary.LoadAsync();
@@ -150,7 +158,21 @@ public partial class MainWindow : Window
         return null;
     }
 
-    /// <summary>--snapshot 时套几张假卡片，让截图里有真实内容可看。</summary>
+    /// <summary>--scroll=0.9 的解析，没传就是 0（不滚动）。</summary>
+    private static double scrollFractionFromArgs()
+    {
+        foreach (string argument in Environment.GetCommandLineArgs())
+        {
+            if (argument.StartsWith("--scroll=", StringComparison.OrdinalIgnoreCase) &&
+                double.TryParse(argument["--scroll=".Length..], NumberStyles.Float, CultureInfo.InvariantCulture, out double value))
+            {
+                return Math.Clamp(value, 0, 1);
+            }
+        }
+        return 0;
+    }
+
+    /// <summary>开发用：--snapshot 时套几张假卡片，让截图里有真实内容可看。</summary>
     private async Task runSnapshotAsync(string path)
     {
         if (Environment.GetCommandLineArgs().Any(arg => arg == "--font=system"))
@@ -173,10 +195,24 @@ public partial class MainWindow : Window
         seedDiagnosticCards();
         await Task.Delay(1800);
 
-        // 开发用：--scroll-bottom 先把主内容滚到底，方便截设置区
-        if (Environment.GetCommandLineArgs().Any(arg => arg == "--scroll-bottom"))
+        // 开发用：--expand 展开所有设置分组，方便一次截完整个设置区
+        if (Environment.GetCommandLineArgs().Any(arg => arg == "--expand"))
         {
-            MainContent.ScrollToVerticalOffset(MainContent.ScrollableHeight * 0.755);
+            RangeExpander.IsExpanded = true;
+            AccountExpander.IsExpanded = true;
+            InterfaceExpander.IsExpanded = true;
+            AdvancedExpander.IsExpanded = true;
+            await Task.Delay(500);
+        }
+
+        // 开发用：--scroll-bottom 先把主内容滚到底，方便截设置区；
+        // --scroll=0.9 可以指定更精确的位置（0–1）。
+        double scrollFraction = Environment.GetCommandLineArgs().Any(arg => arg == "--scroll-bottom")
+            ? 0.755
+            : scrollFractionFromArgs();
+        if (scrollFraction > 0)
+        {
+            MainContent.ScrollToVerticalOffset(MainContent.ScrollableHeight * scrollFraction);
             await Task.Delay(400);
         }
 
@@ -276,7 +312,8 @@ public partial class MainWindow : Window
             LengthSeconds = 252,
             RankedYear = 2019,
             Score = 0.87,
-            Reason = "星级贴合 6.4 · Jumpstream Tech · 谱师命中 2 次",
+            ReasonStarFit = 0.78,
+            ReasonCategory = "Jumpstream Tech",
             KeyCount = 4
         };
 
@@ -394,7 +431,8 @@ public partial class MainWindow : Window
                 LengthSeconds = 132,
                 RankedYear = 2019 + index,
                 Score = 0,
-                Reason = "Jumpstream Tech · 星级贴合 4.2"
+                ReasonStarFit = 0.86,
+                ReasonCategory = "Jumpstream Tech"
             });
         }
     }
@@ -440,7 +478,7 @@ public partial class MainWindow : Window
             settingsStore.SetSecret(settings, ClientSecretBox.Password);
             await settingsStore.SaveAsync(settings);
 
-            StatusText.Text = "正在读取玩家画像...";
+            setStatus("status.profile");
             api.Configure(settings.ClientId, ClientSecretBox.Password);
             int? maniaKeys = settings.Mode == "mania" ? settings.ManiaKeys : null;
             profile = await api.BuildProfileAsync(settings.Username, settings.Mode, maniaKeys, sessionCancellation.Token);
@@ -456,10 +494,10 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
             await settingsStore.SaveAsync(settings);
 
             string sampleLabel = profile.DifficultySampleCount == 0
-                ? " · 无同分类成绩，沿用设置"
-                : $" · {profile.DifficultySampleCount} 个成绩样本";
+                ? " · " + Loc.T("profile.nosamples")
+                : " · " + Loc.F("profile.samples", profile.DifficultySampleCount);
             ProfileText.Text = $"{profile.User.Username} · {difficultyProfileLabel()} · {formatStarRange(settings.MinimumStars, settings.MaximumStars)}{sampleLabel}";
-            StatusText.Text = "正在搜索候选谱面...";
+            setStatus("status.search");
             candidates = [];
             recommendations.Clear();
             playingItem = null;
@@ -494,15 +532,15 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
 
                         isRunning = true;
                         roamStarted = true;
-                        StartButton.Content = "停止";
+                        StartButton.Content = Loc.T("btn.stop");
                         if (settings.AutoDownload && recommendations.FirstOrDefault() is { } first)
-                            firstPreparation = downloadItemAsync(first, importAfterDownload: settings.AutoImport, "正在准备第一首");
+                            firstPreparation = downloadItemAsync(first, importAfterDownload: settings.AutoImport, "status.preparing");
                         else
-                            StatusText.Text = $"已载入首批推荐，共 {recommendations.Count} 首，继续补充中";
+                            setStatus("status.loaded", recommendations.Count);
                     }
                     else if (roamStarted)
                     {
-                        StatusText.Text = $"推荐池已更新，共 {recommendations.Count} 首";
+                        setStatus("status.updated", recommendations.Count);
                     }
                 },
                 sessionCancellation.Token);
@@ -514,23 +552,23 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
                 await firstPreparation;
             if (!roamStarted)
             {
-                StatusText.Text = "当前范围内没有候选谱面";
+                setStatus("status.empty");
                 if (startTosu)
                     isRunning = false;
             }
             else if (recommendations.Count > 0 && firstPreparation is null)
             {
-                StatusText.Text = $"推荐池已生成，共 {recommendations.Count} 首";
+                setStatus("status.built", recommendations.Count);
             }
         }
         catch (OperationCanceledException)
         {
-            StatusText.Text = "操作已取消";
+            setStatus("status.cancelled");
         }
         catch (Exception exception)
         {
             AppLog.Error("生成推荐池失败", exception);
-            StatusText.Text = conciseMessage(exception);
+            setStatusText(conciseMessage(exception));
         }
         finally
         {
@@ -597,7 +635,7 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
         }
         updatePoolVisibility();
         if (missing > 0 && recommendations.Count > 0 && recommendations.All(item => item.IsRecycled))
-            StatusText.Text = "当前区间候选已基本推荐完，本轮为历史回收（可放宽星级/年份，或降低探索度后重试）";
+            setStatus("status.recycled");
         if (historyChanged)
         {
             try
@@ -651,16 +689,16 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
                 RecommendationItem item = pending[index];
                 if (!recommendations.Contains(item))
                     continue;
-                StatusText.Text = $"正在预下载推荐池 {index + 1}/{pending.Length}：{item.DisplayTitle}";
+                setStatus("status.predownload", index + 1, pending.Length, item.DisplayTitle);
                 await downloadItemAsync(item, importAfterDownload: false, "预下载");
             }
-            StatusText.Text = $"推荐池已全部下载（{pending.Length} 首）";
+            setStatus("status.predownloaded", pending.Length);
         }
         catch (OperationCanceledException) { }
         catch (Exception exception)
         {
             AppLog.Error("预下载推荐池失败", exception);
-            StatusText.Text = $"预下载失败：{conciseMessage(exception)}";
+            setStatus("status.predownloadfail", conciseMessage(exception));
         }
         finally
         {
@@ -723,7 +761,7 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
     }
 
     /// <summary>下载（需要时）并按需导入，返回是否已经真正触发 osu! 导入。</summary>
-    private async Task<bool> downloadItemAsync(RecommendationItem item, bool importAfterDownload, string status)
+    private async Task<bool> downloadItemAsync(RecommendationItem item, bool importAfterDownload, string statusKey)
     {
         if (item.DownloadState == DownloadState.Importing)
             return false;
@@ -738,7 +776,7 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
         }
         try
         {
-            StatusText.Text = $"{status}: {item.DisplayTitle}";
+            setStatus("status.withtitle", Loc.T(statusKey), item.DisplayTitle);
             if (item.DownloadState is not DownloadState.Downloading)
             {
                 item.DownloadState = DownloadState.Queued;
@@ -782,12 +820,12 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
                 recordSessionImport(item);
                 setCurrentRoamItem(item);
                 recordArchive(item);
-                StatusText.Text = $"已交给 {osuClientDisplayName()} 导入";
+                setStatus("status.handedover", osuClientDisplayName());
                 showMapInfoFor(item);
             }
             else
             {
-                StatusText.Text = $"下一首已下载：{item.DisplayTitle}";
+                setStatus("status.nextdownloaded", item.DisplayTitle);
             }
 
             return item.DownloadState == DownloadState.Imported;
@@ -800,7 +838,7 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
         catch (Exception exception)
         {
             AppLog.Error($"下载或导入失败：{item.DisplayTitle}", exception);
-            StatusText.Text = $"下载失败：{conciseMessage(exception)}";
+            setStatus("status.downloadfail", conciseMessage(exception));
             return false;
         }
     }
@@ -808,7 +846,7 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
     private async void DownloadButton_Click(object sender, RoutedEventArgs e)
     {
         if (sender is Button { Tag: RecommendationItem item })
-            await downloadItemAsync(item, settings.AutoImport, "正在手动准备");
+            await downloadItemAsync(item, settings.AutoImport, "status.preparingmanual");
     }
 
     private async void SkipButton_Click(object sender, RoutedEventArgs e)
@@ -819,7 +857,7 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
             preparedNextItem = null;
         recommendations.Remove(item);
         await refillPoolAsync();
-        StatusText.Text = "已跳过并补充推荐池";
+        setStatus("status.skipped");
     }
 
     private async void MiniNextButton_Click(object sender, RoutedEventArgs e)
@@ -848,13 +886,13 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
             }
             if (next is null)
             {
-                StatusText.Text = "推荐池暂无下一首";
+                setStatus("status.nonext");
                 return;
             }
 
-            MiniTrackDetailText.Text = "正在下载并导入...";
+            MiniTrackDetailText.Text = Loc.T("status.minibuilding");
             // downloadItemAsync 内部已经把失败原因写进状态栏，这里只需要判断是否真的导入成功。
-            if (!await downloadItemAsync(next, importAfterDownload: true, "正在安装下一首"))
+            if (!await downloadItemAsync(next, importAfterDownload: true, "status.installing"))
                 return;
 
             if (previous is not null && !ReferenceEquals(previous, next))
@@ -862,22 +900,22 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
             if (ReferenceEquals(preparedNextItem, next))
                 preparedNextItem = null;
             await refillPoolAsync();
-            StatusText.Text = $"已导入下一首：{next.DisplayTitle}";
+            setStatus("status.nextimported", next.DisplayTitle);
         }
         catch (OperationCanceledException)
         {
-            StatusText.Text = "下一首操作已取消";
+            setStatus("status.nextcancelled");
         }
         catch (Exception exception)
         {
             AppLog.Error("迷你播放器安装下一首失败", exception);
-            StatusText.Text = $"下一首失败：{conciseMessage(exception)}";
+            setStatus("status.nextfail", conciseMessage(exception));
         }
         finally
         {
             miniNextBusy = false;
             MiniNextButton.IsEnabled = true;
-            MiniNextButton.Content = "下一首";
+            MiniNextButton.Content = Loc.T("btn.next");
             refreshMiniPlayer();
         }
     }
@@ -1109,8 +1147,9 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
         miniIdentity = next;
 
         MiniPlayerHeader.DataContext = currentRoamItem;
+        MiniTitleText.Text = currentRoamItem?.DisplayTitle ?? Loc.T("mini.nobeatmap");
         MiniTrackDetailText.Text = currentRoamItem is null
-            ? "等待漫游"
+            ? Loc.T("mini.waiting")
             : $"{currentRoamItem.DifficultyName} · {currentRoamItem.DifficultySummary}";
 
         animateMiniPlayerEntrance(kind);
@@ -1202,7 +1241,7 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
             return;
 
         AppLog.Info($"成功结算：{played.DisplayTitle}，rank={snapshot.ResultRank}, score={snapshot.ResultScore}");
-        StatusText.Text = $"成功结算：{played.DisplayTitle}";
+        setStatus("status.result", played.DisplayTitle);
         try
         {
             // 结算完成时间比「开始游玩」更有意义，历史里按这个时间排。
@@ -1214,14 +1253,15 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
             if (next is not null && settings.AutoImport)
             {
                 // 缺文件就先补下载再导入；失败时不要写成「已导入」，那条消息会误导排查。
-                bool imported = await downloadItemAsync(next, importAfterDownload: true, "结算后安装下一首");
-                StatusText.Text = imported
-                    ? $"下一首已导入：{next.DisplayTitle}"
-                    : $"下一首未能导入，可手动点 ↓ 重试：{next.DisplayTitle}";
+                bool imported = await downloadItemAsync(next, importAfterDownload: true, "status.installingafter");
+                if (imported)
+                    setStatus("status.nextimported", next.DisplayTitle);
+                else
+                    setStatus("status.nextnotimported", next.DisplayTitle);
             }
             else if (next is null)
             {
-                StatusText.Text = "成功结算，推荐池暂无下一首";
+                setStatus("status.resultnone");
             }
 
             await refillPoolAsync();
@@ -1232,7 +1272,7 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
         catch (Exception exception)
         {
             AppLog.Error("成功结算后的自动导入失败", exception);
-            StatusText.Text = $"自动导入失败：{conciseMessage(exception)}";
+            setStatus("status.autofail", conciseMessage(exception));
         }
     }
 
@@ -1249,15 +1289,96 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
     {
         if (!string.IsNullOrWhiteSpace(snapshot.ProfileName) && profile is null)
             ProfileText.Text = snapshot.ProfileName;
-        ConnectionText.Text = snapshot.StateName switch
+        lastSnapshot = snapshot;
+        ConnectionText.Text = connectionTextFor(snapshot);
+    }
+
+    private static string connectionTextFor(TosuSnapshot snapshot) => Loc.T(snapshot.StateName switch
+    {
+        "play" when snapshot.IsPaused => "tosu.paused",
+        "play" when snapshot.Failed => "tosu.failed",
+        "play" => "tosu.playing",
+        "resultScreen" => "tosu.result",
+        "selectPlay" => "tosu.select",
+        _ => "tosu.connected"
+    });
+
+    // ================= 状态栏 / 语言 =================
+
+    /// <summary>按 key 写状态栏，同时把 key 记下来，换语言时能原地重画。</summary>
+    private void setStatus(string key, params object?[] args)
+    {
+        statusKey = key;
+        statusArgs = args;
+        statusRaw = null;
+        StatusText.Text = Loc.F(key, args);
+    }
+
+    /// <summary>已经是成品文字（异常信息之类）的状态，只能原样记住。</summary>
+    private void setStatusText(string text)
+    {
+        statusKey = null;
+        statusArgs = null;
+        statusRaw = text;
+        StatusText.Text = text;
+    }
+
+    private void renderStatus()
+    {
+        if (statusKey is not null)
+            StatusText.Text = Loc.F(statusKey, statusArgs ?? []);
+        else if (statusRaw is not null)
+            StatusText.Text = statusRaw;
+        else
+            StatusText.Text = Loc.T("status.ready");
+    }
+
+    /// <summary>
+    /// 语言换了。XAML 里的 {DynamicResource L.*} 由 WPF 自己刷新，
+    /// 这里只补上代码里拼的那些：状态栏、迷你播放器、连接状态、卡片详情。
+    /// </summary>
+    private void applyLanguage()
+    {
+        MiniTitleText.Text = currentRoamItem?.DisplayTitle ?? Loc.T("mini.nobeatmap");
+        if (profile is null)
+            ProfileText.Text = Loc.T("profile.waiting");
+        StartButton.Content = Loc.T(isRunning ? "btn.stop" : "btn.start");
+        MiniNextButton.Content = miniNextBusy ? "..." : Loc.T("btn.next");
+        if (miniNextBusy)
+            MiniTrackDetailText.Text = Loc.T("status.minibuilding");
+        else
+            MiniTrackDetailText.Text = currentRoamItem is null
+                ? Loc.T("mini.waiting")
+                : $"{currentRoamItem.DifficultyName} · {currentRoamItem.DifficultySummary}";
+        ConnectionText.Text = lastSnapshot is null ? Loc.T("conn.idle") : connectionTextFor(lastSnapshot);
+        renderStatus();
+        foreach (RecommendationItem item in recommendations)
+            item.NotifyLanguage();
+        foreach (SimpleFilterOption option in statusFilterOptions) option.NotifyLanguage();
+        foreach (SimpleFilterOption option in genreFilterOptions) option.NotifyLanguage();
+        foreach (SimpleFilterOption option in languageFilterOptions) option.NotifyLanguage();
+        historyWindow?.ApplyLanguage();
+    }
+
+    private async void LanguageBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (!settingsControlsReady)
+            return;
+
+        string tag = (LanguageBox.SelectedItem as ComboBoxItem)?.Tag?.ToString() ?? Loc.AutoTag;
+        if (tag == Loc.ToTag(Loc.Setting))
+            return;
+
+        settings.Language = tag;
+        Loc.Apply(tag);
+        try
         {
-            "play" when snapshot.IsPaused => "tosu · 已暂停",
-            "play" when snapshot.Failed => "tosu · 本局失败",
-            "play" => "tosu · 游玩中 · 正在预下载",
-            "resultScreen" => "tosu · 结算",
-            "selectPlay" => "tosu · 选歌",
-            _ => "tosu 已连接"
-        };
+            await settingsStore.SaveAsync(settings);
+        }
+        catch (Exception exception)
+        {
+            AppLog.Error("保存语言设置失败", exception);
+        }
     }
 
     private async Task stopAsync()
@@ -1265,8 +1386,8 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
         sessionCancellation.Cancel();
         await tosu.StopAsync();
         isRunning = false;
-        StartButton.Content = "开始漫游";
-        StatusText.Text = "已停止";
+        StartButton.Content = Loc.T("btn.start");
+        setStatus("status.stopped");
     }
 
     private async Task<bool> ensureTosuReadyAsync(CancellationToken cancellationToken)
@@ -1285,8 +1406,8 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
         catch (Exception exception)
         {
             AppLog.Error("自动启动 tosu 失败", exception);
-            ConnectionText.Text = "tosu 启动失败";
-            StatusText.Text = $"tosu 启动失败：{conciseMessage(exception)}";
+            ConnectionText.Text = Loc.T("tosu.startfail");
+            setStatus("status.tosufail", conciseMessage(exception));
             return false;
         }
     }
@@ -1316,6 +1437,7 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
         value.AutoImport = AutoImportCheck.IsChecked == true;
         value.UseEmbeddedFont = EmbeddedFontCheck.IsChecked == true;
         value.ShowMapInfo = MapInfoCheck.IsChecked == true;
+        value.Language = (LanguageBox.SelectedItem as ComboBoxItem)?.Tag?.ToString() ?? Loc.AutoTag;
         value.OsuClient = (OsuClientBox.SelectedItem as ComboBoxItem)?.Tag?.ToString() ?? "lazer";
         value.OsuExecutablePath = BeatmapDownloadService.NormalizeExecutablePath(OsuPathBox.Text);
         value.DownloadMirrorTemplates = DownloadTemplateBox.Text.Trim();
@@ -1366,6 +1488,10 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
         foreach (ComboBoxItem item in PoolSizeBox.Items)
             if (Equals(item.Content?.ToString(), settings.PoolSize.ToString())) PoolSizeBox.SelectedItem = item;
         CacheLimitBox.Text = settings.CacheLimitMegabytes.ToString();
+        foreach (ComboBoxItem item in LanguageBox.Items)
+            if (Equals(item.Tag?.ToString(), Loc.ToTag(Loc.Parse(settings.Language)))) LanguageBox.SelectedItem = item;
+        // 配置里的语言在这里才生效（App 启动时用的是「跟随系统」）。
+        Loc.Apply(settings.Language);
         applySimpleFilterControls();
         updateDifficultyControls();
         updateExplorationText();
@@ -1449,7 +1575,7 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
             settings = readSettingsFromControls();
             settingsStore.SetSecret(settings, ClientSecretBox.Password);
             SuggestDifficultyButton.IsEnabled = false;
-            StatusText.Text = "正在计算推荐星级...";
+            setStatus("status.suggesting");
             api.Configure(settings.ClientId, ClientSecretBox.Password);
             int? maniaKeys = settings.Mode == "mania" ? settings.ManiaKeys : null;
             profile = await api.BuildProfileAsync(settings.Username, settings.Mode, maniaKeys, sessionCancellation.Token);
@@ -1461,11 +1587,11 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
                 settings.MinimumStars = range.MinimumStars; settings.MaximumStars = range.MaximumStars;
                 applyDifficultyRangeToControls(range);
                 await settingsStore.SaveAsync(settings);
-                StatusText.Text = "已按玩家水平更新星级范围";
+                setStatus("status.suggested");
             }
-            else StatusText.Text = "没有足够成绩样本，保留当前星级范围";
+            else setStatus("status.suggestnone");
         }
-        catch (Exception ex) { StatusText.Text = conciseMessage(ex); }
+        catch (Exception ex) { setStatusText(conciseMessage(ex)); }
         finally { SuggestDifficultyButton.IsEnabled = true; }
     }
 

@@ -211,7 +211,7 @@ public sealed class RadarChart : FrameworkElement
         bool hasValues = Values is not null && targetValues.Length == count && count >= 3;
         if (count < 3 || (Values is not null && !hasValues))
         {
-            drawCentered(context, "暂无键型数据", width, height);
+            drawCentered(context, Loc.T("radar.empty"), width, height);
             return;
         }
 
@@ -232,7 +232,7 @@ public sealed class RadarChart : FrameworkElement
         double radius = Math.Min(width, height) / 2 - labelRoom;
         if (radius <= 2)
         {
-            drawCentered(context, "空间不足", width, height);
+            drawCentered(context, Loc.T("radar.tight"), width, height);
             return;
         }
 
