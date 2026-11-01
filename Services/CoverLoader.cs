@@ -19,10 +19,10 @@ namespace OsuRoam.Services;
 /// 一张曲绘的几种用途：
 /// <paramref name="Cover"/> 是 256px 的清晰版（缩略图 / 需要细节时用），
 /// <paramref name="Backdrop"/> 是 96px 且下边缘已经渐隐的版本（卡片背景），
-/// <paramref name="BackdropRaw"/> 是同一张 96px 但不做渐隐，
-/// <paramref name="Bar"/> 是左右两边羽化过的版本（迷你播放器里居中铺一条，边界要融进模糊底）。
+/// <paramref name="Fill"/> 是重糊的 96px 版（铺满整卡/整块，只用来给下半部分带颜色），
+/// <paramref name="Bar"/> 是整幅再横向羽化的版本（迷你播放器里居中铺一条，边界融进模糊底）。
 /// </summary>
-public sealed record CoverArt(ImageSource? Cover, ImageSource? Backdrop, ImageSource? BackdropRaw, ImageSource? Bar);
+public sealed record CoverArt(ImageSource? Cover, ImageSource? Backdrop, ImageSource? Fill, ImageSource? Bar);
 
 public static class CoverLoader
 {
@@ -30,16 +30,19 @@ public static class CoverLoader
     private const int ThumbnailWidth = 256;
 
     /// <summary>
-    /// 背影宽度。之前用 96px 靠放大出模糊，放太多倍会变成马赛克；
-    /// 现在改成 256px + 烘焙好的模糊，卡片宽度下只放大 ~1.4 倍，观感是"糊"而不是"块"。
+    /// 整幅曲绘底图宽度。96px 靠放大出模糊会变马赛克，256px + 真高斯后放到卡片宽度只放大
+    /// ~1.4 倍，观感是"糊"而不是"块"。
     /// </summary>
     private const int BackdropWidth = 256;
 
-    /// <summary>
-    /// 烘焙模糊的 σ（源图像素，底图 256px 宽）。
-    /// 1.5 对应卡片上的"只糊一点点"：比双线性放大的马赛克柔，又不会把画面糊成色块。
-    /// </summary>
-    private const double BlurSigma = 1.5;
+    /// <summary>整幅曲绘的模糊 σ（256px 底图）。3 ≈ 卡片上的"柔但还认得出画面"。</summary>
+    private const double BandSigma = 3.0;
+
+    /// <summary>铺满卡片的填充层：只留 96px 再重糊，避免下半部分出现细节、抢文字。</summary>
+    private const int FillWidth = 96;
+
+    /// <summary>填充层的模糊 σ（96px 底图，放大到卡片约 3.8 倍，等效很重的糊）。</summary>
+    private const double FillSigma = 4.0;
 
     /// <summary>背影从这一比例开始往下渐隐（0.3 = 上方 30% 完全保留）。</summary>
     private const double FadeStart = 0.30;
@@ -117,13 +120,13 @@ public static class CoverLoader
                 image.EndInit();
             }
             image.Freeze();
-            BitmapSource? scaled = scaleDown(image);
-            BitmapSource? blurred = blurBitmap(scaled, BlurSigma);
+            BitmapSource? band = blurBitmap(scaleDown(image, BackdropWidth), BandSigma);
+            BitmapSource? fill = blurBitmap(scaleDown(image, FillWidth), FillSigma);
             return new CoverArt(
                 image,
-                createBackdrop(blurred, fade: true),
-                blurred,
-                createBarBackdrop(blurred));
+                createBackdrop(band, fade: true),
+                fill,
+                createBarBackdrop(band));
         }
         catch (Exception exception)
         {
@@ -132,15 +135,15 @@ public static class CoverLoader
         }
     }
 
-    /// <summary>缩到 256px 宽；卡片背景和迷你播放器共用同一张底图。</summary>
-    private static BitmapSource? scaleDown(BitmapSource source)
+    /// <summary>把解码出来的 256px 图再缩到指定宽度（填充层只需要 96px）。</summary>
+    private static BitmapSource? scaleDown(BitmapSource source, int width)
     {
         try
         {
-            if (source.PixelWidth <= BackdropWidth)
+            if (source.PixelWidth <= width)
                 return source;
 
-            double scale = (double)BackdropWidth / source.PixelWidth;
+            double scale = (double)width / source.PixelWidth;
             TransformedBitmap scaled = new(source, new ScaleTransform(scale, scale));
             scaled.Freeze();
             return scaled;

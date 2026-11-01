@@ -54,17 +54,17 @@ public sealed class RecommendationItem : INotifyPropertyChanged
         }
     }
 
-    private System.Windows.Media.ImageSource? backdropRaw;
+    private System.Windows.Media.ImageSource? backdropFill;
     private System.Windows.Media.ImageSource? backdropBar;
 
-    /// <summary>和 <see cref="Backdrop"/> 同一张 96px 图，但没有下边缘渐隐（迷你播放器按高度铺满用）。</summary>
-    public System.Windows.Media.ImageSource? BackdropRaw
+    /// <summary>铺满卡片用的重糊底（96px），只负责给下半部分带颜色。</summary>
+    public System.Windows.Media.ImageSource? BackdropFill
     {
-        get => backdropRaw;
+        get => backdropFill;
         private set
         {
-            backdropRaw = value;
-            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(BackdropRaw)));
+            backdropFill = value;
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(BackdropFill)));
         }
     }
 
@@ -83,7 +83,7 @@ public sealed class RecommendationItem : INotifyPropertyChanged
     {
         Cover = art.Cover;
         Backdrop = art.Backdrop;
-        BackdropRaw = art.BackdropRaw;
+        BackdropFill = art.Fill;
         BackdropBar = art.Bar;
     });
     public string PreviewUrl => $"https://b.ppy.sh/preview/{BeatmapsetId}.mp3";

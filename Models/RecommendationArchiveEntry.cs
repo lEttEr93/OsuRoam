@@ -35,7 +35,7 @@ public sealed class RecommendationArchiveEntry : INotifyPropertyChanged
 
     private System.Windows.Media.ImageSource? cover;
     private System.Windows.Media.ImageSource? backdrop;
-    private System.Windows.Media.ImageSource? backdropRaw;
+    private System.Windows.Media.ImageSource? backdropFill;
     private System.Windows.Media.ImageSource? backdropBar;
 
     /// <summary>由 CoverLoader 用程序自己的 HttpClient 拉下来的封面。</summary>
@@ -62,15 +62,15 @@ public sealed class RecommendationArchiveEntry : INotifyPropertyChanged
         }
     }
 
-    /// <summary>和 <see cref="Backdrop"/> 同一张 96px 图，但没有下边缘渐隐。</summary>
+    /// <summary>铺满卡片用的重糊底（96px），只负责给下半部分带颜色。</summary>
     [JsonIgnore]
-    public System.Windows.Media.ImageSource? BackdropRaw
+    public System.Windows.Media.ImageSource? BackdropFill
     {
-        get => backdropRaw;
+        get => backdropFill;
         private set
         {
-            backdropRaw = value;
-            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(BackdropRaw)));
+            backdropFill = value;
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(BackdropFill)));
         }
     }
 
@@ -90,7 +90,7 @@ public sealed class RecommendationArchiveEntry : INotifyPropertyChanged
     {
         Cover = art.Cover;
         Backdrop = art.Backdrop;
-        BackdropRaw = art.BackdropRaw;
+        BackdropFill = art.Fill;
         BackdropBar = art.Bar;
     });
 

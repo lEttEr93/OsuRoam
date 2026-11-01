@@ -22,14 +22,14 @@
                 </Grid.ColumnDefinitions>
 
                 <!-- 迷你播放器曲绘背景：只在折叠态显示（和 MiniPlayerHeader 一起显隐）。
-                     这条只有 64px 高，整幅曲绘是"按高度对齐"填满，因此用不渐隐的 BackdropRaw；
+                     这条只有 64px 高，整幅曲绘是"按高度对齐"填满，因此用重糊的 BackdropFill；
                      左右空出来的部分交给铺满整条的模糊底。 -->
                 <Grid x:Name="MiniBackdrop" Grid.ColumnSpan="2" Visibility="Collapsed" IsHitTestVisible="False"
                       DataContext="{Binding ElementName=MiniPlayerHeader, Path=DataContext}">
                     <Border CornerRadius="7,7,0,0" Opacity="0.30"
                             RenderOptions.BitmapScalingMode="HighQuality">
                         <Border.Background>
-                            <ImageBrush ImageSource="{Binding BackdropRaw}" Stretch="UniformToFill" />
+                            <ImageBrush ImageSource="{Binding BackdropFill}" Stretch="UniformToFill" />
                         </Border.Background>
                     </Border>
                     <Border CornerRadius="7,7,0,0" Opacity="0.50"
@@ -109,11 +109,11 @@
                                         BorderThickness="1" CornerRadius="6" Margin="0,0,0,8" ClipToBounds="True"
                                         Loaded="RecommendationCard_Loaded">
                                     <Grid>
-                                        <!-- 2. 铺满整卡的模糊副本（用未渐隐的 BackdropRaw，否则底部会透出空档） -->
+                                        <!-- 2. 铺满整卡的模糊副本（用重糊的 BackdropFill，否则底部会透出空档） -->
                                         <Border CornerRadius="6" Opacity="0.18" IsHitTestVisible="False"
                                                 RenderOptions.BitmapScalingMode="HighQuality">
                                             <Border.Background>
-                                                <ImageBrush ImageSource="{Binding BackdropRaw}" Stretch="UniformToFill" />
+                                                <ImageBrush ImageSource="{Binding BackdropFill}" Stretch="UniformToFill" />
                                             </Border.Background>
                                         </Border>
 
