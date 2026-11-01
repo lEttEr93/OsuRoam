@@ -1,0 +1,101 @@
+<Window x:Class="OsuRoam.MapInfoWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:controls="clr-namespace:OsuRoam.Controls"
+        Title="谱面信息" Width="390" SizeToContent="Height"
+        WindowStyle="None" AllowsTransparency="True" Background="Transparent"
+        Topmost="True" ShowInTaskbar="False" ShowActivated="False" ResizeMode="NoResize"
+        FontFamily="{DynamicResource UiFont}">
+    <Window.Resources>
+        <!-- 键型占比条的填充色，取自 MMA 的 .cluster-fill 渐变 -->
+        <LinearGradientBrush x:Key="BarFillBrush" StartPoint="0,0" EndPoint="1,0">
+            <GradientStop Color="#4EC7FF" Offset="0" />
+            <GradientStop Color="#58F0D9" Offset="0.6" />
+            <GradientStop Color="#F6EF6B" Offset="1" />
+        </LinearGradientBrush>
+    </Window.Resources>
+
+    <Border x:Name="RootCard" Margin="8" Background="#121416" BorderBrush="#34393E"
+            BorderThickness="1" CornerRadius="7" Opacity="0">
+        <Border.RenderTransform>
+            <TranslateTransform x:Name="CardSlide" />
+        </Border.RenderTransform>
+
+        <Grid Margin="11,9,11,10">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+
+            <!-- 头部：封面 + 曲名 + 难度 + 谱师 -->
+            <Grid Grid.Row="0">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+
+                <Border Width="56" Height="56" CornerRadius="4" Background="#30353A" ClipToBounds="True">
+                    <Image Source="{Binding Cover}" Stretch="UniformToFill" />
+                </Border>
+
+                <StackPanel Grid.Column="1" Margin="9,0,6,0" VerticalAlignment="Center">
+                    <TextBlock x:Name="TrackTitle" FontSize="13" FontWeight="SemiBold"
+                               TextTrimming="CharacterEllipsis" />
+                    <TextBlock x:Name="TrackDifficulty" FontSize="11" Foreground="{StaticResource SecondaryBrush}"
+                               Margin="0,1,0,0" TextTrimming="CharacterEllipsis" />
+                    <TextBlock x:Name="TrackMeta" FontSize="10" Foreground="{StaticResource MutedTextBrush}"
+                               Margin="0,1,0,0" TextTrimming="CharacterEllipsis" />
+                </StackPanel>
+
+                <Button x:Name="CloseButton" Grid.Column="2" Content="×" Width="26" Height="26" Padding="0"
+                        VerticalAlignment="Top" Click="CloseButton_Click"
+                        ToolTip="关闭（下次导入谱面时会再出现）" />
+            </Grid>
+
+            <!-- 星级 + 数据胶囊 -->
+            <Grid Grid.Row="1" Margin="0,10,0,0">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+
+                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                    <TextBlock x:Name="StarValue" FontSize="26" FontWeight="SemiBold" />
+                    <TextBlock x:Name="StarGlyph" Text="★" FontSize="10" Margin="3,0,0,3" VerticalAlignment="Bottom" />
+                </StackPanel>
+
+                <WrapPanel x:Name="CapsulePanel" Grid.Column="1" Margin="10,0,0,0" VerticalAlignment="Center" />
+            </Grid>
+
+            <!-- 雷达 + 键型占比 -->
+            <Grid x:Name="PatternRow" Grid.Row="2" Margin="0,9,0,0">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+
+                <StackPanel x:Name="RadarPanel" Width="152">
+                    <controls:RadarChart x:Name="Radar" Width="152" Height="152" HorizontalAlignment="Center"
+                                         LabelFontFamily="{DynamicResource UiFont}" />
+                    <Button x:Name="RadarToggle" Content="切到技能" FontSize="10" Padding="8,1" Margin="0,2,0,0"
+                            HorizontalAlignment="Center" Click="RadarToggle_Click" ToolTip="切换雷达图轴" />
+                </StackPanel>
+
+                <StackPanel x:Name="BarsPanel" Grid.Column="1" Margin="12,0,0,0" VerticalAlignment="Center" />
+            </Grid>
+
+            <Border Grid.Row="3" Height="1" Background="#242A30" Margin="0,10,0,8" />
+
+            <TextBlock x:Name="DetailText" Grid.Row="4" Margin="0,0,0,0" FontSize="10"
+                       TextWrapping="Wrap" Foreground="{StaticResource MutedTextBrush}" />
+
+            <TextBlock x:Name="ReasonText" Grid.Row="5" Margin="0,5,0,0" FontSize="10"
+                       TextWrapping="Wrap" Foreground="{StaticResource WarningBrush}" />
+        </Grid>
+    </Border>
+</Window>

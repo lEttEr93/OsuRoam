@@ -448,6 +448,10 @@
                                 <CheckBox x:Name="EmbeddedFontCheck" Content="使用内置字体（Outfit）" Click="EmbeddedFontCheck_Click"
                                           ToolTip="数字和英文字母用内置的 Outfit；关掉回退系统字体" />
                             </WrapPanel>
+                            <WrapPanel Margin="0,0,0,9">
+                                <CheckBox x:Name="MapInfoCheck" Content="导入后显示谱面信息窗" Click="MapInfoCheck_Click"
+                                          ToolTip="在迷你播放器下方弹出谱面详情（雷达图 / CS·OD·AR·物件数），开局时自动关闭" />
+                            </WrapPanel>
                             <TextBlock Text="osu! 客户端" Foreground="{StaticResource MutedTextBrush}" FontSize="11" />
                             <ComboBox x:Name="OsuClientBox" SelectedIndex="0"
                                       DropDownOpened="ComboBox_DropDownOpened" DropDownClosed="ComboBox_DropDownClosed">

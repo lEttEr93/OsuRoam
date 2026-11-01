@@ -72,6 +72,8 @@ public sealed class AppSettings
     public bool IncludeLoved { get; set; } = true;
     /// <summary>界面用内置的 Outfit 字体（见 Fonts\ATTRIBUTION.md）。关掉则回退系统字体。</summary>
     public bool UseEmbeddedFont { get; set; } = true;
+    /// <summary>导入谱面后自动弹出谱面信息窗。</summary>
+    public bool ShowMapInfo { get; set; } = true;
     public bool ExcludeRecentlyPlayed { get; set; } = true;
     public double Exploration { get; set; } = 0.45;
     /// <summary>键型偏好在排序里的权重（0 = 不参与）。</summary>

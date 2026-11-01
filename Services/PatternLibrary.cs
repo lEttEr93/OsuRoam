@@ -81,79 +81,36 @@ public sealed class PatternLibrary
     }
 
     /// <summary>从下载好的 .osz 里直接解析目标谱面的 .osu 并入库。</summary>
-    public bool TryIngestOsz(string oszPath, int beatmapId, int beatmapsetId)
+    public bool TryIngestOsz(string oszPath, int beatmapId, int beatmapsetId) =>
+        OszReader.TryReadBeatmapText(oszPath, beatmapId, out string text, out string entryName) &&
+        Ingest(text, beatmapId, beatmapsetId, entryName);
+
+    /// <summary>
+    /// 已经拿到 .osu 文本时直接入库。导入流程会把同一份文本先交给
+    /// <see cref="Models.BeatmapDetailReader"/>（CS/OD/物件数），再交到这里解析键型，
+    /// 免得多解压一遍压缩包。
+    /// </summary>
+    public bool Ingest(string osuText, int beatmapId, int beatmapsetId, string entryName = "")
     {
-        if (!File.Exists(oszPath))
-            return false;
         try
         {
-            using ZipArchive archive = ZipFile.OpenRead(oszPath);
-            List<ZipArchiveEntry> candidates = archive.Entries
-                .Where(item => item.FullName.EndsWith(".osu", StringComparison.OrdinalIgnoreCase))
-                .ToList();
-            if (candidates.Count == 0)
-            {
-                AppLog.Error($"谱面压缩包里没有 .osu：{Path.GetFileName(oszPath)}");
-                return false;
-            }
-
-            // .osu 文件名通常是难度名（[Peko]、[1.1x]），不含 beatmap id；
-            // 可靠做法是读文件里的 BeatmapID 元数据字段。
-            string? text = null;
-            string? matchedName = null;
-            foreach (ZipArchiveEntry candidate in candidates)
-            {
-                using StreamReader reader = new(candidate.Open());
-                string content = reader.ReadToEnd();
-                if (beatmapId <= 0 || hasBeatmapId(content, beatmapId))
-                {
-                    text = content;
-                    matchedName = candidate.FullName;
-                    break;
-                }
-            }
-
-            if (text is null && candidates.Count == 1)
-            {
-                using StreamReader reader = new(candidates[0].Open());
-                text = reader.ReadToEnd();
-                matchedName = candidates[0].FullName;
-            }
-
-            if (text is null)
-            {
-                AppLog.Error($"包里没有 BeatmapID={beatmapId} 的 .osu（共 {candidates.Count} 个）：{Path.GetFileName(oszPath)}");
-                return false;
-            }
-
-            ManiaPattern? pattern = ManiaPatternAnalyzer.Analyze(text, beatmapId, beatmapsetId);
+            ManiaPattern? pattern = ManiaPatternAnalyzer.Analyze(osuText, beatmapId, beatmapsetId);
             if (pattern is null)
             {
-                AppLog.Error($"键型解析返回空（键数或音符不足）：{matchedName}");
+                AppLog.Error($"键型解析返回空（键数或音符不足）：{entryName}");
                 return false;
             }
 
-            AppLog.Info($"键型入库：set={beatmapsetId} beatmap={beatmapId} {pattern.KeyCount}K {pattern.Category}（{matchedName}）");
+            AppLog.Info($"键型入库：set={beatmapsetId} beatmap={beatmapId} {pattern.KeyCount}K {pattern.Category}" +
+                        (entryName.Length == 0 ? string.Empty : $"（{entryName}）"));
             Put(pattern);
             return true;
         }
         catch (Exception exception)
         {
-            AppLog.Error($"解析谱面键型失败：{Path.GetFileName(oszPath)}", exception);
+            AppLog.Error("解析谱面键型失败", exception);
             return false;
         }
-    }
-
-    /// <summary>在 .osu 文本里找 BeatmapID 元数据行。</summary>
-    private static bool hasBeatmapId(string osuText, int beatmapId)
-    {
-        foreach (string line in osuText.Split('\n'))
-        {
-            if (!line.StartsWith("BeatmapID:", StringComparison.Ordinal))
-                continue;
-            return int.TryParse(line.AsSpan(10).Trim(), out int value) && value == beatmapId;
-        }
-        return false;
     }
 
     /// <summary>候选谱面的键型：优先真实数据，退回 tag 推断（推断结果不入库，避免污染库）。</summary>

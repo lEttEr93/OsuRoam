@@ -17,6 +17,10 @@ testNoTemplateAnimatesFrozenTransforms();
 testEmbeddedFont();
 testUiFontIsDynamicResource();
 testEmbeddedFontFamilyResolves();
+testOszReaderReadsBeatmapText();
+testBeatmapDetailParses();
+testBeatmapDetailApproachRateFallsBackToOd();
+testDifficultyColourSpectrum();
 testDifficultyProfilesAreIndependent();
 testUnlimitedDifficultyRange();
 testManiaKeysAreFiltered();
@@ -464,7 +468,7 @@ static void testUiFontIsDynamicResource()
     if (app.Contains("Value=\"Segoe UI\"", StringComparison.Ordinal))
         throw new InvalidOperationException("App.xaml 里还残留硬编码的 Segoe UI");
 
-    foreach (string window in new[] { "MainWindow.xaml", "HistoryWindow.xaml" })
+    foreach (string window in new[] { "MainWindow.xaml", "HistoryWindow.xaml", "MapInfoWindow.xaml" })
     {
         string text = File.ReadAllText(Path.Combine(root, window));
         if (!text.Contains("FontFamily=\"{DynamicResource UiFont}\"", StringComparison.Ordinal))
@@ -499,6 +503,175 @@ static void testEmbeddedFontFamilyResolves()
         throw new InvalidOperationException($"读取内置字体失败：{captured.Message}", captured);
     if (!found)
         throw new InvalidOperationException($@"程序集里解析不出 {Typography.FamilyName} 家族（Fonts\*.ttf 没编进去？）");
+}
+
+/// <summary>
+/// 谱面详情解析：导入时从 .osz 里的 .osu 头读 CS/OD/AR/HP/物件数/BPM。
+/// 这些字段 API 的 beatmapset 接口不直接给，但信息窗要用。
+/// </summary>
+static void testBeatmapDetailParses()
+{
+    const string osu = """
+        osu file format v14
+
+        [General]
+        Mode: 3
+        PreviewTime: 1000
+
+        [Metadata]
+        Title:Test Song
+        Artist:Test Artist
+        Creator:Tester
+        Version:4K Insane
+        BeatmapID:123
+
+        [Difficulty]
+        CircleSize:4
+        OverallDifficulty:8
+        HPDrainRate:6
+        ApproachRate:9.5
+
+        [TimingPoints]
+        0,333.333333333333,4,2,1,60,1,0
+        1000,-100,4,2,1,60,0,0
+
+        [HitObjects]
+        64,192,1000,1,0,0:0:0:0:
+        64,192,1200,1,0,0:0:0:0:
+        64,192,1400,128,0,1600:0:0:0:0:0:0:0:
+        192,192,1800,2,0,B|300:192|400:192,1,140
+        256,192,2400,8,0,2400
+        """;
+
+    BeatmapDetail detail = BeatmapDetailReader.Parse(osu)
+        ?? throw new InvalidOperationException("解析 .osu 返回了 null");
+
+    assertEqual(3, detail.Mode, "模式应解析为 mania");
+    assertEqual(4, detail.KeyCount, "mania 的键数取自 CircleSize");
+    assertNear(4.0, detail.CircleSize, "CS 解析错误");
+    assertNear(8.0, detail.OverallDifficulty, "OD 解析错误");
+    assertNear(9.5, detail.ApproachRate, "AR 解析错误");
+    assertNear(6.0, detail.HPDrainRate, "HP 解析错误");
+    if (Math.Abs(detail.Bpm - 180) > 0.01)
+        throw new InvalidOperationException($"BPM 应由第一个非继承时间点算出 180，实际 {detail.Bpm}");
+    assertEqual(5, detail.ObjectCount, "物件总数解析错误");
+    assertEqual(2, detail.CircleCount, "单点数解析错误");
+    assertEqual(1, detail.HoldCount, "长条数解析错误");
+    assertEqual(1, detail.SliderCount, "滑条数解析错误");
+    assertEqual(1, detail.SpinnerCount, "转盘数解析错误");
+    assertText("mania 4K", detail.ModeDisplay, "模式显示名错误");
+
+    if (BeatmapDetailReader.Parse(string.Empty) is not null)
+        throw new InvalidOperationException("空文本应返回 null");
+}
+
+/// <summary>osu! 的规矩：没写 ApproachRate 时 AR 等于 OD。</summary>
+static void testBeatmapDetailApproachRateFallsBackToOd()
+{
+    const string osu = """
+        osu file format v14
+
+        [General]
+        Mode: 0
+
+        [Difficulty]
+        CircleSize:3.6
+        OverallDifficulty:7.2
+        HPDrainRate:5
+
+        [HitObjects]
+        256,192,1000,1,0,0:0:0:0:
+        """;
+
+    BeatmapDetail detail = BeatmapDetailReader.Parse(osu)
+        ?? throw new InvalidOperationException("解析 .osu 返回了 null");
+    assertNear(7.2, detail.ApproachRate, "缺 ApproachRate 时 AR 应回退到 OD");
+    assertEqual(0, detail.KeyCount, "非 mania 不应有键数");
+    assertText("osu", detail.ModeDisplay, "模式显示名错误");
+}
+
+/// <summary>星级色标：低星偏蓝、高星偏紫暗，异常输入给中性灰。</summary>
+static void testDifficultyColourSpectrum()
+{
+    System.Windows.Media.Color blue = OsuRoam.Controls.DifficultyColour.Sample(0);
+    System.Windows.Media.Color mid = OsuRoam.Controls.DifficultyColour.Sample(3.5);
+    System.Windows.Media.Color top = OsuRoam.Controls.DifficultyColour.Sample(10);
+
+    assertEqual((byte)0x42, blue.R, "0★ 应为 osu 的起始蓝");
+    assertEqual((byte)0x7C, mid.R, "3.5★ 应为绿色档");
+    assertEqual((byte)0x18, top.R, "10★ 应为深蓝档");
+
+    System.Windows.Media.Color unknown = OsuRoam.Controls.DifficultyColour.Sample(double.NaN);
+    if (unknown.R == 0 && unknown.G == 0 && unknown.B == 0)
+        throw new InvalidOperationException("NaN 星级不应得到全黑颜色");
+}
+
+/// <summary>从真 .osz 里挑出指定 beatmapId 的 .osu（导入流程就是走这条路）。</summary>
+static void testOszReaderReadsBeatmapText()
+{
+    string directory = Path.Combine(Path.GetTempPath(), $"osuroam-osz-{Guid.NewGuid():N}");
+    Directory.CreateDirectory(directory);
+    try
+    {
+        string oszPath = Path.Combine(directory, "1411397.osz");
+        using (System.IO.Compression.ZipArchive archive =
+               System.IO.Compression.ZipFile.Open(oszPath, System.IO.Compression.ZipArchiveMode.Create))
+        {
+            writeEntry(archive, "other.osu", """
+                osu file format v14
+                [Metadata]
+                BeatmapID:999
+                Title:Other
+                """);
+            writeEntry(archive, "target.osu", """
+                osu file format v14
+
+                [General]
+                Mode: 3
+
+                [Metadata]
+                BeatmapID:5075177
+                Title:Target
+
+                [Difficulty]
+                CircleSize:4
+                OverallDifficulty:8
+
+                [TimingPoints]
+                0,333.333333333333,4,2,1,60,1,0
+
+                [HitObjects]
+                64,192,1000,1,0,0:0:0:0:
+                """);
+        }
+
+        if (!OszReader.TryReadBeatmapText(oszPath, 5075177, out string text, out string entry))
+            throw new InvalidOperationException("应从 .osz 里读出 BeatmapID=5075177 的 .osu");
+        if (!entry.EndsWith("target.osu", StringComparison.Ordinal))
+            throw new InvalidOperationException($"读错了文件：{entry}");
+        if (!OszReader.HasBeatmapId(text, 5075177))
+            throw new InvalidOperationException(".osu 文本里应能找到 BeatmapID:5075177");
+
+        if (!OszReader.TryReadBeatmapText(oszPath, 0, out _, out _))
+            throw new InvalidOperationException("beatmapId=0 时应取第一个 .osu");
+
+        if (OszReader.TryReadBeatmapText(oszPath, 424242, out _, out _) && !OszReader.HasBeatmapId("", 424242))
+        {
+            // 已经有两个候选、又都不匹配时应该失败（除非只有一个候选的回退分支）。
+            throw new InvalidOperationException("找不到匹配 id 且候选多于一个时不应成功");
+        }
+    }
+    finally
+    {
+        try { Directory.Delete(directory, true); } catch { }
+    }
+}
+
+static void writeEntry(System.IO.Compression.ZipArchive archive, string name, string content)
+{
+    System.IO.Compression.ZipArchiveEntry entry = archive.CreateEntry(name);
+    using StreamWriter writer = new(entry.Open());
+    writer.Write(content);
 }
 
 static bool isTrueType(byte[] bytes) =>

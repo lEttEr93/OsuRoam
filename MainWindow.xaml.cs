@@ -32,6 +32,7 @@ public partial class MainWindow : Window
     /// <summary>键型分析串行化：它已移到线程池执行，避免多个下载并发写同一份键型库。</summary>
     private readonly SemaphoreSlim patternGate = new(1, 1);
     private readonly ArchiveStore archiveStore = new();
+    private MapInfoWindow? mapInfoWindow;
     private HistoryWindow? historyWindow;
     private bool historyWasVisible;
     private bool prefetching;
@@ -156,10 +157,130 @@ public partial class MainWindow : Window
             Typography.Apply(false);
 
         AppLog.Info($"截图模式：{path}｜{Typography.Describe()}");
+
+        if (Environment.GetCommandLineArgs().Any(arg => arg == "--with-info"))
+        {
+            await runInfoSnapshotAsync(path);
+            return;
+        }
+
         seedDiagnosticCards();
         await Task.Delay(1800);
         RenderDiagnostics.CaptureWindow(this, path);
         Close();
+    }
+
+    /// <summary>开发用：折叠成迷你播放器 + 弹出谱面信息窗，各截一张图。</summary>
+    private async Task runInfoSnapshotAsync(string path)
+    {
+        if (!isCollapsed)
+            CollapseButton_Click(this, new RoutedEventArgs());
+
+        RecommendationItem item = buildSnapshotItem();
+        currentRoamItem = item;
+        refreshMiniPlayer();
+        await Task.Delay(500);
+
+        showMapInfoFor(item);
+        await Task.Delay(1400);
+
+        string infoPath = path.EndsWith(".png", StringComparison.OrdinalIgnoreCase)
+            ? path[..^4] + "-info.png"
+            : path + "-info.png";
+        if (mapInfoWindow is not null)
+            RenderDiagnostics.CaptureWindow(mapInfoWindow, infoPath);
+        RenderDiagnostics.CaptureWindow(this, path);
+
+        mapInfoWindow?.Dismiss();
+        Close();
+    }
+
+    /// <summary>截图用的条目：缓存里有真 .osz 就用真数据，没有就造一份接近真实的。</summary>
+    private RecommendationItem buildSnapshotItem()
+    {
+        RecommendationItem item = new()
+        {
+            BeatmapId = 5075177,
+            BeatmapsetId = 1411397,
+            Artist = "Camellia",
+            Title = "Exit This Earth's Atomosphere",
+            DifficultyName = "[4K] 1.1x",
+            Mapper = "Sotarks",
+            Stars = 6.42,
+            Bpm = 180,
+            LengthSeconds = 252,
+            RankedYear = 2019,
+            Score = 0.87,
+            Reason = "星级贴合 6.4 · Jumpstream Tech · 谱师命中 2 次",
+            KeyCount = 4
+        };
+
+        try
+        {
+            string? osz = Directory.Exists(settingsStore.CacheDirectory)
+                ? Directory.EnumerateFiles(settingsStore.CacheDirectory, "*.osz").FirstOrDefault()
+                : null;
+            if (osz is not null && OszReader.TryReadBeatmapText(osz, 0, out string text, out _))
+            {
+                item.ApplyDetail(BeatmapDetailReader.Parse(text));
+                item.ApplyPattern(ManiaPatternAnalyzer.Analyze(text));
+            }
+        }
+        catch (Exception exception)
+        {
+            AppLog.Error("截图模式解析缓存谱面失败", exception);
+        }
+
+        item.ApplyDetail(item.Detail ?? new BeatmapDetail
+        {
+            Mode = 3,
+            KeyCount = 4,
+            CircleSize = 4,
+            OverallDifficulty = 8.5,
+            ApproachRate = 9.3,
+            HPDrainRate = 7,
+            Bpm = 180,
+            ObjectCount = 1832,
+            CircleCount = 1204,
+            SliderCount = 0,
+            HoldCount = 628,
+            Title = item.Title,
+            Artist = item.Artist,
+            Creator = item.Mapper,
+            Version = item.DifficultyName
+        });
+
+        item.ApplyPattern(item.Pattern ?? new ManiaPattern
+        {
+            KeyCount = 4,
+            TotalNotes = 1832,
+            TotalHolds = 628,
+            NotesPerSecond = 6.4,
+            LnRatio = 0.12,
+            HbRowRatio = 0.04,
+            ModeTag = "RC",
+            Category = "Jumpstream",
+            SkillSource = "MinaCalc",
+            CoreShares = new Dictionary<string, double>
+            {
+                ["Stream"] = 0.42,
+                ["Chordstream"] = 0.27,
+                ["Jacks"] = 0.11,
+                ["Coordination"] = 0.10,
+                ["Density"] = 0.06,
+                ["Wildcard"] = 0.04
+            },
+            SpecificShares = new Dictionary<string, double>
+            {
+                ["Jumpstream"] = 0.38,
+                ["Stream"] = 0.22,
+                ["Minitrills"] = 0.14,
+                ["Handstream"] = 0.09
+            },
+            SkillAxes = [0.82, 0.74, 0.41, 0.55, 0.33, 0.28, 0.61]
+        });
+
+        return item;
     }
 
     /// <summary>临时：--diagnose 时造几张假卡片并打开历史面板，用来采帧间隔。</summary>
@@ -548,7 +669,10 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
         if (item.DownloadState == DownloadState.Imported)
         {
             if (importAfterDownload)
+            {
                 setCurrentRoamItem(item);
+                showMapInfoFor(item);
+            }
             return true;
         }
         try
@@ -558,33 +682,37 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
             {
                 item.DownloadState = DownloadState.Queued;
                 await downloader.DownloadAsync(item, settings, sessionCancellation.Token);
-                if (settings.Mode == "mania")
+
+                string oszPath = Path.Combine(settingsStore.CacheDirectory, $"{item.BeatmapsetId}.osz");
+                bool wantPattern = settings.Mode == "mania";
+
+                // 谱面详情（CS/OD/AR/物件数）和键型都来自同一个 .osu：解压 + 解析要几十到几百毫秒，
+                // 放 UI 线程会吃掉动画帧预算，所以丢到线程池；键型那块还要串行化，避免并发写同一份键型库。
+                await patternGate.WaitAsync();
+                try
                 {
-                    string oszPath = Path.Combine(settingsStore.CacheDirectory, $"{item.BeatmapsetId}.osz");
-
-                    // 解析 .osu / 跑键型分析（含 MinaCalc）要几十到几百毫秒，
-                    // 放 UI 线程会直接吃掉动画帧预算，所以丢到线程池，并串行化避免并发写键型库。
-                    await patternGate.WaitAsync();
-                    try
+                    System.Diagnostics.Stopwatch parseClock = System.Diagnostics.Stopwatch.StartNew();
+                    (BeatmapDetail? detail, string? osuText) parsed = await Task.Run(() =>
                     {
-                        System.Diagnostics.Stopwatch patternClock = System.Diagnostics.Stopwatch.StartNew();
-                        bool ingested = await Task.Run(
-                            () => patternLibrary.TryIngestOsz(oszPath, item.BeatmapId, item.BeatmapsetId));
-                        long patternMilliseconds = patternClock.ElapsedMilliseconds;
-                        if (patternMilliseconds > 120)
-                            AppLog.Info($"键型分析较慢：{item.DisplayTitle}，{patternMilliseconds}ms（已在后台线程）");
+                        OszReader.TryReadBeatmapText(oszPath, item.BeatmapId, out string text, out _);
+                        return (BeatmapDetailReader.Parse(text), wantPattern ? text : null);
+                    });
+                    long parseMilliseconds = parseClock.ElapsedMilliseconds;
+                    if (parseMilliseconds > 120)
+                        AppLog.Info($"谱面解析较慢：{item.DisplayTitle}，{parseMilliseconds}ms（已在后台线程）");
 
-                        if (ingested)
-                        {
-                            refreshPatternCache();
-                            item.ApplyPattern(patternLibrary.TryGet(item.BeatmapId));
-                            await patternLibrary.SaveAsync();
-                        }
-                    }
-                    finally
+                    item.ApplyDetail(parsed.detail);
+                    if (parsed.osuText is not null &&
+                        patternLibrary.Ingest(parsed.osuText, item.BeatmapId, item.BeatmapsetId))
                     {
-                        patternGate.Release();
+                        refreshPatternCache();
+                        item.ApplyPattern(patternLibrary.TryGet(item.BeatmapId));
+                        await patternLibrary.SaveAsync();
                     }
+                }
+                finally
+                {
+                    patternGate.Release();
                 }
             }
             if (importAfterDownload)
@@ -594,6 +722,7 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
                 setCurrentRoamItem(item);
                 recordArchive(item);
                 StatusText.Text = $"已交给 {osuClientDisplayName()} 导入";
+                showMapInfoFor(item);
             }
             else
             {
@@ -702,6 +831,35 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
         }
         return recommendations.FirstOrDefault(item => !ReferenceEquals(item, currentRoamItem));
     }
+
+    /// <summary>
+    /// 导入发起后弹出谱面信息窗（贴在主窗口/迷你播放器下方）。
+    /// 数据来自刚解析好的 <see cref="RecommendationItem.Detail"/> 和键型库。
+    /// </summary>
+    private void showMapInfoFor(RecommendationItem item)
+    {
+        if (!settings.ShowMapInfo)
+            return;
+
+        try
+        {
+            if (mapInfoWindow is null)
+            {
+                mapInfoWindow = new MapInfoWindow();
+                mapInfoWindow.Closed += (_, _) => mapInfoWindow = null;
+                mapInfoWindow.DockTo(this);
+            }
+
+            mapInfoWindow.ShowFor(item);
+        }
+        catch (Exception exception)
+        {
+            AppLog.Error("显示谱面信息窗失败", exception);
+        }
+    }
+
+    /// <summary>收起信息窗（开局 / 关掉设置选项 / 用户点 ×）。</summary>
+    private void dismissMapInfo() => mapInfoWindow?.Dismiss();
 
     private void setCurrentRoamItem(RecommendationItem item)
     {
@@ -954,6 +1112,9 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
 
     private async Task handlePlayStartedAsync(TosuSnapshot snapshot)
     {
+        // 谱面信息窗只在「导入 → 进游戏」这段里有用，真正开局就收起来。
+        dismissMapInfo();
+
         if (!isRunning)
             return;
         playingItem = findRecommendation(snapshot);
@@ -1093,6 +1254,7 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
         value.AutoDownload = AutoDownloadCheck.IsChecked == true;
         value.AutoImport = AutoImportCheck.IsChecked == true;
         value.UseEmbeddedFont = EmbeddedFontCheck.IsChecked == true;
+        value.ShowMapInfo = MapInfoCheck.IsChecked == true;
         value.OsuClient = (OsuClientBox.SelectedItem as ComboBoxItem)?.Tag?.ToString() ?? "lazer";
         value.OsuExecutablePath = BeatmapDownloadService.NormalizeExecutablePath(OsuPathBox.Text);
         value.DownloadMirrorTemplates = DownloadTemplateBox.Text.Trim();
@@ -1123,6 +1285,7 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
         AutoDownloadCheck.IsChecked = settings.AutoDownload;
         AutoImportCheck.IsChecked = settings.AutoImport;
         EmbeddedFontCheck.IsChecked = settings.UseEmbeddedFont;
+        MapInfoCheck.IsChecked = settings.ShowMapInfo;
         applyFontSetting();
         OsuPathBox.Text = BeatmapDownloadService.NormalizeExecutablePath(settings.OsuExecutablePath);
         string osuClient = string.Equals(settings.OsuClient, "stable", StringComparison.OrdinalIgnoreCase) ? "stable" : "lazer";
@@ -1157,6 +1320,23 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
         Typography.EnsureUsable();
         Typography.Apply(settings.UseEmbeddedFont);
         AppLog.Info(Typography.Describe());
+    }
+
+    private async void MapInfoCheck_Click(object sender, RoutedEventArgs e)
+    {
+        if (!settingsControlsReady)
+            return;
+        settings.ShowMapInfo = MapInfoCheck.IsChecked == true;
+        if (!settings.ShowMapInfo)
+            dismissMapInfo();
+        try
+        {
+            await settingsStore.SaveAsync(settings);
+        }
+        catch (Exception exception)
+        {
+            AppLog.Error("保存谱面信息窗设置失败", exception);
+        }
     }
 
     private async void EmbeddedFontCheck_Click(object sender, RoutedEventArgs e)

@@ -112,6 +112,20 @@ public sealed class RecommendationItem : INotifyPropertyChanged
 
     public ManiaPattern? Pattern => pattern;
 
+    private BeatmapDetail? detail;
+
+    /// <summary>从 .osz 解析出来的谱面静态详情（CS/OD/物件数/实际 BPM），非 mania 也有。</summary>
+    public BeatmapDetail? Detail => detail;
+
+    public bool HasDetail => detail is not null;
+
+    public void ApplyDetail(BeatmapDetail? value)
+    {
+        detail = value;
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Detail)));
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(HasDetail)));
+    }
+
     public bool IsDetailVisible => isDetailVisible;
 
     public bool IsSummaryVisible => !isDetailVisible;
