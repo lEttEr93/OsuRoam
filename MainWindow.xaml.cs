@@ -134,30 +134,39 @@ public partial class MainWindow : Window
 
         if (Environment.GetCommandLineArgs().Any(arg => arg == "--diagnose"))
             await runDiagnosticsAsync();
+        else if (snapshotPath() is { } capturePath)
+            await runSnapshotAsync(capturePath);
+    }
+
+    /// <summary>开发用：--snapshot=路径，把当前界面渲染成 PNG 后退退出。</summary>
+    private static string? snapshotPath()
+    {
+        foreach (string argument in Environment.GetCommandLineArgs())
+        {
+            if (argument.StartsWith("--snapshot=", StringComparison.OrdinalIgnoreCase))
+                return argument["--snapshot=".Length..].Trim('"');
+        }
+        return null;
+    }
+
+    /// <summary>--snapshot 时套几张假卡片，让截图里有真实内容可看。</summary>
+    private async Task runSnapshotAsync(string path)
+    {
+        if (Environment.GetCommandLineArgs().Any(arg => arg == "--font=system"))
+            Typography.Apply(false);
+
+        AppLog.Info($"截图模式：{path}｜{Typography.Describe()}");
+        seedDiagnosticCards();
+        await Task.Delay(1800);
+        RenderDiagnostics.CaptureWindow(this, path);
+        Close();
     }
 
     /// <summary>临时：--diagnose 时造几张假卡片并打开历史面板，用来采帧间隔。</summary>
     private async Task runDiagnosticsAsync()
     {
         AppLog.Info("诊断模式：构造卡片并打开历史面板");
-        for (int index = 0; index < 6; index++)
-        {
-            recommendations.Add(new RecommendationItem
-            {
-                BeatmapId = 900000 + index,
-                BeatmapsetId = 900000 + index,
-                Artist = $"Diagnostic {index}",
-                Title = "Frame timing probe",
-                DifficultyName = $"{index + 1}K probe",
-                Mapper = "diagnostic",
-                Stars = 3.5,
-                Bpm = 180,
-                LengthSeconds = 120,
-                RankedYear = 2024,
-                Score = 0,
-                Reason = "diagnostic"
-            });
-        }
+        seedDiagnosticCards();
 
         await Task.Delay(2600);
         if (historyWindow is null && archiveStore.Entries.Count > 0)
@@ -176,6 +185,29 @@ public partial class MainWindow : Window
         {
             CollapseButton_Click(this, new RoutedEventArgs());
             RenderDiagnostics.MeasureOnce("expand");
+        }
+    }
+
+    /// <summary>诊断/截图共用的假卡片。</summary>
+    private void seedDiagnosticCards()
+    {
+        for (int index = 0; index < 6; index++)
+        {
+            recommendations.Add(new RecommendationItem
+            {
+                BeatmapId = 900000 + index,
+                BeatmapsetId = 900000 + index,
+                Artist = $"Diagnostic {index}",
+                Title = "Camellia - Exit This Earth's Atomosphere",
+                DifficultyName = $"{index + 1}K probe 7.85★",
+                Mapper = "Sotarks",
+                Stars = 3.5 + index * 0.4,
+                Bpm = 180,
+                LengthSeconds = 132,
+                RankedYear = 2019 + index,
+                Score = 0,
+                Reason = "Jumpstream Tech · 星级贴合 4.2"
+            });
         }
     }
 
@@ -1060,6 +1092,7 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
         value.ExcludeRecentlyPlayed = ExcludeRecentCheck.IsChecked == true;
         value.AutoDownload = AutoDownloadCheck.IsChecked == true;
         value.AutoImport = AutoImportCheck.IsChecked == true;
+        value.UseOsuFont = OsuFontCheck.IsChecked == true;
         value.OsuClient = (OsuClientBox.SelectedItem as ComboBoxItem)?.Tag?.ToString() ?? "lazer";
         value.OsuExecutablePath = BeatmapDownloadService.NormalizeExecutablePath(OsuPathBox.Text);
         value.DownloadMirrorTemplates = DownloadTemplateBox.Text.Trim();
@@ -1079,8 +1112,7 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
     private void applySettingsToControls()
     {
         settingsControlsReady = false;
-        UsernameBox.Text = settings.Username;
-        ClientIdBox.Text = settings.ClientId;
+        UsernameBox.Text = settings.Username;        ClientIdBox.Text = settings.ClientId;
         ClientSecretBox.Password = settingsStore.ReadSecret(settings);
         MinimumYearBox.Text = settings.MinimumYear.ToString();
         MaximumYearBox.Text = settings.MaximumYear.ToString();
@@ -1090,6 +1122,8 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
         ExcludeRecentCheck.IsChecked = settings.ExcludeRecentlyPlayed;
         AutoDownloadCheck.IsChecked = settings.AutoDownload;
         AutoImportCheck.IsChecked = settings.AutoImport;
+        OsuFontCheck.IsChecked = settings.UseOsuFont;
+        applyFontSetting();
         OsuPathBox.Text = BeatmapDownloadService.NormalizeExecutablePath(settings.OsuExecutablePath);
         string osuClient = string.Equals(settings.OsuClient, "stable", StringComparison.OrdinalIgnoreCase) ? "stable" : "lazer";
         foreach (ComboBoxItem item in OsuClientBox.Items)
@@ -1112,6 +1146,33 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
         updateDifficultyControls();
         updateExplorationText();
         settingsControlsReady = true;
+    }
+
+    /// <summary>
+    /// 应用字体设置。Torus 是编进程序集的资源，<c>UiFont</c> 是 DynamicResource，
+    /// 所以在这里换资源能立刻刷新已经建好的界面，不用重启。
+    /// </summary>
+    private void applyFontSetting()
+    {
+        Typography.EnsureUsable();
+        Typography.Apply(settings.UseOsuFont);
+        AppLog.Info(Typography.Describe());
+    }
+
+    private async void OsuFontCheck_Click(object sender, RoutedEventArgs e)
+    {
+        if (!settingsControlsReady)
+            return;
+        settings.UseOsuFont = OsuFontCheck.IsChecked == true;
+        applyFontSetting();
+        try
+        {
+            await settingsStore.SaveAsync(settings);
+        }
+        catch (Exception exception)
+        {
+            AppLog.Error("保存字体设置失败", exception);
+        }
     }
 
     private void ModeBox_SelectionChanged(object sender, SelectionChangedEventArgs e)

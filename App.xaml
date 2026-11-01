@@ -4,6 +4,11 @@
              StartupUri="MainWindow.xaml">
     <Application.Resources>
         <BooleanToVisibilityConverter x:Key="BoolToVis" />
+        <!-- 界面字体：默认系统字体，启动时由 Services\Typography.cs 换成内置的
+             osu!(lazer) 字体 Torus（Fonts\，见 ATTRIBUTION.md）。
+             这里不能直接写 pack://application:,,,/Fonts/#Torus —— 字符串形式的
+             pack URI 建出来的 FontFamily 没有 BaseUri，WPF 解析不出字形面。 -->
+        <FontFamily x:Key="UiFont">Microsoft YaHei UI</FontFamily>
         <SolidColorBrush x:Key="BackgroundBrush" Color="#121416" />
         <SolidColorBrush x:Key="SurfaceBrush" Color="#1B1E21" />
         <SolidColorBrush x:Key="SurfaceRaisedBrush" Color="#24282C" />
@@ -17,10 +22,17 @@
 
         <Style TargetType="TextBlock">
             <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
-            <Setter Property="FontFamily" Value="Segoe UI" />
+            <Setter Property="FontFamily" Value="{DynamicResource UiFont}" />
+        </Style>
+        <Style TargetType="ToolTip">
+            <Setter Property="FontFamily" Value="{DynamicResource UiFont}" />
+            <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
+            <Setter Property="Background" Value="{StaticResource SurfaceRaisedBrush}" />
+            <Setter Property="BorderBrush" Value="{StaticResource BorderBrush}" />
         </Style>
         <Style TargetType="Button">
             <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
+            <Setter Property="FontFamily" Value="{DynamicResource UiFont}" />
             <Setter Property="Background" Value="{StaticResource SurfaceRaisedBrush}" />
             <Setter Property="BorderBrush" Value="{StaticResource BorderBrush}" />
             <Setter Property="BorderThickness" Value="1" />
@@ -93,6 +105,7 @@
         </Style>
         <Style TargetType="TextBox">
             <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
+            <Setter Property="FontFamily" Value="{DynamicResource UiFont}" />
             <Setter Property="Background" Value="{StaticResource SurfaceRaisedBrush}" />
             <Setter Property="BorderBrush" Value="{StaticResource BorderBrush}" />
             <Setter Property="Padding" Value="8,6" />
@@ -100,6 +113,7 @@
         </Style>
         <Style TargetType="PasswordBox">
             <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
+            <Setter Property="FontFamily" Value="{DynamicResource UiFont}" />
             <Setter Property="Background" Value="{StaticResource SurfaceRaisedBrush}" />
             <Setter Property="BorderBrush" Value="{StaticResource BorderBrush}" />
             <Setter Property="Padding" Value="8,6" />
@@ -107,6 +121,7 @@
         </Style>
         <Style TargetType="ComboBox">
             <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
+            <Setter Property="FontFamily" Value="{DynamicResource UiFont}" />
             <Setter Property="Background" Value="#181B1E" />
             <Setter Property="BorderBrush" Value="{StaticResource BorderBrush}" />
             <Setter Property="BorderThickness" Value="1" />
@@ -170,6 +185,7 @@
         </Style>
         <Style TargetType="ComboBoxItem">
             <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
+            <Setter Property="FontFamily" Value="{DynamicResource UiFont}" />
             <Setter Property="Background" Value="#181B1E" />
             <Setter Property="Padding" Value="8,5" />
             <Setter Property="HorizontalContentAlignment" Value="Stretch" />
@@ -204,10 +220,12 @@
         </Style>
         <Style TargetType="CheckBox">
             <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
+            <Setter Property="FontFamily" Value="{DynamicResource UiFont}" />
             <Setter Property="VerticalAlignment" Value="Center" />
         </Style>
         <Style TargetType="Expander">
             <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
+            <Setter Property="FontFamily" Value="{DynamicResource UiFont}" />
         </Style>
         <Style x:Key="ScrollBarButtonStyle" TargetType="RepeatButton">
             <Setter Property="Focusable" Value="False" />

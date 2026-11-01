@@ -1,6 +1,8 @@
 using System.Diagnostics;
+using System.IO;
 using System.Windows;
 using System.Windows.Media;
+using System.Windows.Media.Imaging;
 using System.Windows.Threading;
 
 namespace OsuRoam.Services;
@@ -114,6 +116,35 @@ public static class RenderDiagnostics
         catch
         {
             return false;
+        }
+    }
+
+    /// <summary>
+    /// 开发用：把窗口当前画面渲染成 PNG。用来在改字体/配色后肉眼对比，
+    /// 免得靠"启动看一眼"。透明窗口会带 alpha 通道，直接看没问题。
+    /// </summary>
+    public static void CaptureWindow(Window window, string path, double scale = 2.0)
+    {
+        try
+        {
+            window.UpdateLayout();
+            int width = (int)Math.Ceiling(Math.Max(1, window.ActualWidth) * scale);
+            int height = (int)Math.Ceiling(Math.Max(1, window.ActualHeight) * scale);
+            RenderTargetBitmap bitmap = new(width, height, 96 * scale, 96 * scale, PixelFormats.Pbgra32);
+            bitmap.Render(window);
+
+            PngBitmapEncoder encoder = new();
+            encoder.Frames.Add(BitmapFrame.Create(bitmap));
+            string? directory = Path.GetDirectoryName(path);
+            if (!string.IsNullOrEmpty(directory))
+                Directory.CreateDirectory(directory);
+            using FileStream stream = File.Create(path);
+            encoder.Save(stream);
+            AppLog.Info($"截图已保存：{path}（{width}x{height}）");
+        }
+        catch (Exception exception)
+        {
+            AppLog.Error("截图失败", exception);
         }
     }
 

@@ -7,14 +7,20 @@ namespace OsuRoam;
 public partial class App : Application
 {
     private Mutex? singleInstance;
+    private bool ownsSingleInstance;
 
     protected override void OnStartup(StartupEventArgs e)
     {
+        AppLog.Info($"启动 {typeof(App).Assembly.GetName().Version}｜参数：{string.Join(' ', e.Args)}");
+
         // 配置和缓存是单写入设计（File.Create 独占），两个实例会互相报
         // "Access to the path ... settings.json is denied"，这里直接拦住第二个。
         singleInstance = new Mutex(true, "OsuRoam.SingleInstance", out bool createdNew);
+        ownsSingleInstance = createdNew;
+        AppLog.Info($"单实例锁：{(createdNew ? "获得" : "已被占用")}");
         if (!createdNew)
         {
+            AppLog.Info("另一个实例在运行，本次启动退出");
             MessageBox.Show("已经有一个 osu! Roam 在运行了，先关掉它再启动。", "osu! Roam",
                 MessageBoxButton.OK, MessageBoxImage.Information);
             Shutdown();
@@ -28,13 +34,23 @@ public partial class App : Application
             AppLog.Error("未处理的界面异常", args.Exception);
         };
 
+        // 先把内置 Torus 装上；真正的开关在读到配置后再由 MainWindow 应用。
+        Typography.Apply(preferOsuFont: true);
+
         base.OnStartup(e);
     }
 
     protected override void OnExit(ExitEventArgs e)
     {
-        singleInstance?.ReleaseMutex();
+        // 只有本线程真的持有了锁才能 Release，否则这里会在退出时抛
+        // "Object synchronization method was called from an unsynchronized block"。
+        if (singleInstance is not null && ownsSingleInstance)
+        {
+            try { singleInstance.ReleaseMutex(); } catch (Exception exception) { AppLog.Error("释放单实例锁失败", exception); }
+            ownsSingleInstance = false;
+        }
         singleInstance?.Dispose();
+        singleInstance = null;
         base.OnExit(e);
     }
 }

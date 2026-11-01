@@ -70,6 +70,8 @@ public sealed class AppSettings
     public int MinimumLengthSeconds { get; set; } = 45;
     public int MaximumLengthSeconds { get; set; } = 360;
     public bool IncludeLoved { get; set; } = true;
+    /// <summary>界面用内置的 osu! 字体 Torus（见 Fonts\ATTRIBUTION.md）。关掉则回退系统字体。</summary>
+    public bool UseOsuFont { get; set; } = true;
     public bool ExcludeRecentlyPlayed { get; set; } = true;
     public double Exploration { get; set; } = 0.45;
     /// <summary>键型偏好在排序里的权重（0 = 不参与）。</summary>

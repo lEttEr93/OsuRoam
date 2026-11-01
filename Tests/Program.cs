@@ -14,6 +14,9 @@ testArchiveEntryDetailLayer();
 testChangeKindDetection();
 testTranslateStoryboardPathResolves();
 testNoTemplateAnimatesFrozenTransforms();
+testEmbeddedOsuFont();
+testUiFontIsDynamicResource();
+testEmbeddedTorusFamilyResolves();
 testDifficultyProfilesAreIndependent();
 testUnlimitedDifficultyRange();
 testManiaKeysAreFiltered();
@@ -381,11 +384,121 @@ static void testNoTemplateAnimatesFrozenTransforms()
     }
 }
 
-static void assertKind(ChangeKind expected, ChangeKind actual, string message)
-{
+static void assertKind(ChangeKind expected, ChangeKind actual, string message){
     if (expected != actual)
         throw new InvalidOperationException($"{message}：expected={expected}, actual={actual}");
 }
+
+/// <summary>从测试输出目录往上找仓库根（认 OsuRoam.csproj）。</summary>
+static string? findProjectRoot()
+{
+    DirectoryInfo? dir = new(AppContext.BaseDirectory);
+    for (int depth = 0; depth < 6 && dir is not null; depth++, dir = dir.Parent)
+    {
+        if (File.Exists(Path.Combine(dir.FullName, "OsuRoam.csproj")))
+            return dir.FullName;
+    }
+    return null;
+}
+
+/// <summary>
+/// 1.3.2 的字体：Torus 必须以 WPF Resource 的形式编进程序集，
+/// 而且家族名必须真的叫 Torus —— Typography 按这个名字找家族，名字对不上就静默回退系统字体。
+/// </summary>
+static void testEmbeddedOsuFont()
+{
+    string? root = findProjectRoot();
+    if (root is null)
+        return;
+
+    string project = File.ReadAllText(Path.Combine(root, "OsuRoam.csproj"));
+    if (!project.Contains(@"Fonts\*.otf", StringComparison.OrdinalIgnoreCase))
+        throw new InvalidOperationException(@"OsuRoam.csproj 里没有把 Fonts\*.otf 作为 Resource 编进程序集");
+
+    foreach (string name in new[] { "Torus-Regular.otf", "Torus-Bold.otf" })
+    {
+        string path = Path.Combine(root, "Fonts", name);
+        if (!File.Exists(path))
+            throw new InvalidOperationException($"缺少字体文件 Fonts/{name}");
+
+        byte[] bytes = File.ReadAllBytes(path);
+        if (bytes.Length < 4 || bytes[0] != 'O' || bytes[1] != 'T' || bytes[2] != 'T' || bytes[3] != 'O')
+            throw new InvalidOperationException($"Fonts/{name} 不是 OpenType/CFF 字体（魔数不是 OTTO）");
+        if (!containsAscii(bytes, "Torus") && !containsUtf16BigEndian(bytes, "Torus"))
+            throw new InvalidOperationException($"Fonts/{name} 的 name 表里找不到家族名 Torus");
+    }
+}
+
+/// <summary>
+/// 字体资源必须是 DynamicResource：设置面板里的开关要在不重启的情况下立刻生效。
+/// 另外 App.xaml 里不能直接写 pack URI 形式的字体 —— 字符串建的 FontFamily 没有 BaseUri，
+/// Typeface.TryGetGlyphTypeface 一律返回 false（见 Services/Typography.cs 的注释）。
+/// </summary>
+static void testUiFontIsDynamicResource()
+{
+    string? root = findProjectRoot();
+    if (root is null)
+        return;
+
+    string app = File.ReadAllText(Path.Combine(root, "App.xaml"));
+    int keyIndex = app.IndexOf("x:Key=\"UiFont\"", StringComparison.Ordinal);
+    if (keyIndex < 0)
+        throw new InvalidOperationException("App.xaml 里没有 UiFont 字体资源");
+
+    int valueStart = app.IndexOf('>', keyIndex);
+    int valueEnd = app.IndexOf("</FontFamily>", valueStart, StringComparison.Ordinal);
+    if (valueStart < 0 || valueEnd < 0)
+        throw new InvalidOperationException("App.xaml 的 UiFont 不是内联的 FontFamily 元素");
+
+    string fontValue = app[(valueStart + 1)..valueEnd].Trim();
+    if (fontValue.Contains('#'))
+        throw new InvalidOperationException(
+            $"App.xaml 的 UiFont 写成了 {fontValue}：字符串形式的 pack URI 建不出带 BaseUri 的 FontFamily，解析不出字形面；应交由 Services/Typography.cs");
+
+    if (app.Contains("Value=\"Segoe UI\"", StringComparison.Ordinal))
+        throw new InvalidOperationException("App.xaml 里还残留硬编码的 Segoe UI");
+
+    foreach (string window in new[] { "MainWindow.xaml", "HistoryWindow.xaml" })
+    {
+        string text = File.ReadAllText(Path.Combine(root, window));
+        if (!text.Contains("FontFamily=\"{DynamicResource UiFont}\"", StringComparison.Ordinal))
+            throw new InvalidOperationException($"{window} 没有用 DynamicResource 绑定 UiFont");
+    }
+}
+
+/// <summary>端到端：程序集里真的能解析出 Torus 家族（不只是文件存在）。</summary>
+static void testEmbeddedTorusFamilyResolves()
+{
+    Exception? captured = null;
+    bool found = false;
+    Thread thread = new(() =>
+    {
+        try
+        {
+            ICollection<System.Windows.Media.FontFamily> families =
+                System.Windows.Media.Fonts.GetFontFamilies(new Uri("pack://application:,,,/OsuRoam;component/Fonts/"));
+            found = families.Any(family => family.FamilyNames.Values.Any(name => name == "Torus"));
+        }
+        catch (Exception exception)
+        {
+            captured = exception;
+        }
+    });
+    thread.SetApartmentState(ApartmentState.STA);
+    thread.Start();
+    thread.Join();
+
+    if (captured is not null)
+        throw new InvalidOperationException($"读取内置字体失败：{captured.Message}", captured);
+    if (!found)
+        throw new InvalidOperationException(@"程序集里解析不出 Torus 家族（Fonts\*.otf 没编进去？）");
+}
+
+static bool containsAscii(byte[] bytes, string text) =>
+    bytes.AsSpan().IndexOf(System.Text.Encoding.ASCII.GetBytes(text)) >= 0;
+
+static bool containsUtf16BigEndian(byte[] bytes, string text) =>
+    bytes.AsSpan().IndexOf(System.Text.Encoding.BigEndianUnicode.GetBytes(text)) >= 0;
 
 static void testDifficultyProfilesAreIndependent()
 {

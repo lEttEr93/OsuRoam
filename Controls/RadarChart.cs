@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Windows;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
+using OsuRoam.Services;
 
 namespace OsuRoam.Controls;
 
@@ -43,6 +44,14 @@ public sealed class RadarChart : FrameworkElement
         "Growth", typeof(double), typeof(RadarChart),
         new FrameworkPropertyMetadata(1.0, FrameworkPropertyMetadataOptions.AffectsRender));
 
+    /// <summary>
+    /// 标签字体。XAML 里用 <c>{DynamicResource UiFont}</c> 绑定，
+    /// 这样设置面板切换 osu! 字体时这里的标签也会跟着换（改了要丢缓存重排）。
+    /// </summary>
+    public static readonly DependencyProperty LabelFontFamilyProperty = DependencyProperty.Register(
+        nameof(LabelFontFamily), typeof(FontFamily), typeof(RadarChart),
+        new FrameworkPropertyMetadata(null, FrameworkPropertyMetadataOptions.AffectsRender, onLabelFontChanged));
+
     private double[] fromValues = [];
     private double[] targetValues = [];
 
@@ -67,6 +76,13 @@ public sealed class RadarChart : FrameworkElement
     {
         get => (IReadOnlyList<double>?)GetValue(ValuesProperty);
         set => SetValue(ValuesProperty, value);
+    }
+
+    /// <summary>标签字体；为 null 时跟随 <see cref="Services.Typography.Current"/>。</summary>
+    public FontFamily? LabelFontFamily
+    {
+        get => (FontFamily?)GetValue(LabelFontFamilyProperty);
+        set => SetValue(LabelFontFamilyProperty, value);
     }
 
     public RadarChart()
@@ -96,6 +112,14 @@ public sealed class RadarChart : FrameworkElement
     private static void onValuesChanged(DependencyObject target, DependencyPropertyChangedEventArgs e)
     {
         ((RadarChart)target).beginGrowth(e.NewValue as IReadOnlyList<double>);
+    }
+
+    /// <summary>字体换了：标签宽度会变，缓存的 FormattedText 全部作废。</summary>
+    private static void onLabelFontChanged(DependencyObject target, DependencyPropertyChangedEventArgs e)
+    {
+        RadarChart chart = (RadarChart)target;
+        chart.cachedTexts = null;
+        chart.cachedLabelSignature = null;
     }
 
     /// <summary>
@@ -342,9 +366,10 @@ public sealed class RadarChart : FrameworkElement
         return new Point(center.X + radius * Math.Cos(angle), center.Y + radius * Math.Sin(angle));
     }
 
-    private static FormattedText format(string text, double pixelsPerDip) =>
+    private FormattedText format(string text, double pixelsPerDip) =>
         new(text, CultureInfo.CurrentUICulture, FlowDirection.LeftToRight,
-            new Typeface("Microsoft YaHei UI"), LabelFontSize, LabelBrush, pixelsPerDip);
+            new Typeface(LabelFontFamily ?? Typography.Current, FontStyles.Normal, FontWeights.Normal, FontStretches.Normal),
+            LabelFontSize, LabelBrush, pixelsPerDip);
 
     private static T freeze<T>(T freezable) where T : Freezable
     {

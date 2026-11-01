@@ -3,6 +3,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:controls="clr-namespace:OsuRoam.Controls"
         Title="历史推荐" Width="330" Height="600" MinWidth="280" MinHeight="300"
+        FontFamily="{DynamicResource UiFont}"
         WindowStyle="None" AllowsTransparency="True" Background="Transparent"
         ShowInTaskbar="False" ShowActivated="False" ResizeMode="NoResize"
         Icon="/OsuRoam;component/Assets/OsuRoam.ico">
@@ -106,6 +107,7 @@
                                         </Grid.ColumnDefinitions>
                                         <StackPanel>
                                             <controls:RadarChart Width="104" Height="104" HorizontalAlignment="Center"
+                                                                 LabelFontFamily="{DynamicResource UiFont}"
                                                                  Labels="{Binding RadarLabels}" Values="{Binding RadarValues}" />
                                             <Button Content="{Binding RadarToggleLabel}" Tag="{Binding}" Click="RadarToggleButton_Click"
                                                     HorizontalAlignment="Center" Padding="8,1" Margin="0,2,0,0" FontSize="10"

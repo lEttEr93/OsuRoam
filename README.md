@@ -1,4 +1,4 @@
-# osu! Roam v1.2.5
+# osu! Roam v1.3.2
 
 osu! 谱面漫游推荐工具。Windows / WPF / .NET 8。
 
@@ -126,6 +126,18 @@ Tag 池内置预设曲风、mania 键型特征（含 `米` `面` `叠` `技` `�
 - 删掉 `patterns.json` 只会丢掉键型记录，重新下载谱面会重新解析。
 - `settings.json` 里有 OAuth Secret（已用当前 Windows 用户加密），不要分享给别人，也别拷到别的用户环境里。
 
+## 界面字体
+
+界面上的数字和英文字母用 osu!(lazer) 的默认字体 **Torus**（`Fonts/`，以 WPF Resource 编进程序集）。
+Torus 只有拉丁字母和数字，**没有汉字字形**：中文照旧由系统字体 `Microsoft YaHei UI` 渲染
+（WPF 逐字符回退），和 osu!lazer 用 Noto 补 CJK 是一个思路。
+
+- 「下载与高级设置」→「使用 osu! 字体（Torus）」可以随时关掉，**立刻生效、不用重启**。
+- 启动日志会有一行 `字体：内置 Torus（561 字形）；汉字回退 Microsoft YaHei UI`；
+  字体没加载出来会打 `Torus 不可用` 并自动回退到系统字体（界面不会变成方框）。
+- Torus 是商业字体（Paulo Goode），osu! 官方有授权。本项目的发行包带上它属于非商业使用；
+  要商业分发请自行购买授权，或者删掉 `Fonts/` 并关掉上面的开关。详见 `Fonts/ATTRIBUTION.md`。
+
 ## 构建
 
 需要 .NET 8 SDK：
@@ -133,12 +145,12 @@ Tag 池内置预设曲风、mania 键型特征（含 `米` `面` `叠` `技` `�
 ```powershell
 dotnet build OsuRoam.csproj -c Release
 
-# 单文件自包含便携包
+# 自包含便携包（非单文件；Fonts\*.otf 作为 WPF Resource 编进程序集）
 dotnet publish OsuRoam.csproj -c Release -r win-x64 --self-contained true `
-  -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o bin\v1.2.5
+  -p:PublishSingleFile=false -o bin\v1.3.2
 ```
 
-发布前确认没有正在运行的 `OsuRoam.exe`，单文件发布会因文件占用失败。
+发布前确认没有正在运行的 `OsuRoam.exe`，发布会因文件占用失败。
 
 ## 项目结构
 
