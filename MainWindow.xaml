@@ -393,7 +393,9 @@
                                         <ColumnDefinition Width="Auto" />
                                     </Grid.ColumnDefinitions>
                                     <TextBlock Text="简易筛选" Foreground="{StaticResource SecondaryBrush}" FontSize="12" FontWeight="SemiBold" />
-                                    <TextBlock Text="&#x52FE;&#x9009;&#xFF1A;&#x504F;&#x597D;  &#x4E2D;&#x95F4;&#x72B6;&#x6001;&#xFF1A;&#x4E25;&#x683C;&#x7B5B;&#x9009;" Foreground="{StaticResource MutedTextBrush}" FontSize="10" Margin="0,2,0,0" />
+                                    <TextBlock Grid.Column="1" VerticalAlignment="Center"
+                                               Text="&#x52FE;&#x9009;&#xFF1A;&#x504F;&#x597D;  &#x4E2D;&#x95F4;&#x72B6;&#x6001;&#xFF1A;&#x4E25;&#x683C;&#x7B5B;&#x9009;"
+                                               Foreground="{StaticResource MutedTextBrush}" FontSize="10" Margin="8,0,0,0" />
                                 </Grid>
                                 <TextBlock Text="分类" Foreground="{StaticResource MutedTextBrush}" FontSize="11" Margin="0,7,0,1" />
                                 <ItemsControl x:Name="StatusFilterItems">

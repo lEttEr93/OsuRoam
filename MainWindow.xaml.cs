@@ -172,6 +172,14 @@ public partial class MainWindow : Window
 
         seedDiagnosticCards();
         await Task.Delay(1800);
+
+        // 开发用：--scroll-bottom 先把主内容滚到底，方便截设置区
+        if (Environment.GetCommandLineArgs().Any(arg => arg == "--scroll-bottom"))
+        {
+            MainContent.ScrollToVerticalOffset(MainContent.ScrollableHeight * 0.755);
+            await Task.Delay(400);
+        }
+
         RenderDiagnostics.CaptureWindow(this, path);
         Close();
     }
