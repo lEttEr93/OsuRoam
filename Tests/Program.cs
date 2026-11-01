@@ -11,6 +11,8 @@ testStaleResultsFromPreviousPlayAreIgnored();
 testQuotedExecutablePathIsNormalized();
 await testArchiveStorePublishesCollectionChangesAsync();
 testArchiveEntryDetailLayer();
+testChangeKindDetection();
+testTranslateStoryboardPathResolves();
 testDifficultyProfilesAreIndependent();
 testUnlimitedDifficultyRange();
 testManiaKeysAreFiltered();
@@ -260,6 +262,88 @@ static RecommendationItem sampleRecommendationItem() => new()
     Score = 0,
     Reason = "test"
 };
+
+static void testChangeKindDetection()
+{
+    MapIdentity empty = MapIdentity.Empty;
+    MapIdentity songA = MapIdentity.From(1001, 100, "artist", "A");
+    MapIdentity songAOtherDiff = MapIdentity.From(1002, 100, "artist", "A");
+    MapIdentity songB = MapIdentity.From(2001, 200, "artist", "B");
+
+    assertKind(ChangeKind.Initial, ChangeKindDetector.Detect(empty, empty), "空身份不应触发入场");
+    assertKind(ChangeKind.Initial, ChangeKindDetector.Detect(empty, songA), "首次载入是 Initial");
+    assertKind(ChangeKind.Song, ChangeKindDetector.ForEntrance(empty, songA), "首次载入按换歌入场");
+    assertKind(ChangeKind.Mod, ChangeKindDetector.Detect(songA, songA), "同一张谱面重算应是 Mod");
+    assertKind(ChangeKind.Difficulty, ChangeKindDetector.Detect(songA, songAOtherDiff), "同 set 换难度");
+    assertKind(ChangeKind.Song, ChangeKindDetector.Detect(songA, songB), "不同 set 是换歌");
+
+    // 没有 beatmapsetId 时 SongKey 退化成「作者 - 标题」，仍能区分换歌
+    MapIdentity metaA = MapIdentity.From(3001, 0, "artist", "A");
+    MapIdentity metaA2 = MapIdentity.From(3002, 0, "artist", "A");
+    assertKind(ChangeKind.Difficulty, ChangeKindDetector.Detect(metaA, metaA2), "退化 key 下同曲换难度");
+    assertKind(ChangeKind.Song, ChangeKindDetector.Detect(metaA2, MapIdentity.From(3003, 0, "artist", "C")),
+        "退化 key 下换歌仍是 Song");
+
+    // 缺失字段不能把一次续报判成换歌
+    assertKind(ChangeKind.Difficulty, ChangeKindDetector.Detect(
+        MapIdentity.From(4001, 0, "artist", "D"),
+        MapIdentity.From(4002, 0, "artist", "D")), "字段缺失不等于换歌");
+}
+
+/// <summary>
+/// XAML 里的入场动画用 (UIElement.RenderTransform).(TranslateTransform.Y) 这种属性路径。
+/// 路径写错只会在运行时抛，编译期发现不了，所以在这里真的跑一次 Storyboard。
+/// </summary>
+static void testTranslateStoryboardPathResolves()
+{
+    Exception? captured = null;
+    Thread thread = new(() =>
+    {
+        try
+        {
+            System.Windows.Controls.Border border = new()
+            {
+                RenderTransform = new System.Windows.Media.TranslateTransform(),
+                Opacity = 0
+            };
+
+            System.Windows.Media.Animation.Storyboard storyboard = new();
+
+            System.Windows.Media.Animation.DoubleAnimation fade =
+                new(0, 1, TimeSpan.FromMilliseconds(30));
+            System.Windows.Media.Animation.Storyboard.SetTarget(fade, border);
+            System.Windows.Media.Animation.Storyboard.SetTargetProperty(
+                fade, new System.Windows.PropertyPath("Opacity"));
+            storyboard.Children.Add(fade);
+
+            System.Windows.Media.Animation.DoubleAnimation slide =
+                new(7, 0, TimeSpan.FromMilliseconds(30));
+            System.Windows.Media.Animation.Storyboard.SetTarget(slide, border);
+            System.Windows.Media.Animation.Storyboard.SetTargetProperty(
+                slide,
+                new System.Windows.PropertyPath("(UIElement.RenderTransform).(TranslateTransform.Y)"));
+            storyboard.Children.Add(slide);
+
+            storyboard.Begin();
+        }
+        catch (Exception exception)
+        {
+            captured = exception;
+        }
+    });
+    thread.SetApartmentState(ApartmentState.STA);
+    thread.Start();
+    thread.Join();
+
+    if (captured is not null)
+        throw new InvalidOperationException($"入场动画的属性路径解析失败：{captured.Message}", captured);
+}
+
+static void assertKind(ChangeKind expected, ChangeKind actual, string message)
+{
+    if (expected != actual)
+        throw new InvalidOperationException($"{message}：expected={expected}, actual={actual}");
+}
 
 static void testDifficultyProfilesAreIndependent()
 {

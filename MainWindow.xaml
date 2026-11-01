@@ -24,6 +24,12 @@
                     <TextBlock x:Name="ConnectionText" Text="尚未启动" Foreground="{StaticResource MutedTextBrush}" FontSize="11" />
                 </StackPanel>
                 <Grid x:Name="MiniPlayerHeader" Visibility="Collapsed" Margin="10,0,4,0" VerticalAlignment="Center">
+                    <Grid.RenderTransform>
+                        <TransformGroup>
+                            <ScaleTransform x:Name="MiniHeaderScale" />
+                            <TranslateTransform x:Name="MiniHeaderSlide" />
+                        </TransformGroup>
+                    </Grid.RenderTransform>
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="38" />
                         <ColumnDefinition Width="*" />
@@ -36,7 +42,11 @@
                         <TextBlock Text="{Binding DisplayTitle, FallbackValue=尚未导入谱面, TargetNullValue=尚未导入谱面}"
                                    FontWeight="SemiBold" FontSize="12" TextTrimming="CharacterEllipsis" />
                         <TextBlock x:Name="MiniTrackDetailText" Text="等待漫游"
-                                   Foreground="{StaticResource MutedTextBrush}" FontSize="10" TextTrimming="CharacterEllipsis" />
+                                   Foreground="{StaticResource MutedTextBrush}" FontSize="10" TextTrimming="CharacterEllipsis">
+                            <TextBlock.RenderTransform>
+                                <TranslateTransform x:Name="MiniDetailSlide" />
+                            </TextBlock.RenderTransform>
+                        </TextBlock>
                     </StackPanel>
                     <Button x:Name="MiniNextButton" Grid.Column="2" Width="58" Height="30" Padding="0"
                             Content="下一首" Click="MiniNextButton_Click" ToolTip="下载并导入下一首" />
@@ -69,8 +79,69 @@
                             <DataTemplate>
                                 <Border Background="{StaticResource SurfaceBrush}" BorderBrush="{StaticResource BorderBrush}"
                                         BorderThickness="1" CornerRadius="6" Margin="0,0,0,8" Padding="9">
+                                    <Border.RenderTransform>
+                                        <TranslateTransform />
+                                    </Border.RenderTransform>
+                                    <Border.Style>
+                                        <Style TargetType="Border">
+                                            <Setter Property="Opacity" Value="0" />
+                                            <Style.Triggers>
+                                                <!-- 条目入场：移植 MMA 的 item-float-in（Y 7→0 + 淡入） -->
+                                                <EventTrigger RoutedEvent="Loaded">
+                                                    <BeginStoryboard>
+                                                        <Storyboard>
+                                                            <DoubleAnimation Storyboard.TargetProperty="Opacity" To="1"
+                                                                             Duration="0:0:0.30">
+                                                                <DoubleAnimation.EasingFunction>
+                                                                    <CubicEase EasingMode="EaseOut" />
+                                                                </DoubleAnimation.EasingFunction>
+                                                            </DoubleAnimation>
+                                                            <DoubleAnimation
+                                                                Storyboard.TargetProperty="(UIElement.RenderTransform).(TranslateTransform.Y)"
+                                                                From="7" To="0" Duration="0:0:0.30">
+                                                                <DoubleAnimation.EasingFunction>
+                                                                    <CubicEase EasingMode="EaseOut" />
+                                                                </DoubleAnimation.EasingFunction>
+                                                            </DoubleAnimation>
+                                                        </Storyboard>
+                                                    </BeginStoryboard>
+                                                </EventTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </Border.Style>
                                     <Grid>
                                         <Grid Visibility="{Binding IsSummaryVisible, Converter={StaticResource BoolToVis}}">
+                                            <Grid.RenderTransform>
+                                                <TranslateTransform />
+                                            </Grid.RenderTransform>
+                                            <Grid.Style>
+                                                <Style TargetType="Grid">
+                                                    <Style.Triggers>
+                                                        <!-- 翻回摘要层：淡入 + 6px 上移 -->
+                                                        <DataTrigger Binding="{Binding IsSummaryVisible}" Value="True">
+                                                            <DataTrigger.EnterActions>
+                                                                <BeginStoryboard>
+                                                                    <Storyboard>
+                                                                        <DoubleAnimation Storyboard.TargetProperty="Opacity"
+                                                                                         From="0" To="1" Duration="0:0:0.18">
+                                                                            <DoubleAnimation.EasingFunction>
+                                                                                <CubicEase EasingMode="EaseOut" />
+                                                                            </DoubleAnimation.EasingFunction>
+                                                                        </DoubleAnimation>
+                                                                        <DoubleAnimation
+                                                                            Storyboard.TargetProperty="(UIElement.RenderTransform).(TranslateTransform.Y)"
+                                                                            From="6" To="0" Duration="0:0:0.18">
+                                                                            <DoubleAnimation.EasingFunction>
+                                                                                <CubicEase EasingMode="EaseOut" />
+                                                                            </DoubleAnimation.EasingFunction>
+                                                                        </DoubleAnimation>
+                                                                    </Storyboard>
+                                                                </BeginStoryboard>
+                                                            </DataTrigger.EnterActions>
+                                                        </DataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </Grid.Style>
                                         <Grid.RowDefinitions>
                                             <RowDefinition Height="Auto" />
                                             <RowDefinition Height="Auto" />
@@ -171,6 +242,37 @@
                                         </Expander>
                                         </Grid>
                                         <Grid Visibility="{Binding IsDetailVisible, Converter={StaticResource BoolToVis}}">
+                                            <Grid.RenderTransform>
+                                                <TranslateTransform />
+                                            </Grid.RenderTransform>
+                                            <Grid.Style>
+                                                <Style TargetType="Grid">
+                                                    <Style.Triggers>
+                                                        <!-- 翻到详情层：淡入 + 6px 上移，方向与返回相反 -->
+                                                        <DataTrigger Binding="{Binding IsDetailVisible}" Value="True">
+                                                            <DataTrigger.EnterActions>
+                                                                <BeginStoryboard>
+                                                                    <Storyboard>
+                                                                        <DoubleAnimation Storyboard.TargetProperty="Opacity"
+                                                                                         From="0" To="1" Duration="0:0:0.20">
+                                                                            <DoubleAnimation.EasingFunction>
+                                                                                <CubicEase EasingMode="EaseOut" />
+                                                                            </DoubleAnimation.EasingFunction>
+                                                                        </DoubleAnimation>
+                                                                        <DoubleAnimation
+                                                                            Storyboard.TargetProperty="(UIElement.RenderTransform).(TranslateTransform.Y)"
+                                                                            From="6" To="0" Duration="0:0:0.20">
+                                                                            <DoubleAnimation.EasingFunction>
+                                                                                <CubicEase EasingMode="EaseOut" />
+                                                                            </DoubleAnimation.EasingFunction>
+                                                                        </DoubleAnimation>
+                                                                    </Storyboard>
+                                                                </BeginStoryboard>
+                                                            </DataTrigger.EnterActions>
+                                                        </DataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </Grid.Style>
                                             <Grid.ColumnDefinitions>
                                                 <ColumnDefinition Width="150" />
                                                 <ColumnDefinition Width="*" />

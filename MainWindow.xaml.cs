@@ -8,6 +8,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Media.Animation;
 using NAudio.Vorbis;
 using NAudio.Wave;
 using OsuRoam.Models;
@@ -753,12 +754,65 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
         e.Handled = true;
     }
 
+    /// <summary>当前谱面身份，用来判定这次刷新是「换歌」还是「换难度」。</summary>
+    private MapIdentity miniIdentity = MapIdentity.Empty;
+
     private void refreshMiniPlayer()
     {
+        MapIdentity next = currentRoamItem is null
+            ? MapIdentity.Empty
+            : MapIdentity.From(
+                currentRoamItem.BeatmapId,
+                currentRoamItem.BeatmapsetId,
+                currentRoamItem.Artist,
+                currentRoamItem.Title);
+        ChangeKind kind = ChangeKindDetector.ForEntrance(miniIdentity, next);
+        miniIdentity = next;
+
         MiniPlayerHeader.DataContext = currentRoamItem;
         MiniTrackDetailText.Text = currentRoamItem is null
             ? "等待漫游"
             : $"{currentRoamItem.DifficultyName} · {currentRoamItem.DifficultySummary}";
+
+        animateMiniPlayerEntrance(kind);
+    }
+
+    /// <summary>
+    /// 迷你播放器的相位入场：换歌重放整块（淡入 + 上移 + 轻微放大），
+    /// 换难度只让副标题纵向轻弹一次。参数取自 MMA 的 song-enter / diff-swap。
+    /// </summary>
+    private void animateMiniPlayerEntrance(ChangeKind kind)
+    {
+        if (!SystemParameters.ClientAreaAnimation || !IsLoaded)
+            return;
+
+        switch (kind)
+        {
+            case ChangeKind.Song:
+                startMiniAnimation(MiniPlayerHeader, UIElement.OpacityProperty, 0, 1, 420);
+                startMiniAnimation(MiniHeaderSlide, TranslateTransform.YProperty, 12, 0, 420);
+                startMiniAnimation(MiniHeaderScale, ScaleTransform.ScaleXProperty, 0.985, 1, 420);
+                startMiniAnimation(MiniHeaderScale, ScaleTransform.ScaleYProperty, 0.985, 1, 420);
+                startMiniAnimation(MiniTrackDetailText, UIElement.OpacityProperty, 0, 1, 360);
+                startMiniAnimation(MiniDetailSlide, TranslateTransform.XProperty, 22, 0, 360);
+                break;
+
+            case ChangeKind.Difficulty:
+                startMiniAnimation(MiniTrackDetailText, UIElement.OpacityProperty, 0.4, 1, 260);
+                startMiniAnimation(MiniDetailSlide, TranslateTransform.YProperty, 6, 0, 260);
+                break;
+        }
+    }
+
+    /// <summary>从 from 走到 to；结束后回到属性基值（Stop），不会把动画值留在属性上。</summary>
+    private static void startMiniAnimation(IAnimatable target, DependencyProperty property, double from, double to, double milliseconds)
+    {
+        target.BeginAnimation(property, null);
+        target.BeginAnimation(property, new DoubleAnimation(from, to, TimeSpan.FromMilliseconds(milliseconds))
+        {
+            EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut },
+            FillBehavior = FillBehavior.Stop
+        }, HandoffBehavior.SnapshotAndReplace);
     }
 
     private async Task handlePlayStartedAsync(TosuSnapshot snapshot)
