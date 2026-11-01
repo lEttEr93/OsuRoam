@@ -28,6 +28,9 @@ public partial class MainWindow : Window
     private readonly HashSet<int> sessionImportedBeatmapsetIds = [];
     private readonly BeatmapDownloadService downloader;
     private readonly PatternLibrary patternLibrary = new();
+
+    /// <summary>键型分析串行化：它已移到线程池执行，避免多个下载并发写同一份键型库。</summary>
+    private readonly SemaphoreSlim patternGate = new(1, 1);
     private readonly ArchiveStore archiveStore = new();
     private HistoryWindow? historyWindow;
     private bool historyWasVisible;
@@ -68,6 +71,7 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+        applyDiagnosticWindowMode();
         topmostKeeper = new TopmostKeeper(this);
         downloader = new BeatmapDownloadService(settingsStore.CacheDirectory);
         RecommendationList.ItemsSource = recommendations;
@@ -103,6 +107,7 @@ public partial class MainWindow : Window
     {
         AppLog.Info("osu! Roam 启动");
         AppLog.Info($"日志文件：{AppLog.CurrentPath}");
+        RenderDiagnostics.LogEnvironment();
         if (StoragePaths.Note is not null)
             AppLog.Info($"存储位置：{StoragePaths.Note}");
         settings = await settingsStore.LoadAsync();
@@ -126,6 +131,51 @@ public partial class MainWindow : Window
         updatePoolVisibility();
         if (settings.AutoStartTosu)
             await ensureTosuReadyAsync(sessionCancellation.Token);
+
+        if (Environment.GetCommandLineArgs().Any(arg => arg == "--diagnose"))
+            await runDiagnosticsAsync();
+    }
+
+    /// <summary>临时：--diagnose 时造几张假卡片并打开历史面板，用来采帧间隔。</summary>
+    private async Task runDiagnosticsAsync()
+    {
+        AppLog.Info("诊断模式：构造卡片并打开历史面板");
+        for (int index = 0; index < 6; index++)
+        {
+            recommendations.Add(new RecommendationItem
+            {
+                BeatmapId = 900000 + index,
+                BeatmapsetId = 900000 + index,
+                Artist = $"Diagnostic {index}",
+                Title = "Frame timing probe",
+                DifficultyName = $"{index + 1}K probe",
+                Mapper = "diagnostic",
+                Stars = 3.5,
+                Bpm = 180,
+                LengthSeconds = 120,
+                RankedYear = 2024,
+                Score = 0,
+                Reason = "diagnostic"
+            });
+        }
+
+        await Task.Delay(2600);
+        if (historyWindow is null && archiveStore.Entries.Count > 0)
+            HistoryButton_Click(this, new RoutedEventArgs());
+    }
+
+    /// <summary>
+    /// 诊断用：把窗口切成不透明，做 AllowsTransparency 的 A/B 对照。
+    /// 必须在窗口句柄创建之前设置。
+    /// </summary>
+    private void applyDiagnosticWindowMode()
+    {
+        if (!Environment.GetCommandLineArgs().Any(arg => arg == "--diagnose-opaque"))
+            return;
+
+        AllowsTransparency = false;
+        Background = new SolidColorBrush(Color.FromRgb(0x12, 0x14, 0x16));
+        AppLog.Info("诊断模式：窗口改为不透明（对照组）");
     }
 
     private async void StartButton_Click(object sender, RoutedEventArgs e)
@@ -464,11 +514,29 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
                 if (settings.Mode == "mania")
                 {
                     string oszPath = Path.Combine(settingsStore.CacheDirectory, $"{item.BeatmapsetId}.osz");
-                    if (patternLibrary.TryIngestOsz(oszPath, item.BeatmapId, item.BeatmapsetId))
+
+                    // 解析 .osu / 跑键型分析（含 MinaCalc）要几十到几百毫秒，
+                    // 放 UI 线程会直接吃掉动画帧预算，所以丢到线程池，并串行化避免并发写键型库。
+                    await patternGate.WaitAsync();
+                    try
                     {
-                        refreshPatternCache();
-                        item.ApplyPattern(patternLibrary.TryGet(item.BeatmapId));
-                        await patternLibrary.SaveAsync();
+                        System.Diagnostics.Stopwatch patternClock = System.Diagnostics.Stopwatch.StartNew();
+                        bool ingested = await Task.Run(
+                            () => patternLibrary.TryIngestOsz(oszPath, item.BeatmapId, item.BeatmapsetId));
+                        long patternMilliseconds = patternClock.ElapsedMilliseconds;
+                        if (patternMilliseconds > 120)
+                            AppLog.Info($"键型分析较慢：{item.DisplayTitle}，{patternMilliseconds}ms（已在后台线程）");
+
+                        if (ingested)
+                        {
+                            refreshPatternCache();
+                            item.ApplyPattern(patternLibrary.TryGet(item.BeatmapId));
+                            await patternLibrary.SaveAsync();
+                        }
+                    }
+                    finally
+                    {
+                        patternGate.Release();
                     }
                 }
             }

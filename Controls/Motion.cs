@@ -32,6 +32,9 @@ public static class Motion
             element.RenderTransform = slide;
             element.BeginAnimation(UIElement.OpacityProperty, tween(0, 1, milliseconds));
             slide.BeginAnimation(TranslateTransform.YProperty, tween(fromY, 0, milliseconds));
+
+            // 只采第一张卡片的帧间隔：之后的卡片动画不再采样，避免常驻开销。
+            Services.RenderDiagnostics.MeasureOnce("card-enter");
         }
         catch (Exception exception)
         {

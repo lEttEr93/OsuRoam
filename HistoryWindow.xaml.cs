@@ -113,6 +113,7 @@ public partial class HistoryWindow : Window
             };
             RootCard.BeginAnimation(UIElement.OpacityProperty, null);
             RootCard.BeginAnimation(UIElement.OpacityProperty, fade);
+            Services.RenderDiagnostics.MeasureOnce("history-entrance");
 
             DoubleAnimation slide = Controls.Motion.tween(SlideOffset, 0, 220);
             slide.FillBehavior = FillBehavior.HoldEnd;
