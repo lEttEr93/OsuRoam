@@ -18,7 +18,10 @@
     <Border x:Name="RootCard" Margin="8" Background="#121416" BorderBrush="#34393E"
             BorderThickness="1" CornerRadius="7" Opacity="0">
         <Border.RenderTransform>
-            <TranslateTransform x:Name="CardSlide" />
+            <TransformGroup>
+                <ScaleTransform x:Name="CardScale" />
+                <TranslateTransform x:Name="CardSlide" />
+            </TransformGroup>
         </Border.RenderTransform>
 
         <Grid Margin="11,9,11,10">

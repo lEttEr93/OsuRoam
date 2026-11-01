@@ -55,6 +55,9 @@ public sealed class PatternBars : FrameworkElement
     private string? cachedLabelSignature;
     private double cachedPixelsPerDip;
 
+    /// <summary>真正要画的行（跳过显示为 0% 的键型），按 Labels/Shares 变化重算。</summary>
+    private int[]? visibleRows;
+
     public IReadOnlyList<string>? Labels
     {
         get => (IReadOnlyList<string>?)GetValue(LabelsProperty);
@@ -73,7 +76,35 @@ public sealed class PatternBars : FrameworkElement
         SnapsToDevicePixels = true;
     }
 
-    private int Count => Math.Min(Labels?.Count ?? 0, Shares?.Count ?? 0);
+    private int Count => resolveRows().Length;
+
+    /// <summary>
+    /// 只保留四舍五入后大于 0% 的行：谱面里常见的 "Jacks 0% / Wildcard 0%"
+    /// 画出来既没信息量，又白占卡片高度。
+    /// </summary>
+    private int[] resolveRows() => visibleRows ??= VisibleRowIndices(Labels, Shares);
+
+    /// <summary>
+    /// 需要画出来的行号：跳过显示为 0% 的键型。
+    /// 谱面里 "Jacks 0% / Wildcard 0%" 很常见，画出来既没信息量又白占高度。
+    /// 判据按四舍五入后的百分比算，所以 0.4% 也不画（界面上它同样是 "0%"）。
+    /// </summary>
+    public static int[] VisibleRowIndices(IReadOnlyList<string>? labels, IReadOnlyList<double>? shares)
+    {
+        int count = Math.Min(labels?.Count ?? 0, shares?.Count ?? 0);
+        List<int> rows = new(count);
+        for (int index = 0; index < count; index++)
+        {
+            double share = shares![index];
+            if (!double.IsFinite(share) || share <= 0)
+                continue;
+            if (Math.Round(share * 100, MidpointRounding.AwayFromZero) <= 0)
+                continue;
+            rows.Add(index);
+        }
+
+        return rows.ToArray();
+    }
 
     protected override Size MeasureOverride(Size availableSize)
     {
@@ -85,8 +116,8 @@ public sealed class PatternBars : FrameworkElement
 
     protected override void OnRender(DrawingContext context)
     {
-        int count = Count;
-        if (count == 0)
+        int[] rows = resolveRows();
+        if (rows.Length == 0)
             return;
 
         double growth = (double)GetValue(GrowthProperty);
@@ -95,13 +126,14 @@ public sealed class PatternBars : FrameworkElement
         growth = Math.Clamp(growth, 0, 1);
 
         double pixelsPerDip = VisualTreeHelper.GetDpi(this).PixelsPerDip;
-        FormattedText[] labels = resolveLabels(count, pixelsPerDip);
+        FormattedText[] labels = resolveLabels(rows.Length, pixelsPerDip);
         double width = Math.Max(24, ActualWidth);
 
-        for (int index = 0; index < count; index++)
+        for (int row = 0; row < rows.Length; row++)
         {
-            double y = index * rowHeight();
-            FormattedText label = labels[index];
+            int index = rows[row];
+            double y = row * rowHeight();
+            FormattedText label = labels[row];
             FormattedText value = format(Shares, index, pixelsPerDip);
 
             context.DrawText(label, new Point(0, y));
@@ -137,17 +169,19 @@ public sealed class PatternBars : FrameworkElement
     {
         IReadOnlyList<string>? labels = Labels;
         string signature = string.Join('\u001f', labels ?? []);
-        if (cachedLabels is not null && cachedLabels.Length == count &&
+        if (cachedLabels is not null && cachedLabels.Length == Count &&
             Math.Abs(cachedPixelsPerDip - pixelsPerDip) < 0.0001 &&
             string.Equals(cachedLabelSignature, signature, StringComparison.Ordinal))
         {
             return cachedLabels;
         }
 
-        FormattedText[] texts = new FormattedText[count];
-        for (int index = 0; index < count; index++)
+        int[] rows = resolveRows();
+        FormattedText[] texts = new FormattedText[rows.Length];
+        for (int row = 0; row < rows.Length; row++)
         {
-            texts[index] = new FormattedText(
+            int index = rows[row];
+            texts[row] = new FormattedText(
                 labels is not null && index < labels.Count ? labels[index] ?? string.Empty : string.Empty,
                 CultureInfo.CurrentUICulture, FlowDirection.LeftToRight,
                 new Typeface(Services.Typography.Current, FontStyles.Normal, FontWeights.Normal, FontStretches.Normal),
@@ -167,6 +201,7 @@ public sealed class PatternBars : FrameworkElement
         PatternBars bars = (PatternBars)target;
         bars.cachedLabels = null;
         bars.cachedLabelSignature = null;
+        bars.visibleRows = null;
         bars.beginGrowth();
     }
 

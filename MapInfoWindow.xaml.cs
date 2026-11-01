@@ -89,20 +89,30 @@ public partial class MapInfoWindow : Window
 
         try
         {
-            DoubleAnimation fade = new(1, 0, TimeSpan.FromMilliseconds(120))
+            // 退场用 EaseIn：EaseOut 是"一开始就冲到底"，之前的 120ms 里前 40ms 就掉到
+            // 0.11 了，肉眼等于瞬间消失。EaseIn 前半段变化小，位移才看得出来。
+            DoubleAnimation fade = new(1, 0, TimeSpan.FromMilliseconds(170))
             {
-                EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut },
+                EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseIn },
                 FillBehavior = FillBehavior.HoldEnd
             };
             fade.Completed += (_, _) => finishExit();
             RootCard.BeginAnimation(OpacityProperty, fade, HandoffBehavior.SnapshotAndReplace);
 
-            DoubleAnimation slide = new(0, 6, TimeSpan.FromMilliseconds(120))
+            DoubleAnimation slide = new(0, 10, TimeSpan.FromMilliseconds(170))
             {
-                EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut },
+                EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseIn },
                 FillBehavior = FillBehavior.HoldEnd
             };
             CardSlide.BeginAnimation(TranslateTransform.YProperty, slide, HandoffBehavior.SnapshotAndReplace);
+
+            DoubleAnimation shrink = new(1, 0.985, TimeSpan.FromMilliseconds(170))
+            {
+                EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseIn },
+                FillBehavior = FillBehavior.HoldEnd
+            };
+            CardScale.BeginAnimation(ScaleTransform.ScaleXProperty, shrink, HandoffBehavior.SnapshotAndReplace);
+            CardScale.BeginAnimation(ScaleTransform.ScaleYProperty, shrink, HandoffBehavior.SnapshotAndReplace);
         }
         catch (Exception exception)
         {
@@ -115,7 +125,11 @@ public partial class MapInfoWindow : Window
     {
         RootCard.BeginAnimation(OpacityProperty, null);
         CardSlide.BeginAnimation(TranslateTransform.YProperty, null);
+        CardScale.BeginAnimation(ScaleTransform.ScaleXProperty, null);
+        CardScale.BeginAnimation(ScaleTransform.ScaleYProperty, null);
         CardSlide.Y = 0;
+        CardScale.ScaleX = 1;
+        CardScale.ScaleY = 1;
         Hide();
         exiting = false;
     }
@@ -124,6 +138,8 @@ public partial class MapInfoWindow : Window
     {
         RootCard.Opacity = 1;
         CardSlide.Y = 0;
+        CardScale.ScaleX = 1;
+        CardScale.ScaleY = 1;
         if (!SystemParameters.ClientAreaAnimation)
             return;
 
@@ -142,6 +158,14 @@ public partial class MapInfoWindow : Window
                 FillBehavior = FillBehavior.Stop
             };
             CardSlide.BeginAnimation(TranslateTransform.YProperty, slide, HandoffBehavior.SnapshotAndReplace);
+
+            DoubleAnimation grow = new(0.985, 1, TimeSpan.FromMilliseconds(220))
+            {
+                EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut },
+                FillBehavior = FillBehavior.Stop
+            };
+            CardScale.BeginAnimation(ScaleTransform.ScaleXProperty, grow, HandoffBehavior.SnapshotAndReplace);
+            CardScale.BeginAnimation(ScaleTransform.ScaleYProperty, grow, HandoffBehavior.SnapshotAndReplace);
         }
         catch (Exception exception)
         {
@@ -350,6 +374,21 @@ public partial class MapInfoWindow : Window
         }
 
         return string.Join("\n", parts);
+    }
+
+    /// <summary>开发用：Dismiss 之后采样不透明度，确认退场动画真的在跑而不是直接消失。</summary>
+    public async Task ProbeExitAsync()
+    {
+        AppLog.Info($"信息窗退场探针：ClientAreaAnimation={SystemParameters.ClientAreaAnimation}, " +
+                    $"IsVisible={IsVisible}, Opacity={RootCard.Opacity:0.00}, SlideY={CardSlide.Y:0.0}");
+        Dismiss();
+        for (int step = 0; step < 12; step++)
+        {
+            await Task.Delay(20);
+            AppLog.Info($"退场 {step * 20 + 20}ms：IsVisible={IsVisible}, Opacity={RootCard.Opacity:0.00}, SlideY={CardSlide.Y:0.0}");
+        }
+
+        AppLog.Info($"退场结束：IsVisible={IsVisible}, Opacity={RootCard.Opacity:0.00}, SlideY={CardSlide.Y:0.0}");
     }
 
     private void CloseButton_Click(object sender, RoutedEventArgs e) => Dismiss();

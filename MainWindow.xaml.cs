@@ -197,7 +197,10 @@ public partial class MainWindow : Window
             RenderDiagnostics.CaptureWindow(mapInfoWindow, infoPath);
         RenderDiagnostics.CaptureWindow(this, path);
 
-        mapInfoWindow?.Dismiss();
+        if (Environment.GetCommandLineArgs().Any(arg => arg == "--probe-exit") && mapInfoWindow is not null)
+            await mapInfoWindow.ProbeExitAsync();
+        else
+            mapInfoWindow?.Dismiss();
         Close();
     }
 
@@ -299,12 +302,12 @@ public partial class MainWindow : Window
             SkillSource = "MinaCalc",
             CoreShares = new Dictionary<string, double>
             {
-                ["Stream"] = 0.42,
-                ["Chordstream"] = 0.27,
-                ["Jacks"] = 0.11,
+                ["Stream"] = 0.46,
+                ["Chordstream"] = 0.31,
+                ["Jacks"] = 0.13,
                 ["Coordination"] = 0.10,
-                ["Density"] = 0.06,
-                ["Wildcard"] = 0.04
+                ["Density"] = 0,
+                ["Wildcard"] = 0
             },
             SpecificShares = new Dictionary<string, double>
             {

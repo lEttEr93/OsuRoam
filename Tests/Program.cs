@@ -21,6 +21,7 @@ testOszReaderReadsBeatmapText();
 testBeatmapDetailParses();
 testBeatmapDetailApproachRateFallsBackToOd();
 testDifficultyColourSpectrum();
+testPatternBarsSkipEmptyRows();
 testDifficultyProfilesAreIndependent();
 testUnlimitedDifficultyRange();
 testManiaKeysAreFiltered();
@@ -679,6 +680,27 @@ static void writeEntry(System.IO.Compression.ZipArchive archive, string name, st
     System.IO.Compression.ZipArchiveEntry entry = archive.CreateEntry(name);
     using StreamWriter writer = new(entry.Open());
     writer.Write(content);
+}
+
+/// <summary>直方图不该画 0% 的键型：0% 和四舍五入后是 0% 的行都跳过。</summary>
+static void testPatternBarsSkipEmptyRows()
+{
+    string[] labels = ["流", "和弦流", "叠键", "协调", "密度", "杂项"];
+    double[] shares = [0.46, 0.31, 0, 0.10, 0.001, 0.0049];
+
+    int[] rows = OsuRoam.Controls.PatternBars.VisibleRowIndices(labels, shares);
+    if (!rows.SequenceEqual([0, 1, 3]))
+        throw new InvalidOperationException($"0% 的行应被跳过，实际留下 [{string.Join(",", rows)}]");
+
+    // 1% 及以上要保留：0.006 * 100 = 0.6 → 四舍五入 1%
+    int[] kept = OsuRoam.Controls.PatternBars.VisibleRowIndices(labels, [0.006, 0.994, 0, 0, 0, 0]);
+    if (!kept.SequenceEqual([0, 1]))
+        throw new InvalidOperationException($"0.6% 应四舍五入成 1% 并保留，实际 [{string.Join(",", kept)}]");
+
+    // 全是 0 时不留任何行（卡片高度随之收缩）
+    int[] none = OsuRoam.Controls.PatternBars.VisibleRowIndices(labels, [0, 0, 0, 0, 0, 0]);
+    if (none.Length != 0)
+        throw new InvalidOperationException("全部是 0 时不应有可见行");
 }
 
 static bool isTrueType(byte[] bytes) =>
