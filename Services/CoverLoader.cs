@@ -35,8 +35,11 @@ public static class CoverLoader
     /// </summary>
     private const int BackdropWidth = 256;
 
-    /// <summary>烘焙模糊的半径（源图像素）。3 次 box blur 近似高斯，半径 6 ≈ 一个柔和的 10px 高斯。</summary>
-    private const int BlurRadius = 6;
+    /// <summary>
+    /// 烘焙模糊的 σ（源图像素，底图 256px 宽）。
+    /// 1.5 对应卡片上的"只糊一点点"：比双线性放大的马赛克柔，又不会把画面糊成色块。
+    /// </summary>
+    private const double BlurSigma = 1.5;
 
     /// <summary>背影从这一比例开始往下渐隐（0.3 = 上方 30% 完全保留）。</summary>
     private const double FadeStart = 0.30;
@@ -115,7 +118,7 @@ public static class CoverLoader
             }
             image.Freeze();
             BitmapSource? scaled = scaleDown(image);
-            BitmapSource? blurred = blurBitmap(scaled);
+            BitmapSource? blurred = blurBitmap(scaled, BlurSigma);
             return new CoverArt(
                 image,
                 createBackdrop(blurred, fade: true),
@@ -265,14 +268,14 @@ public static class CoverLoader
     }
 
     /// <summary>
-    /// 3 次 box blur 近似高斯。只在小图上做（256x71），所以用滑动窗口的可分离实现，
-    /// 单张耗时 &lt;1ms。边缘用"复制边界像素"而不是采样透明，避免把图形边缘糊淡——
-    /// 边缘的渐隐/羽化是后面单独按 smoothstep 烘的。
+    /// 可分离高斯模糊：先横向一卷、再纵向一卷。
+    /// 只在小图上做（256x71），核半径 ceil(3σ)=5，单张约 1~2ms，放在后台线程里可以忽略。
+    /// 边缘用"复制边界像素"而不是采样透明，避免把图形边缘糊淡——边缘的渐隐/羽化是后面单独烘的。
     /// </summary>
-    private static BitmapSource? blurBitmap(BitmapSource? source)
+    private static BitmapSource? blurBitmap(BitmapSource? source, double sigma)
     {
-        if (source is null)
-            return null;
+        if (source is null || sigma <= 0)
+            return source;
 
         try
         {
@@ -289,13 +292,11 @@ public static class CoverLoader
             byte[] buffer = new byte[stride * height];
             pixels.CopyPixels(buffer, stride, 0);
 
+            float[] kernel = gaussianKernel(sigma);
+            int radius = kernel.Length / 2;
             byte[] scratch = new byte[buffer.Length];
-            int radius = Math.Max(1, Math.Min(BlurRadius, Math.Min(width, height) / 2));
-            for (int pass = 0; pass < 3; pass++)
-            {
-                boxBlurHorizontal(buffer, scratch, width, height, radius);
-                boxBlurVertical(scratch, buffer, width, height, radius);
-            }
+            convolveHorizontal(buffer, scratch, width, height, kernel, radius);
+            convolveVertical(scratch, buffer, width, height, kernel, radius);
 
             BitmapSource blurred = BitmapSource.Create(
                 width, height, 96, 96, PixelFormats.Pbgra32, null, buffer, stride);
@@ -309,74 +310,81 @@ public static class CoverLoader
         }
     }
 
-    private static void boxBlurHorizontal(byte[] source, byte[] target, int width, int height, int radius)
+    /// <summary>归一化的一维高斯核，半径 ceil(3σ)（覆盖 99.7% 的能量）。</summary>
+    private static float[] gaussianKernel(double sigma)
     {
-        int window = radius * 2 + 1;
+        int radius = Math.Max(1, (int)Math.Ceiling(sigma * 3));
+        float[] kernel = new float[radius * 2 + 1];
+        double sum = 0;
+        for (int offset = -radius; offset <= radius; offset++)
+        {
+            double weight = Math.Exp(-(offset * offset) / (2 * sigma * sigma));
+            kernel[offset + radius] = (float)weight;
+            sum += weight;
+        }
+
+        for (int index = 0; index < kernel.Length; index++)
+            kernel[index] = (float)(kernel[index] / sum);
+        return kernel;
+    }
+
+    private static void convolveHorizontal(byte[] source, byte[] target, int width, int height, float[] kernel, int radius)
+    {
         for (int y = 0; y < height; y++)
         {
             int row = y * width * 4;
-            int b = 0, g = 0, r = 0, a = 0;
-            for (int offset = -radius; offset <= radius; offset++)
-            {
-                int index = row + Math.Clamp(offset, 0, width - 1) * 4;
-                b += source[index];
-                g += source[index + 1];
-                r += source[index + 2];
-                a += source[index + 3];
-            }
-
             for (int x = 0; x < width; x++)
             {
-                int outIndex = row + x * 4;
-                target[outIndex] = (byte)(b / window);
-                target[outIndex + 1] = (byte)(g / window);
-                target[outIndex + 2] = (byte)(r / window);
-                target[outIndex + 3] = (byte)(a / window);
+                float b = 0, g = 0, r = 0, a = 0;
+                for (int tap = -radius; tap <= radius; tap++)
+                {
+                    int index = row + Math.Clamp(x + tap, 0, width - 1) * 4;
+                    float weight = kernel[tap + radius];
+                    b += source[index] * weight;
+                    g += source[index + 1] * weight;
+                    r += source[index + 2] * weight;
+                    a += source[index + 3] * weight;
+                }
 
-                int addIndex = row + Math.Clamp(x + radius + 1, 0, width - 1) * 4;
-                int removeIndex = row + Math.Clamp(x - radius, 0, width - 1) * 4;
-                b += source[addIndex] - source[removeIndex];
-                g += source[addIndex + 1] - source[removeIndex + 1];
-                r += source[addIndex + 2] - source[removeIndex + 2];
-                a += source[addIndex + 3] - source[removeIndex + 3];
+                int outIndex = row + x * 4;
+                target[outIndex] = clampToByte(b);
+                target[outIndex + 1] = clampToByte(g);
+                target[outIndex + 2] = clampToByte(r);
+                target[outIndex + 3] = clampToByte(a);
             }
         }
     }
 
-    private static void boxBlurVertical(byte[] source, byte[] target, int width, int height, int radius)
+    private static void convolveVertical(byte[] source, byte[] target, int width, int height, float[] kernel, int radius)
     {
-        int window = radius * 2 + 1;
         int stride = width * 4;
         for (int x = 0; x < width; x++)
         {
             int column = x * 4;
-            int b = 0, g = 0, r = 0, a = 0;
-            for (int offset = -radius; offset <= radius; offset++)
-            {
-                int index = Math.Clamp(offset, 0, height - 1) * stride + column;
-                b += source[index];
-                g += source[index + 1];
-                r += source[index + 2];
-                a += source[index + 3];
-            }
-
             for (int y = 0; y < height; y++)
             {
-                int outIndex = y * stride + column;
-                target[outIndex] = (byte)(b / window);
-                target[outIndex + 1] = (byte)(g / window);
-                target[outIndex + 2] = (byte)(r / window);
-                target[outIndex + 3] = (byte)(a / window);
+                float b = 0, g = 0, r = 0, a = 0;
+                for (int tap = -radius; tap <= radius; tap++)
+                {
+                    int index = Math.Clamp(y + tap, 0, height - 1) * stride + column;
+                    float weight = kernel[tap + radius];
+                    b += source[index] * weight;
+                    g += source[index + 1] * weight;
+                    r += source[index + 2] * weight;
+                    a += source[index + 3] * weight;
+                }
 
-                int addIndex = Math.Clamp(y + radius + 1, 0, height - 1) * stride + column;
-                int removeIndex = Math.Clamp(y - radius, 0, height - 1) * stride + column;
-                b += source[addIndex] - source[removeIndex];
-                g += source[addIndex + 1] - source[removeIndex + 1];
-                r += source[addIndex + 2] - source[removeIndex + 2];
-                a += source[addIndex + 3] - source[removeIndex + 3];
+                int outIndex = y * stride + column;
+                target[outIndex] = clampToByte(b);
+                target[outIndex + 1] = clampToByte(g);
+                target[outIndex + 2] = clampToByte(r);
+                target[outIndex + 3] = clampToByte(a);
             }
         }
     }
+
+    private static byte clampToByte(float value) =>
+        value <= 0 ? (byte)0 : value >= 255 ? (byte)255 : (byte)(value + 0.5f);
 
     private static double smoothstep(double t) => t * t * (3 - 2 * t);
 

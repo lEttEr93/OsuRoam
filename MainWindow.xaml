@@ -109,11 +109,11 @@
                                         BorderThickness="1" CornerRadius="6" Margin="0,0,0,8" ClipToBounds="True"
                                         Loaded="RecommendationCard_Loaded">
                                     <Grid>
-                                        <!-- 2. 铺满整卡的模糊副本：让下半部分也有曲绘的颜色，不是纯黑 -->
+                                        <!-- 2. 铺满整卡的模糊副本（用未渐隐的 BackdropRaw，否则底部会透出空档） -->
                                         <Border CornerRadius="6" Opacity="0.18" IsHitTestVisible="False"
                                                 RenderOptions.BitmapScalingMode="HighQuality">
                                             <Border.Background>
-                                                <ImageBrush ImageSource="{Binding Backdrop}" Stretch="UniformToFill" />
+                                                <ImageBrush ImageSource="{Binding BackdropRaw}" Stretch="UniformToFill" />
                                             </Border.Background>
                                         </Border>
 

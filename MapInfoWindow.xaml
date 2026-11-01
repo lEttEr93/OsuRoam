@@ -29,7 +29,7 @@
             <Border CornerRadius="7" Opacity="0.20" IsHitTestVisible="False"
                     RenderOptions.BitmapScalingMode="HighQuality">
                 <Border.Background>
-                    <ImageBrush ImageSource="{Binding Backdrop}" Stretch="UniformToFill" />
+                    <ImageBrush ImageSource="{Binding BackdropRaw}" Stretch="UniformToFill" />
                 </Border.Background>
             </Border>
             <Border CornerRadius="7" Opacity="0.55" IsHitTestVisible="False"
