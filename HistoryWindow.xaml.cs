@@ -14,14 +14,20 @@ public partial class HistoryWindow : Window
 {
     private readonly AppSettings settings;
     private readonly SettingsStore settingsStore;
+    private readonly PatternLibrary? patternLibrary;
     private Window? dockOwner;
     private bool hiddenByOwner;
 
-    public HistoryWindow(ObservableCollection<RecommendationArchiveEntry> entries, AppSettings settings, SettingsStore settingsStore)
+    public HistoryWindow(
+        ObservableCollection<RecommendationArchiveEntry> entries,
+        AppSettings settings,
+        SettingsStore settingsStore,
+        PatternLibrary? patternLibrary = null)
     {
         InitializeComponent();
         this.settings = settings;
         this.settingsStore = settingsStore;
+        this.patternLibrary = patternLibrary;
 
         // 直接绑 store 的可观察集合：新增、替换、超限淘汰都会实时反映到面板上。
         HistoryList.ItemsSource = entries;
@@ -33,7 +39,7 @@ public partial class HistoryWindow : Window
     /// <summary>双击 tag 加入偏好后通知主窗口刷新高亮。</summary>
     public event Action? TagsChanged;
 
-    /// <summary>重新计算 tag 高亮并补齐封面；集合本身是实时绑定的，不需要重绑 ItemsSource。</summary>
+    /// <summary>重新计算 tag 高亮并补齐封面/键型；集合本身实时绑定，不需要重绑 ItemsSource。</summary>
     public void RefreshEntries(IReadOnlyList<RecommendationArchiveEntry> entries)
     {
         foreach (RecommendationArchiveEntry entry in entries)
@@ -41,7 +47,25 @@ public partial class HistoryWindow : Window
             entry.RefreshTagInclusion(settings.IncludedTags);
             if (entry.Cover is null)
                 entry.LoadCover();
+            // 旧记录没有落盘键型，用键型库按 beatmapId 补一份，让详情层对老记录也能用。
+            if (entry.Pattern is null && patternLibrary is not null &&
+                patternLibrary.TryGet(entry.BeatmapId) is { } pattern)
+            {
+                entry.ApplyPattern(pattern);
+            }
         }
+    }
+
+    private void DetailButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement { Tag: RecommendationArchiveEntry entry })
+            entry.ToggleDetail();
+    }
+
+    private void RadarToggleButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement { Tag: RecommendationArchiveEntry entry })
+            entry.ToggleRadar();
     }
 
     private void updateEmptyHint(int count) =>
@@ -107,10 +131,20 @@ public partial class HistoryWindow : Window
         if (sender is not Button { Tag: string tag } || !AppSettings.IsMeaningfulTag(tag))
             return;
 
+        // 用 Preview 版事件：Button 会把 MouseDown 标记为 Handled，普通 MouseDoubleClick 不一定触发。
+        e.Handled = true;
+
+        if (settings.IncludedTags.Contains(tag, StringComparer.OrdinalIgnoreCase))
+            return;
+
         settings.IncludedTags.Add(tag);
         settings.NormalizeTags();
         await settingsStore.SaveAsync(settings);
-        e.Handled = true;
+
+        // 立刻把本面板里所有同名 tag 的高亮刷掉，否则双击看起来“没反应”。
+        if (HistoryList.ItemsSource is IEnumerable<RecommendationArchiveEntry> all)
+            RefreshEntries(all.ToList());
+
         TagsChanged?.Invoke();
     }
 }

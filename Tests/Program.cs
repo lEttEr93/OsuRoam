@@ -1,3 +1,4 @@
+using System.Text.Json;
 using OsuRoam.Services;
 using OsuRoam.Models;
 
@@ -9,6 +10,7 @@ testResultsDetectedWithoutResultScreenState();
 testStaleResultsFromPreviousPlayAreIgnored();
 testQuotedExecutablePathIsNormalized();
 await testArchiveStorePublishesCollectionChangesAsync();
+testArchiveEntryDetailLayer();
 testDifficultyProfilesAreIndependent();
 testUnlimitedDifficultyRange();
 testManiaKeysAreFiltered();
@@ -179,6 +181,77 @@ static async Task testArchiveStorePublishesCollectionChangesAsync()
         Directory.Delete(directory, true);
     }
 }
+
+static void testArchiveEntryDetailLayer()
+{
+    ManiaPattern pattern = new()
+    {
+        BeatmapId = 11,
+        BeatmapsetId = 22,
+        KeyCount = 4,
+        CoreShares = new() { ["Stream"] = 0.6, ["Jacks"] = 0.4 },
+        SpecificShares = new() { ["Jumpstream"] = 0.5 },
+        SkillAxes = [1, 2, 3, 4, 5, 6, 7],
+        SkillSource = "MinaCalc 23.1",
+        ModeTag = "RC",
+        Category = "Stream",
+        LnRatio = 0.1,
+        NotesPerSecond = 7.5
+    };
+
+    RecommendationItem item = sampleRecommendationItem();
+    item.ApplyPattern(pattern);
+    RecommendationArchiveEntry entry = RecommendationArchiveEntry.FromItem(item);
+
+    assertTrue(ReferenceEquals(pattern, entry.Pattern), "历史记录应带上键型快照");
+    assertEqual(6, entry.RadarLabels.Count, "默认雷达应是 6 轴核心键型");
+    assertNear(0.6, entry.RadarValues[0], "核心雷达第一轴应来自 CoreShares");
+
+    entry.ToggleRadar();
+    assertEqual(7, entry.RadarLabels.Count, "切到技能后应有 7 个轴");
+    assertNear(3.0, entry.RadarValues[2], "技能雷达应使用 SkillAxes");
+
+    entry.ToggleDetail();
+    assertTrue(entry.IsDetailVisible && !entry.IsSummaryVisible, "详情层与摘要层必须互斥");
+    assertTrue(entry.DetailLines.Any(line => line.Contains("MinaCalc", StringComparison.Ordinal)),
+        "技能雷达下详情应显示技能轴来源");
+
+    // history.json 要能存下键型快照，否则面板里永远是空雷达
+    string json = JsonSerializer.Serialize(entry);
+    RecommendationArchiveEntry? restored = JsonSerializer.Deserialize<RecommendationArchiveEntry>(json);
+    assertTrue(restored?.Pattern is not null, "键型快照应能存进 history.json");
+    assertNear(0.6, restored!.Pattern!.CoreShares["Stream"], "键型数据往返后应保持一致");
+    assertNear(3.0, restored.Pattern.SkillAxes[2], "技能轴往返后应保持一致");
+
+    // 没有键型数据时给提示，而不是一片空白雷达
+    RecommendationArchiveEntry empty = new()
+    {
+        Mapper = "mapper",
+        Stars = 3,
+        Bpm = 180,
+        LengthSeconds = 100,
+        RankedYear = 2024
+    };
+    assertTrue(!empty.HasPattern, "没有键型时应标记为缺失");
+    assertTrue(empty.DetailLines.Any(line => line.Contains("没有键型数据", StringComparison.Ordinal)),
+        "缺键型数据时应给出提示");
+}
+
+static RecommendationItem sampleRecommendationItem() => new()
+{
+    BeatmapId = 11,
+    BeatmapsetId = 22,
+    Artist = "artist",
+    Title = "title",
+    DifficultyName = "4K",
+    Mapper = "mapper",
+    Stars = 3,
+    Bpm = 180,
+    LengthSeconds = 120,
+    RankedYear = 2024,
+    Score = 0,
+    Reason = "test"
+};
 
 static void testDifficultyProfilesAreIndependent()
 {

@@ -419,7 +419,7 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
 
         if (historyWindow is null)
         {
-            historyWindow = new HistoryWindow(archiveStore.Entries, settings, settingsStore);
+            historyWindow = new HistoryWindow(archiveStore.Entries, settings, settingsStore, patternLibrary);
             historyWindow.TagsChanged += () =>
             {
                 refreshTagList();
