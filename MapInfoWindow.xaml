@@ -24,7 +24,33 @@
             </TransformGroup>
         </Border.RenderTransform>
 
-        <Grid Margin="11,9,11,10">
+        <Grid>
+            <!-- 曲绘背景：铺满整块的模糊底 + 顶部整幅（下边缘已烘好 alpha 渐隐）+ 压暗 -->
+            <Border CornerRadius="7" Opacity="0.20" IsHitTestVisible="False"
+                    RenderOptions.BitmapScalingMode="HighQuality">
+                <Border.Background>
+                    <ImageBrush ImageSource="{Binding Backdrop}" Stretch="UniformToFill" />
+                </Border.Background>
+            </Border>
+            <Border CornerRadius="7" Opacity="0.55" IsHitTestVisible="False"
+                    RenderOptions.BitmapScalingMode="HighQuality">
+                <Border.Background>
+                    <ImageBrush ImageSource="{Binding Backdrop}" Stretch="Uniform"
+                                AlignmentX="Center" AlignmentY="Top" />
+                </Border.Background>
+            </Border>
+            <Border IsHitTestVisible="False">
+                <Border.Background>
+                    <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
+                        <GradientStop Color="#6A121416" Offset="0" />
+                        <GradientStop Color="#A4121416" Offset="0.35" />
+                        <GradientStop Color="#C8121416" Offset="0.72" />
+                        <GradientStop Color="#DC121416" Offset="1" />
+                    </LinearGradientBrush>
+                </Border.Background>
+            </Border>
+
+            <Grid Margin="11,9,11,10">
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" />
@@ -37,17 +63,11 @@
             <!-- 头部：封面 + 曲名 + 难度 + 谱师 -->
             <Grid Grid.Row="0">
                 <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="*" />
                     <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
 
-                <Border Width="56" Height="56" CornerRadius="4" Background="#30353A" ClipToBounds="True">
-                    <Image Source="{Binding Cover}" Stretch="UniformToFill"
-                           HorizontalAlignment="Center" VerticalAlignment="Center" />
-                </Border>
-
-                <StackPanel Grid.Column="1" Margin="9,0,6,0" VerticalAlignment="Center">
+                <StackPanel Margin="0,0,6,0" VerticalAlignment="Center">
                     <TextBlock x:Name="TrackTitle" FontSize="13" FontWeight="SemiBold"
                                TextTrimming="CharacterEllipsis" />
                     <TextBlock x:Name="TrackDifficulty" FontSize="11" Foreground="{StaticResource SecondaryBrush}"
@@ -56,7 +76,7 @@
                                Margin="0,1,0,0" TextTrimming="CharacterEllipsis" />
                 </StackPanel>
 
-                <Button x:Name="CloseButton" Grid.Column="2" Content="×" Width="26" Height="26" Padding="0"
+                <Button x:Name="CloseButton" Grid.Column="1" Content="×" Width="26" Height="26" Padding="0"
                         VerticalAlignment="Top" Click="CloseButton_Click"
                         ToolTip="关闭（下次导入谱面时会再出现）" />
             </Grid>
@@ -99,6 +119,7 @@
 
             <TextBlock x:Name="ReasonText" Grid.Row="5" Margin="0,5,0,0" FontSize="10"
                        TextWrapping="Wrap" Foreground="{StaticResource WarningBrush}" />
+            </Grid>
         </Grid>
     </Border>
 </Window>

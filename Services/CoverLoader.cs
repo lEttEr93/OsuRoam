@@ -15,8 +15,14 @@ namespace OsuRoam.Services;
 /// 线程注意：解码必须离开 UI 线程。之前 await 之后会回到 UI 上下文再 EndInit，
 /// 一张封面解码十几毫秒，预取/翻页时会直接吃掉动画的帧预算（渲染诊断里的 p95 尖峰）。
 /// </summary>
-/// <summary>一张曲绘的两种用途：<paramref name="Cover"/> 给缩略图，<paramref name="Backdrop"/> 给卡片背景。</summary>
-public sealed record CoverArt(ImageSource? Cover, ImageSource? Backdrop);
+/// <summary>
+/// 一张曲绘的几种用途：
+/// <paramref name="Cover"/> 是 256px 的清晰版（缩略图 / 需要细节时用），
+/// <paramref name="Backdrop"/> 是 96px 且下边缘已经渐隐的版本（卡片背景），
+/// <paramref name="BackdropRaw"/> 是同一张 96px 但不做渐隐，
+/// <paramref name="Bar"/> 是左右两边羽化过的版本（迷你播放器里居中铺一条，边界要融进模糊底）。
+/// </summary>
+public sealed record CoverArt(ImageSource? Cover, ImageSource? Backdrop, ImageSource? BackdropRaw, ImageSource? Bar);
 
 public static class CoverLoader
 {
@@ -32,6 +38,9 @@ public static class CoverLoader
     /// <summary>背影从这一比例开始往下渐隐（0.3 = 上方 30% 完全保留）。</summary>
     private const double FadeStart = 0.30;
 
+    /// <summary>迷你播放器用的左右羽化宽度（0.22 = 两侧各 22% 渐隐）。</summary>
+    private const double EdgeFade = 0.22;
+
     private static readonly HttpClient Http = new() { Timeout = TimeSpan.FromSeconds(20) };
     private static readonly Dictionary<int, CoverArt> Cache = [];
     private static readonly HashSet<int> Loading = [];
@@ -43,7 +52,7 @@ public static class CoverLoader
     {
         if (beatmapsetId <= 0)
         {
-            apply(new CoverArt(null, null));
+            apply(new CoverArt(null, null, null, null));
             return;
         }
 
@@ -79,8 +88,8 @@ public static class CoverLoader
         catch (Exception exception)
         {
             AppLog.Error($"加载曲绘失败：set={beatmapsetId}", exception);
-            lock (Cache) Cache[beatmapsetId] = new CoverArt(null, null);
-            post(() => apply(new CoverArt(null, null)));
+            lock (Cache) Cache[beatmapsetId] = new CoverArt(null, null, null, null);
+            post(() => apply(new CoverArt(null, null, null, null)));
         }
         finally
         {
@@ -102,31 +111,54 @@ public static class CoverLoader
                 image.EndInit();
             }
             image.Freeze();
-            return new CoverArt(image, createBackdrop(image));
+            BitmapSource? scaled = scaleDown(image);
+            return new CoverArt(
+                image,
+                createBackdrop(scaled, fade: true),
+                scaled,
+                createBarBackdrop(scaled));
         }
         catch (Exception exception)
         {
             AppLog.Error("曲绘解码失败", exception);
-            return new CoverArt(null, null);
+            return new CoverArt(null, null, null, null);
+        }
+    }
+
+    /// <summary>缩到 96px 宽；卡片背景和迷你播放器共用同一张底图。</summary>
+    private static BitmapSource? scaleDown(BitmapSource source)
+    {
+        try
+        {
+            if (source.PixelWidth <= BackdropWidth)
+                return source;
+
+            double scale = (double)BackdropWidth / source.PixelWidth;
+            TransformedBitmap scaled = new(source, new ScaleTransform(scale, scale));
+            scaled.Freeze();
+            return scaled;
+        }
+        catch (Exception exception)
+        {
+            AppLog.Error("曲绘背影缩放失败", exception);
+            return null;
         }
     }
 
     /// <summary>
-    /// 把缩略图缩到 96px 宽当背影用，并烘一条竖直 alpha 渐隐：
-    /// 上方 <see cref="FadeStart"/> 保持原样，往下按 smoothstep 收到完全透明。
-    ///
-    /// 这样图的下边缘是"透明"的，不会在卡片上留一条硬横线；渐隐比例又是烘在位图里的，
-    /// 卡片高度怎么变、放大多少倍都自动成立。
+    /// 生成 96px 背影。<paramref name="fade"/> 为 true 时把下 70% 的 alpha 按 smoothstep 收到 0：
+    /// 卡片里整幅曲绘只占顶部一条，这样下边缘不会有硬横线；
+    /// 迷你播放器那种"按高度填满"的场景不需要（也不能）渐隐，用 false。
     /// </summary>
-    private static ImageSource? createBackdrop(BitmapSource source)
+    private static ImageSource? createBackdrop(BitmapSource? scaled, bool fade)
     {
+        if (scaled is null)
+            return null;
+        if (!fade)
+            return scaled;
+
         try
         {
-            double scale = Math.Min(1.0, (double)BackdropWidth / source.PixelWidth);
-            BitmapSource scaled = scale < 1.0
-                ? new TransformedBitmap(source, new ScaleTransform(scale, scale))
-                : source;
-
             BitmapSource pixels = scaled.Format == PixelFormats.Bgra32 || scaled.Format == PixelFormats.Pbgra32
                 ? scaled
                 : new FormatConvertedBitmap(scaled, PixelFormats.Pbgra32, null, 0);
@@ -168,8 +200,63 @@ public static class CoverLoader
         }
         catch (Exception exception)
         {
-            AppLog.Error("曲绘背影生成失败", exception);
+            AppLog.Error("曲绘背影渐隐失败", exception);
+            return scaled;
+        }
+    }
+
+    /// <summary>
+    /// 迷你播放器用的版本：左右各 <see cref="EdgeFade"/> 横向羽化。
+    /// 那条只有 64px 高，曲绘按高度铺满后左右会留出模糊底，"硬边"就出现在图的两侧，
+    /// 所以这里做的是横向渐隐（纵向不渐隐）。
+    /// </summary>
+    private static ImageSource? createBarBackdrop(BitmapSource? scaled)
+    {
+        if (scaled is null)
             return null;
+
+        try
+        {
+            BitmapSource pixels = scaled.Format == PixelFormats.Bgra32 || scaled.Format == PixelFormats.Pbgra32
+                ? scaled
+                : new FormatConvertedBitmap(scaled, PixelFormats.Pbgra32, null, 0);
+
+            int width = pixels.PixelWidth;
+            int height = pixels.PixelHeight;
+            if (width <= 1 || height <= 0)
+                return scaled;
+
+            int stride = width * 4;
+            byte[] buffer = new byte[stride * height];
+            pixels.CopyPixels(buffer, stride, 0);
+
+            for (int x = 0; x < width; x++)
+            {
+                double progress = x / (double)(width - 1);
+                double edge = Math.Min(progress, 1 - progress) / EdgeFade;
+                if (edge >= 1)
+                    continue;
+
+                double keep = smoothstep(Math.Clamp(edge, 0, 1));
+                for (int y = 0; y < height; y++)
+                {
+                    int index = y * stride + x * 4;
+                    buffer[index] = (byte)(buffer[index] * keep);
+                    buffer[index + 1] = (byte)(buffer[index + 1] * keep);
+                    buffer[index + 2] = (byte)(buffer[index + 2] * keep);
+                    buffer[index + 3] = (byte)(buffer[index + 3] * keep);
+                }
+            }
+
+            BitmapSource feathered = BitmapSource.Create(
+                width, height, 96, 96, PixelFormats.Pbgra32, null, buffer, stride);
+            feathered.Freeze();
+            return feathered;
+        }
+        catch (Exception exception)
+        {
+            AppLog.Error("曲绘横向羽化失败", exception);
+            return scaled;
         }
     }
 

@@ -35,6 +35,8 @@ public sealed class RecommendationArchiveEntry : INotifyPropertyChanged
 
     private System.Windows.Media.ImageSource? cover;
     private System.Windows.Media.ImageSource? backdrop;
+    private System.Windows.Media.ImageSource? backdropRaw;
+    private System.Windows.Media.ImageSource? backdropBar;
 
     /// <summary>由 CoverLoader 用程序自己的 HttpClient 拉下来的封面。</summary>
     [JsonIgnore]
@@ -60,10 +62,36 @@ public sealed class RecommendationArchiveEntry : INotifyPropertyChanged
         }
     }
 
+    /// <summary>和 <see cref="Backdrop"/> 同一张 96px 图，但没有下边缘渐隐。</summary>
+    [JsonIgnore]
+    public System.Windows.Media.ImageSource? BackdropRaw
+    {
+        get => backdropRaw;
+        private set
+        {
+            backdropRaw = value;
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(BackdropRaw)));
+        }
+    }
+
+    /// <summary>左右羽化过的版本，迷你播放器里居中铺一条用。</summary>
+    [JsonIgnore]
+    public System.Windows.Media.ImageSource? BackdropBar
+    {
+        get => backdropBar;
+        private set
+        {
+            backdropBar = value;
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(BackdropBar)));
+        }
+    }
+
     public void LoadCover() => Services.CoverLoader.Load(BeatmapsetId, art =>
     {
         Cover = art.Cover;
         Backdrop = art.Backdrop;
+        BackdropRaw = art.BackdropRaw;
+        BackdropBar = art.Bar;
     });
 
     [JsonIgnore]

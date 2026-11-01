@@ -20,11 +20,41 @@
                     <ColumnDefinition Width="*" />
                     <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
+
+                <!-- 迷你播放器曲绘背景：只在折叠态显示（和 MiniPlayerHeader 一起显隐）。
+                     这条只有 64px 高，整幅曲绘是"按高度对齐"填满，因此用不渐隐的 BackdropRaw；
+                     左右空出来的部分交给铺满整条的模糊底。 -->
+                <Grid x:Name="MiniBackdrop" Grid.ColumnSpan="2" Visibility="Collapsed" IsHitTestVisible="False"
+                      DataContext="{Binding ElementName=MiniPlayerHeader, Path=DataContext}">
+                    <Border CornerRadius="7,7,0,0" Opacity="0.30"
+                            RenderOptions.BitmapScalingMode="HighQuality">
+                        <Border.Background>
+                            <ImageBrush ImageSource="{Binding BackdropRaw}" Stretch="UniformToFill" />
+                        </Border.Background>
+                    </Border>
+                    <Border CornerRadius="7,7,0,0" Opacity="0.50"
+                            RenderOptions.BitmapScalingMode="HighQuality">
+                        <Border.Background>
+                            <ImageBrush ImageSource="{Binding BackdropBar}" Stretch="Uniform"
+                                        AlignmentX="Center" AlignmentY="Center" />
+                        </Border.Background>
+                    </Border>
+                    <Border CornerRadius="7,7,0,0">
+                        <Border.Background>
+                            <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
+                                <GradientStop Color="#5A121416" Offset="0" />
+                                <GradientStop Color="#8E121416" Offset="0.55" />
+                                <GradientStop Color="#B4121416" Offset="1" />
+                            </LinearGradientBrush>
+                        </Border.Background>
+                    </Border>
+                </Grid>
+
                 <StackPanel x:Name="NormalHeader" Margin="14,0" VerticalAlignment="Center">
                     <TextBlock Text="osu! Roam" FontSize="16" FontWeight="SemiBold" />
                     <TextBlock x:Name="ConnectionText" Text="尚未启动" Foreground="{StaticResource MutedTextBrush}" FontSize="11" />
                 </StackPanel>
-                <Grid x:Name="MiniPlayerHeader" Visibility="Collapsed" Margin="10,0,4,0" VerticalAlignment="Center">
+                <Grid x:Name="MiniPlayerHeader" Visibility="Collapsed" Margin="14,0,4,0" VerticalAlignment="Center">
                     <Grid.RenderTransform>
                         <TransformGroup>
                             <ScaleTransform x:Name="MiniHeaderScale" />
@@ -32,15 +62,10 @@
                         </TransformGroup>
                     </Grid.RenderTransform>
                     <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="38" />
                         <ColumnDefinition Width="*" />
                         <ColumnDefinition Width="58" />
                     </Grid.ColumnDefinitions>
-                    <Border Width="34" Height="34" CornerRadius="4" ClipToBounds="True" Background="#30353A">
-                        <Image Source="{Binding Cover}" Stretch="UniformToFill"
-                               HorizontalAlignment="Center" VerticalAlignment="Center" />
-                    </Border>
-                    <StackPanel Grid.Column="1" Margin="7,0,7,0" VerticalAlignment="Center">
+                    <StackPanel Margin="0,0,7,0" VerticalAlignment="Center">
                         <TextBlock Text="{Binding DisplayTitle, FallbackValue=尚未导入谱面, TargetNullValue=尚未导入谱面}"
                                    FontWeight="SemiBold" FontSize="12" TextTrimming="CharacterEllipsis" />
                         <TextBlock x:Name="MiniTrackDetailText" Text="等待漫游"
@@ -50,7 +75,7 @@
                             </TextBlock.RenderTransform>
                         </TextBlock>
                     </StackPanel>
-                    <Button x:Name="MiniNextButton" Grid.Column="2" Width="58" Height="30" Padding="0"
+                    <Button x:Name="MiniNextButton" Grid.Column="1" Width="58" Height="30" Padding="0"
                             Content="下一首" Click="MiniNextButton_Click" ToolTip="下载并导入下一首" />
                 </Grid>
                 <StackPanel Grid.Column="1" Orientation="Horizontal" Margin="0,7,7,7">

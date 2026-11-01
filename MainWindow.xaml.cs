@@ -185,10 +185,11 @@ public partial class MainWindow : Window
         RecommendationItem item = buildSnapshotItem();
         currentRoamItem = item;
         refreshMiniPlayer();
-        await Task.Delay(500);
+        // 等曲绘下载完（截图模式是现拉的，本机最慢 3.4s）
+        await Task.Delay(4200);
 
         showMapInfoFor(item);
-        await Task.Delay(1400);
+        await Task.Delay(1200);
 
         string infoPath = path.EndsWith(".png", StringComparison.OrdinalIgnoreCase)
             ? path[..^4] + "-info.png"
@@ -1808,6 +1809,7 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
             Footer.Visibility = Visibility.Collapsed;
             NormalHeader.Visibility = Visibility.Collapsed;
             MiniPlayerHeader.Visibility = Visibility.Visible;
+            MiniBackdrop.Visibility = Visibility.Visible;
             refreshMiniPlayer();
             MinHeight = 64;
             MinWidth = 390;
@@ -1827,6 +1829,7 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
             Footer.Visibility = Visibility.Visible;
             NormalHeader.Visibility = Visibility.Visible;
             MiniPlayerHeader.Visibility = Visibility.Collapsed;
+            MiniBackdrop.Visibility = Visibility.Collapsed;
             MainContent.ClearValue(HeightProperty);
             if (historyWasVisible && historyWindow is not null)
             {
