@@ -164,6 +164,12 @@ public partial class MainWindow : Window
             return;
         }
 
+        if (Environment.GetCommandLineArgs().Any(arg => arg == "--with-detail"))
+        {
+            await runDetailSnapshotAsync(path);
+            return;
+        }
+
         seedDiagnosticCards();
         await Task.Delay(1800);
         RenderDiagnostics.CaptureWindow(this, path);
@@ -192,6 +198,36 @@ public partial class MainWindow : Window
         RenderDiagnostics.CaptureWindow(this, path);
 
         mapInfoWindow?.Dismiss();
+        Close();
+    }
+
+    /// <summary>开发用：把卡片翻到详情层（雷达 + 直方图），需要时再开历史面板截一张。</summary>
+    private async Task runDetailSnapshotAsync(string path)
+    {
+        RecommendationItem item = buildSnapshotItem();
+        recommendations.Add(item);
+        item.ToggleDetail();
+        await Task.Delay(900);
+        RenderDiagnostics.CaptureWindow(this, path);
+
+        if (!Environment.GetCommandLineArgs().Any(arg => arg == "--with-history"))
+        {
+            Close();
+            return;
+        }
+
+        recordArchive(item);
+        archiveStore.Entries.FirstOrDefault()?.ToggleDetail();
+        HistoryButton_Click(this, new RoutedEventArgs());
+        await Task.Delay(900);
+        if (historyWindow is not null)
+        {
+            string historyPath = path.EndsWith(".png", StringComparison.OrdinalIgnoreCase)
+                ? path[..^4] + "-history.png"
+                : path + "-history.png";
+            RenderDiagnostics.CaptureWindow(historyWindow, historyPath);
+        }
+
         Close();
     }
 
@@ -550,12 +586,6 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
     {
         if (sender is FrameworkElement { Tag: RecommendationItem item })
             item.ToggleDetail();
-    }
-
-    private void RadarToggleButton_Click(object sender, RoutedEventArgs e)
-    {
-        if (sender is FrameworkElement { Tag: RecommendationItem item })
-            item.ToggleRadar();
     }
 
     /// <summary>只有「导入」或「开始游玩」才记入历史，单纯进推荐池不算。</summary>
@@ -1873,7 +1903,6 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
             completed?.Invoke();
         }
     }
-
 
     private void CloseButton_Click(object sender, RoutedEventArgs e) => Close();
 

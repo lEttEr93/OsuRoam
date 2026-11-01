@@ -80,13 +80,12 @@
                 </Grid.ColumnDefinitions>
 
                 <StackPanel x:Name="RadarPanel" Width="152">
+                    <!-- 只保留 7 轴技能雷达；6 个核心键型占比和上面不是一类数据，用直方图 -->
                     <controls:RadarChart x:Name="Radar" Width="152" Height="152" HorizontalAlignment="Center"
                                          LabelFontFamily="{DynamicResource UiFont}" />
-                    <Button x:Name="RadarToggle" Content="切到技能" FontSize="10" Padding="8,1" Margin="0,2,0,0"
-                            HorizontalAlignment="Center" Click="RadarToggle_Click" ToolTip="切换雷达图轴" />
                 </StackPanel>
 
-                <StackPanel x:Name="BarsPanel" Grid.Column="1" Margin="12,0,0,0" VerticalAlignment="Center" />
+                <controls:PatternBars x:Name="Bars" Grid.Column="1" Margin="12,0,0,0" VerticalAlignment="Center" />
             </Grid>
 
             <Border Grid.Row="3" Height="1" Background="#242A30" Margin="0,10,0,8" />

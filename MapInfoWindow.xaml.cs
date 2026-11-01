@@ -31,7 +31,6 @@ public partial class MapInfoWindow : Window
 
     private Window? dockOwner;
     private RecommendationItem? currentItem;
-    private bool showSkillRadar;
     private bool exiting;
 
     public MapInfoWindow()
@@ -287,101 +286,31 @@ public partial class MapInfoWindow : Window
             PatternRow.Visibility = Visibility.Collapsed;
             Radar.Labels = null;
             Radar.Values = null;
-            BarsPanel.Children.Clear();
+            Bars.Labels = null;
+            Bars.Shares = null;
             return;
         }
 
         PatternRow.Visibility = Visibility.Visible;
 
-        bool useSkill = showSkillRadar && pattern.SkillAxes.Length == ManiaPattern.SkillPatterns.Length;
-        Radar.Labels = useSkill ? ManiaPattern.SkillPatternShortLabels : ManiaPattern.CorePatternShortLabels;
-        Radar.Values = useSkill ? pattern.SkillAxes : pattern.ToVector();
-        RadarToggle.Content = showSkillRadar ? "切到键型" : "切到技能";
-        RadarToggle.Visibility = pattern.SkillAxes.Length == ManiaPattern.SkillPatterns.Length
-            ? Visibility.Visible
-            : Visibility.Collapsed;
-
-        buildBars(pattern);
-    }
-
-    /// <summary>6 个核心型占比条，长度按占比、进场时横向生长（和 MMA 的 cluster-fill 一致）。</summary>
-    private void buildBars(ManiaPattern pattern)
-    {
-        BarsPanel.Children.Clear();
-        double[] vector = pattern.ToVector();
-
-        for (int index = 0; index < ManiaPattern.CorePatterns.Length; index++)
+        // 7 轴技能强度：各轴独立，适合雷达图。
+        if (pattern.SkillAxes.Length == ManiaPattern.SkillPatterns.Length)
         {
-            double share = Math.Clamp(vector[index], 0, 1);
-            string label = ManiaPattern.CorePatternLabels[index];
-
-            Grid row = new() { Margin = new Thickness(0, 0, 0, 5) };
-            row.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-            row.RowDefinitions.Add(new RowDefinition { Height = new GridLength(6) });
-
-            DockPanel header = new() { Margin = new Thickness(0, 0, 0, 2) };
-            TextBlock value = new()
-            {
-                Text = share.ToString("P0"),
-                FontSize = 9,
-                FontWeight = FontWeights.SemiBold,
-                Foreground = TextBrush
-            };
-            TextBlock name = new() { Text = label, FontSize = 9, Foreground = MutedBrush };
-            DockPanel.SetDock(value, Dock.Right);
-            header.Children.Add(value);
-            header.Children.Add(name);
-            Grid.SetRow(header, 0);
-            row.Children.Add(header);
-
-            Grid bar = new();
-            bar.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(Math.Max(0.001, share), GridUnitType.Star) });
-            bar.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(Math.Max(0.001, 1 - share), GridUnitType.Star) });
-
-            Border fill = new()
-            {
-                Background = (Brush)FindResource("BarFillBrush"),
-                CornerRadius = new CornerRadius(3),
-                RenderTransformOrigin = new Point(0, 0.5),
-                RenderTransform = new ScaleTransform(1, 1)
-            };
-            Grid.SetColumn(fill, 0);
-            bar.Children.Add(fill);
-
-            Border track = new()
-            {
-                Background = TrackBrush,
-                CornerRadius = new CornerRadius(3),
-                ClipToBounds = true,
-                Child = bar
-            };
-            Grid.SetRow(track, 1);
-            row.Children.Add(track);
-
-            BarsPanel.Children.Add(row);
-            animateBar(fill);
+            RadarPanel.Visibility = Visibility.Visible;
+            Radar.Labels = ManiaPattern.SkillPatternShortLabels;
+            Radar.Values = pattern.SkillAxes;
         }
-    }
-
-    private void animateBar(Border fill)
-    {
-        if (!SystemParameters.ClientAreaAnimation || fill.RenderTransform is not ScaleTransform scale)
-            return;
-
-        try
+        else
         {
-            DoubleAnimation grow = new(0, 1, TimeSpan.FromMilliseconds(380))
-            {
-                EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut },
-                FillBehavior = FillBehavior.Stop
-            };
-            scale.BeginAnimation(ScaleTransform.ScaleXProperty, grow, HandoffBehavior.SnapshotAndReplace);
+            // 没有技能轴时宁可空着，也不要拿"占比和 = 1"的核心键型去凑雷达图。
+            RadarPanel.Visibility = Visibility.Collapsed;
+            Radar.Labels = null;
+            Radar.Values = null;
         }
-        catch (Exception exception)
-        {
-            AppLog.Error("键型占比条动画失败", exception);
-            scale.ScaleX = 1;
-        }
+
+        // 6 个核心键型占比：加起来是 1，用直方图看长短（雷达图会误导）。
+        Bars.Labels = ManiaPattern.CorePatternLabels;
+        Bars.Shares = pattern.ToVector();
     }
 
     private static string buildDetailLine(RecommendationItem item)
@@ -421,13 +350,6 @@ public partial class MapInfoWindow : Window
         }
 
         return string.Join("\n", parts);
-    }
-
-    private void RadarToggle_Click(object sender, RoutedEventArgs e)
-    {
-        showSkillRadar = !showSkillRadar;
-        if (currentItem is not null)
-            buildPattern(currentItem);
     }
 
     private void CloseButton_Click(object sender, RoutedEventArgs e) => Dismiss();

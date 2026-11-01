@@ -214,17 +214,24 @@ static void testArchiveEntryDetailLayer()
     RecommendationArchiveEntry entry = RecommendationArchiveEntry.FromItem(item);
 
     assertTrue(ReferenceEquals(pattern, entry.Pattern), "历史记录应带上键型快照");
-    assertEqual(6, entry.RadarLabels.Count, "默认雷达应是 6 轴核心键型");
-    assertNear(0.6, entry.RadarValues[0], "核心雷达第一轴应来自 CoreShares");
 
-    entry.ToggleRadar();
-    assertEqual(7, entry.RadarLabels.Count, "切到技能后应有 7 个轴");
+    // 6 个核心键型的占比和为 1（此消彼长），只能进直方图；雷达图只留 7 轴技能。
+    assertEqual(7, entry.RadarLabels.Count, "雷达应只有 7 轴技能");
     assertNear(3.0, entry.RadarValues[2], "技能雷达应使用 SkillAxes");
+    assertEqual(6, entry.PatternBars.Count, "直方图应有 6 个核心键型");
+    assertNear(0.6, entry.PatternBars[0], "直方图第一格应来自 CoreShares");
+    assertEqual(6, entry.PatternBarLabels.Count, "直方图标签数应与数据对齐");
 
     entry.ToggleDetail();
     assertTrue(entry.IsDetailVisible && !entry.IsSummaryVisible, "详情层与摘要层必须互斥");
     assertTrue(entry.DetailLines.Any(line => line.Contains("MinaCalc", StringComparison.Ordinal)),
-        "技能雷达下详情应显示技能轴来源");
+        "详情应显示技能轴来源");
+    assertTrue(!entry.DetailLines.Any(line => line.StartsWith("Jumpstream", StringComparison.Ordinal)),
+        "各键型占比应交给直方图，不要再用文字重复一遍");
+
+    // 没有键型数据时直方图为空，避免画出一排 0
+    RecommendationArchiveEntry bare = new() { Mapper = "m", Stars = 3, Bpm = 180, LengthSeconds = 100, RankedYear = 2024 };
+    assertEqual(0, bare.PatternBars.Count, "没有键型时直方图应为空");
 
     // history.json 要能存下键型快照，否则面板里永远是空雷达
     string json = JsonSerializer.Serialize(entry);

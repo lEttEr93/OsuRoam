@@ -75,7 +75,6 @@ public sealed class RecommendationArchiveEntry : INotifyPropertyChanged
     public ManiaPattern? Pattern { get; set; }
 
     private bool isDetailVisible;
-    private bool showSkillRadar;
 
     [JsonIgnore]
     public bool IsDetailVisible => isDetailVisible;
@@ -86,26 +85,21 @@ public sealed class RecommendationArchiveEntry : INotifyPropertyChanged
     [JsonIgnore]
     public bool HasPattern => Pattern is not null;
 
+    /// <summary>只保留 7 轴技能雷达；6 个核心键型占比改用直方图（占比和为 1，雷达图会误导）。</summary>
     [JsonIgnore]
-    public string RadarToggleLabel => showSkillRadar ? "切到键型" : "切到技能";
+    public IReadOnlyList<string> RadarLabels => ManiaPattern.SkillPatternShortLabels;
 
     [JsonIgnore]
-    public IReadOnlyList<string> RadarLabels => showSkillRadar
-        ? ManiaPattern.SkillPatternShortLabels
-        : ManiaPattern.CorePatternShortLabels;
+    public IReadOnlyList<double> RadarValues =>
+        Pattern is not null && Pattern.SkillAxes.Length == ManiaPattern.SkillPatterns.Length
+            ? Pattern.SkillAxes
+            : [];
 
     [JsonIgnore]
-    public IReadOnlyList<double> RadarValues
-    {
-        get
-        {
-            if (Pattern is null)
-                return [];
-            return showSkillRadar && Pattern.SkillAxes.Length == ManiaPattern.SkillPatterns.Length
-                ? Pattern.SkillAxes
-                : Pattern.ToVector();
-        }
-    }
+    public IReadOnlyList<double> PatternBars => Pattern?.ToVector() ?? [];
+
+    [JsonIgnore]
+    public IReadOnlyList<string> PatternBarLabels => ManiaPattern.CorePatternLabels;
 
     [JsonIgnore]
     public IReadOnlyList<string> DetailLines
@@ -126,9 +120,7 @@ public sealed class RecommendationArchiveEntry : INotifyPropertyChanged
             }
 
             lines.Add($"模式 {Pattern.ModeTag}  LN {Pattern.LnRatio:P0}  NPS {Pattern.NotesPerSecond:0.0}");
-            lines.Add(showSkillRadar ? $"技能轴 {Pattern.SkillSource}" : $"主导键型 {Pattern.Category}");
-            foreach (KeyValuePair<string, double> pair in Pattern.SpecificShares.Take(3))
-                lines.Add($"{pair.Key} {pair.Value:P0}");
+            lines.Add($"主导 {Pattern.Category} · {Pattern.SkillSource}");
             return lines;
         }
     }
@@ -145,12 +137,6 @@ public sealed class RecommendationArchiveEntry : INotifyPropertyChanged
         notifyDetail();
     }
 
-    public void ToggleRadar()
-    {
-        showSkillRadar = !showSkillRadar;
-        notifyDetail();
-    }
-
     private void notifyDetail()
     {
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IsDetailVisible)));
@@ -158,7 +144,7 @@ public sealed class RecommendationArchiveEntry : INotifyPropertyChanged
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(HasPattern)));
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(RadarLabels)));
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(RadarValues)));
-        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(RadarToggleLabel)));
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(PatternBars)));
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(DetailLines)));
     }
 

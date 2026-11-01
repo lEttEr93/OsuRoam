@@ -106,12 +106,10 @@
                                             <ColumnDefinition Width="*" />
                                         </Grid.ColumnDefinitions>
                                         <StackPanel>
+                                            <!-- 只留 7 轴技能雷达，核心键型占比改由下面的直方图表示 -->
                                             <controls:RadarChart Width="104" Height="104" HorizontalAlignment="Center"
                                                                  LabelFontFamily="{DynamicResource UiFont}"
                                                                  Labels="{Binding RadarLabels}" Values="{Binding RadarValues}" />
-                                            <Button Content="{Binding RadarToggleLabel}" Tag="{Binding}" Click="RadarToggleButton_Click"
-                                                    HorizontalAlignment="Center" Padding="8,1" Margin="0,2,0,0" FontSize="10"
-                                                    ToolTip="切换雷达图" />
                                         </StackPanel>
                                         <StackPanel Grid.Column="1" Margin="6,0,0,0">
                                             <TextBlock Text="{Binding DisplayTitle}" FontSize="12" FontWeight="SemiBold"
@@ -124,6 +122,9 @@
                                                     </DataTemplate>
                                                 </ItemsControl.ItemTemplate>
                                             </ItemsControl>
+                                            <controls:PatternBars Margin="0,5,0,0"
+                                                                  Labels="{Binding PatternBarLabels}"
+                                                                  Shares="{Binding PatternBars}" />
                                             <Button Content="‹ 返回" Tag="{Binding}" Click="DetailButton_Click"
                                                     HorizontalAlignment="Left" Margin="0,6,0,0" Padding="10,1" FontSize="10" />
                                         </StackPanel>

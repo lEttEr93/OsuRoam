@@ -200,12 +200,6 @@ public partial class HistoryWindow : Window
             entry.ToggleDetail();
     }
 
-    private void RadarToggleButton_Click(object sender, RoutedEventArgs e)
-    {
-        if (sender is FrameworkElement { Tag: RecommendationArchiveEntry entry })
-            entry.ToggleRadar();
-    }
-
     private void updateEmptyHint(int count) =>
         EmptyHint.Visibility = count == 0 ? Visibility.Visible : Visibility.Collapsed;
 

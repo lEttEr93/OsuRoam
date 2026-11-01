@@ -108,7 +108,6 @@ public sealed class RecommendationItem : INotifyPropertyChanged
 
     private ManiaPattern? pattern;
     private bool isDetailVisible;
-    private bool showSkillRadar;
 
     public ManiaPattern? Pattern => pattern;
 
@@ -130,25 +129,23 @@ public sealed class RecommendationItem : INotifyPropertyChanged
 
     public bool IsSummaryVisible => !isDetailVisible;
 
-    public string RadarToggleLabel => showSkillRadar ? "切到键型" : "切到技能";
-
     public string DetailTitle => DisplayTitle;
 
-    public IReadOnlyList<string> RadarLabels => showSkillRadar
-        ? ManiaPattern.SkillPatternShortLabels
-        : ManiaPattern.CorePatternShortLabels;
+    /// <summary>
+    /// 只保留 7 轴技能雷达。6 个核心键型的占比加起来是 1（此消彼长），
+    /// 用雷达图会让人误读成相互独立，改由 <see cref="PatternBars"/> 的直方图表示。
+    /// </summary>
+    public IReadOnlyList<string> RadarLabels => ManiaPattern.SkillPatternShortLabels;
 
-    public IReadOnlyList<double> RadarValues
-    {
-        get
-        {
-            if (pattern is null)
-                return [];
-            return showSkillRadar && pattern.SkillAxes.Length == ManiaPattern.SkillPatterns.Length
-                ? pattern.SkillAxes
-                : pattern.ToVector();
-        }
-    }
+    public IReadOnlyList<double> RadarValues =>
+        pattern is not null && pattern.SkillAxes.Length == ManiaPattern.SkillPatterns.Length
+            ? pattern.SkillAxes
+            : [];
+
+    /// <summary>直方图的 6 个核心键型占比（顺序固定，和 <see cref="PatternBarLabels"/> 对齐）。</summary>
+    public IReadOnlyList<double> PatternBars => pattern?.ToVector() ?? [];
+
+    public IReadOnlyList<string> PatternBarLabels => ManiaPattern.CorePatternLabels;
 
     public IReadOnlyList<string> DetailLines
     {
@@ -166,10 +163,9 @@ public sealed class RecommendationItem : INotifyPropertyChanged
                 return lines;
             }
 
+            // 键型占比交给下面的直方图，这里只留比值型描述（雷达图看形状、条看占比）。
             lines.Add($"模式 {pattern.ModeTag}  LN {pattern.LnRatio:P0}  NPS {pattern.NotesPerSecond:0.0}");
-            lines.Add(showSkillRadar ? $"技能轴 {pattern.SkillSource}" : $"主导键型 {pattern.Category}");
-            foreach (KeyValuePair<string, double> pair in pattern.SpecificShares.Take(4))
-                lines.Add($"{pair.Key} {pair.Value:P0}");
+            lines.Add($"主导 {pattern.Category} · {pattern.SkillSource}");
             return lines;
         }
     }
@@ -186,19 +182,13 @@ public sealed class RecommendationItem : INotifyPropertyChanged
         notifyDetail();
     }
 
-    public void ToggleRadar()
-    {
-        showSkillRadar = !showSkillRadar;
-        notifyDetail();
-    }
-
     private void notifyDetail()
     {
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IsDetailVisible)));
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IsSummaryVisible)));
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(RadarLabels)));
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(RadarValues)));
-        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(RadarToggleLabel)));
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(PatternBars)));
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(DetailLines)));
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(DetailTitle)));
     }
