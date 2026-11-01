@@ -18,10 +18,11 @@
     <Compile Remove="Tests\**\*.cs" />
     <Page Remove="Tests\**\*.xaml" />
     <Resource Include="Assets\OsuRoam.ico" />
-    <!-- 字体必须以 Resource 编进程序集，pack URI 才能按 #Torus 找到它；
+    <!-- 字体必须以 Resource 编进程序集，pack URI 才能按 #Outfit 找到它；
          Content/CopyToOutput 的话换目录运行就会掉字。 -->
-    <Resource Include="Fonts\*.otf" />
+    <Resource Include="Fonts\*.ttf" />
     <None Update="Fonts\ATTRIBUTION.md" CopyToOutputDirectory="PreserveNewest" />
+    <None Update="Fonts\OFL-Outfit.txt" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="NAudio" Version="2.2.1" />

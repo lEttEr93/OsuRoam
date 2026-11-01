@@ -45,8 +45,8 @@ public partial class App : Application
             AppLog.Error("未处理的界面异常", args.Exception);
         };
 
-        // 先把内置 Torus 装上；真正的开关在读到配置后再由 MainWindow 应用。
-        Typography.Apply(preferOsuFont: true);
+        // 先把内置字体装上；真正的开关在读到配置后再由 MainWindow 应用。
+        Typography.Apply(preferEmbeddedFont: true);
 
         base.OnStartup(e);
     }

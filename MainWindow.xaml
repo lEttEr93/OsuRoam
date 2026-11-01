@@ -445,8 +445,8 @@
                                 <CheckBox x:Name="AutoImportCheck" Content="自动导入" />
                             </WrapPanel>
                             <WrapPanel Margin="0,0,0,9">
-                                <CheckBox x:Name="OsuFontCheck" Content="使用 osu! 字体（Torus）" Click="OsuFontCheck_Click"
-                                          ToolTip="数字和英文字母用 osu! 的 Torus；关掉回退系统字体" />
+                                <CheckBox x:Name="EmbeddedFontCheck" Content="使用内置字体（Outfit）" Click="EmbeddedFontCheck_Click"
+                                          ToolTip="数字和英文字母用内置的 Outfit；关掉回退系统字体" />
                             </WrapPanel>
                             <TextBlock Text="osu! 客户端" Foreground="{StaticResource MutedTextBrush}" FontSize="11" />
                             <ComboBox x:Name="OsuClientBox" SelectedIndex="0"

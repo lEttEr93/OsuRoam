@@ -14,9 +14,9 @@ testArchiveEntryDetailLayer();
 testChangeKindDetection();
 testTranslateStoryboardPathResolves();
 testNoTemplateAnimatesFrozenTransforms();
-testEmbeddedOsuFont();
+testEmbeddedFont();
 testUiFontIsDynamicResource();
-testEmbeddedTorusFamilyResolves();
+testEmbeddedFontFamilyResolves();
 testDifficultyProfilesAreIndependent();
 testUnlimitedDifficultyRange();
 testManiaKeysAreFiltered();
@@ -402,31 +402,37 @@ static string? findProjectRoot()
 }
 
 /// <summary>
-/// 1.3.2 的字体：Torus 必须以 WPF Resource 的形式编进程序集，
-/// 而且家族名必须真的叫 Torus —— Typography 按这个名字找家族，名字对不上就静默回退系统字体。
+/// 内置字体必须以 WPF Resource 的形式编进程序集，而且文件里的家族名要和
+/// <see cref="Typography.FamilyName"/> 一致 —— Typography 按这个名字找家族，
+/// 名字对不上就静默回退系统字体（1.3.2 踩过这个坑）。
 /// </summary>
-static void testEmbeddedOsuFont()
+static void testEmbeddedFont()
 {
     string? root = findProjectRoot();
     if (root is null)
         return;
 
     string project = File.ReadAllText(Path.Combine(root, "OsuRoam.csproj"));
-    if (!project.Contains(@"Fonts\*.otf", StringComparison.OrdinalIgnoreCase))
-        throw new InvalidOperationException(@"OsuRoam.csproj 里没有把 Fonts\*.otf 作为 Resource 编进程序集");
+    if (!project.Contains(@"Fonts\*.ttf", StringComparison.OrdinalIgnoreCase))
+        throw new InvalidOperationException(@"OsuRoam.csproj 里没有把 Fonts\*.ttf 作为 Resource 编进程序集");
 
-    foreach (string name in new[] { "Torus-Regular.otf", "Torus-Bold.otf" })
+    string[] files = Directory.GetFiles(Path.Combine(root, "Fonts"), "*.ttf");
+    if (files.Length == 0)
+        throw new InvalidOperationException("Fonts/ 里没有 ttf");
+
+    foreach (string path in files)
     {
-        string path = Path.Combine(root, "Fonts", name);
-        if (!File.Exists(path))
-            throw new InvalidOperationException($"缺少字体文件 Fonts/{name}");
-
         byte[] bytes = File.ReadAllBytes(path);
-        if (bytes.Length < 4 || bytes[0] != 'O' || bytes[1] != 'T' || bytes[2] != 'T' || bytes[3] != 'O')
-            throw new InvalidOperationException($"Fonts/{name} 不是 OpenType/CFF 字体（魔数不是 OTTO）");
-        if (!containsAscii(bytes, "Torus") && !containsUtf16BigEndian(bytes, "Torus"))
-            throw new InvalidOperationException($"Fonts/{name} 的 name 表里找不到家族名 Torus");
+        if (!isTrueType(bytes) && !isOpenTypeCff(bytes))
+            throw new InvalidOperationException($"Fonts/{Path.GetFileName(path)} 不是可识别的字体文件（魔数不对）");
+
+        if (!containsAscii(bytes, Typography.FamilyName) && !containsUtf16BigEndian(bytes, Typography.FamilyName))
+            throw new InvalidOperationException(
+                $"Fonts/{Path.GetFileName(path)} 的 name 表里找不到家族名 {Typography.FamilyName}，和 Typography.FamilyName 对不上");
     }
+
+    if (!project.Contains("OFL", StringComparison.OrdinalIgnoreCase))
+        throw new InvalidOperationException("csproj 没有把 OFL 授权文件一起打进输出（SIL OFL 要求随字体附带）");
 }
 
 /// <summary>
@@ -466,8 +472,8 @@ static void testUiFontIsDynamicResource()
     }
 }
 
-/// <summary>端到端：程序集里真的能解析出 Torus 家族（不只是文件存在）。</summary>
-static void testEmbeddedTorusFamilyResolves()
+/// <summary>端到端：程序集里真的能解析出 <see cref="Typography.FamilyName"/> 家族（不只是文件存在）。</summary>
+static void testEmbeddedFontFamilyResolves()
 {
     Exception? captured = null;
     bool found = false;
@@ -477,7 +483,8 @@ static void testEmbeddedTorusFamilyResolves()
         {
             ICollection<System.Windows.Media.FontFamily> families =
                 System.Windows.Media.Fonts.GetFontFamilies(new Uri("pack://application:,,,/OsuRoam;component/Fonts/"));
-            found = families.Any(family => family.FamilyNames.Values.Any(name => name == "Torus"));
+            found = families.Any(family => family.FamilyNames.Values.Any(
+                name => name.Equals(Typography.FamilyName, StringComparison.OrdinalIgnoreCase)));
         }
         catch (Exception exception)
         {
@@ -491,8 +498,14 @@ static void testEmbeddedTorusFamilyResolves()
     if (captured is not null)
         throw new InvalidOperationException($"读取内置字体失败：{captured.Message}", captured);
     if (!found)
-        throw new InvalidOperationException(@"程序集里解析不出 Torus 家族（Fonts\*.otf 没编进去？）");
+        throw new InvalidOperationException($@"程序集里解析不出 {Typography.FamilyName} 家族（Fonts\*.ttf 没编进去？）");
 }
+
+static bool isTrueType(byte[] bytes) =>
+    bytes.Length > 4 && bytes[0] == 0x00 && bytes[1] == 0x01 && bytes[2] == 0x00 && bytes[3] == 0x00;
+
+static bool isOpenTypeCff(byte[] bytes) =>
+    bytes.Length > 4 && bytes[0] == 'O' && bytes[1] == 'T' && bytes[2] == 'T' && bytes[3] == 'O';
 
 static bool containsAscii(byte[] bytes, string text) =>
     bytes.AsSpan().IndexOf(System.Text.Encoding.ASCII.GetBytes(text)) >= 0;

@@ -1092,7 +1092,7 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
         value.ExcludeRecentlyPlayed = ExcludeRecentCheck.IsChecked == true;
         value.AutoDownload = AutoDownloadCheck.IsChecked == true;
         value.AutoImport = AutoImportCheck.IsChecked == true;
-        value.UseOsuFont = OsuFontCheck.IsChecked == true;
+        value.UseEmbeddedFont = EmbeddedFontCheck.IsChecked == true;
         value.OsuClient = (OsuClientBox.SelectedItem as ComboBoxItem)?.Tag?.ToString() ?? "lazer";
         value.OsuExecutablePath = BeatmapDownloadService.NormalizeExecutablePath(OsuPathBox.Text);
         value.DownloadMirrorTemplates = DownloadTemplateBox.Text.Trim();
@@ -1122,7 +1122,7 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
         ExcludeRecentCheck.IsChecked = settings.ExcludeRecentlyPlayed;
         AutoDownloadCheck.IsChecked = settings.AutoDownload;
         AutoImportCheck.IsChecked = settings.AutoImport;
-        OsuFontCheck.IsChecked = settings.UseOsuFont;
+        EmbeddedFontCheck.IsChecked = settings.UseEmbeddedFont;
         applyFontSetting();
         OsuPathBox.Text = BeatmapDownloadService.NormalizeExecutablePath(settings.OsuExecutablePath);
         string osuClient = string.Equals(settings.OsuClient, "stable", StringComparison.OrdinalIgnoreCase) ? "stable" : "lazer";
@@ -1149,21 +1149,21 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
     }
 
     /// <summary>
-    /// 应用字体设置。Torus 是编进程序集的资源，<c>UiFont</c> 是 DynamicResource，
+    /// 应用字体设置。Outfit 是编进程序集的资源，<c>UiFont</c> 是 DynamicResource，
     /// 所以在这里换资源能立刻刷新已经建好的界面，不用重启。
     /// </summary>
     private void applyFontSetting()
     {
         Typography.EnsureUsable();
-        Typography.Apply(settings.UseOsuFont);
+        Typography.Apply(settings.UseEmbeddedFont);
         AppLog.Info(Typography.Describe());
     }
 
-    private async void OsuFontCheck_Click(object sender, RoutedEventArgs e)
+    private async void EmbeddedFontCheck_Click(object sender, RoutedEventArgs e)
     {
         if (!settingsControlsReady)
             return;
-        settings.UseOsuFont = OsuFontCheck.IsChecked == true;
+        settings.UseEmbeddedFont = EmbeddedFontCheck.IsChecked == true;
         applyFontSetting();
         try
         {

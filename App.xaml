@@ -5,8 +5,8 @@
     <Application.Resources>
         <BooleanToVisibilityConverter x:Key="BoolToVis" />
         <!-- 界面字体：默认系统字体，启动时由 Services\Typography.cs 换成内置的
-             osu!(lazer) 字体 Torus（Fonts\，见 ATTRIBUTION.md）。
-             这里不能直接写 pack://application:,,,/Fonts/#Torus —— 字符串形式的
+             Outfit（Fonts\，见 ATTRIBUTION.md）。
+             这里不能直接写 pack://application:,,,/Fonts/#Outfit —— 字符串形式的
              pack URI 建出来的 FontFamily 没有 BaseUri，WPF 解析不出字形面。 -->
         <FontFamily x:Key="UiFont">Microsoft YaHei UI</FontFamily>
         <SolidColorBrush x:Key="BackgroundBrush" Color="#121416" />

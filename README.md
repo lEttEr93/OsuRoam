@@ -128,15 +128,18 @@ Tag 池内置预设曲风、mania 键型特征（含 `米` `面` `叠` `技` `�
 
 ## 界面字体
 
-界面上的数字和英文字母用 osu!(lazer) 的默认字体 **Torus**（`Fonts/`，以 WPF Resource 编进程序集）。
-Torus 只有拉丁字母和数字，**没有汉字字形**：中文照旧由系统字体 `Microsoft YaHei UI` 渲染
+界面上的数字和英文字母用 **Outfit**（`Fonts/`，Regular / SemiBold / Bold 三个字面，
+以 WPF Resource 编进程序集）。它和 osu!(lazer) 用的 Torus 同属几何无衬线、观感接近，
+但授权是 **SIL OFL 1.1**，可以随程序自由分发（Torus 是商业字体，需要授权才能嵌进发行包）。
+
+Outfit 只有拉丁字母和数字，**没有汉字字形**：中文照旧由系统字体 `Microsoft YaHei UI` 渲染
 （WPF 逐字符回退），和 osu!lazer 用 Noto 补 CJK 是一个思路。
 
-- 「下载与高级设置」→「使用 osu! 字体（Torus）」可以随时关掉，**立刻生效、不用重启**。
-- 启动日志会有一行 `字体：内置 Torus（561 字形）；汉字回退 Microsoft YaHei UI`；
-  字体没加载出来会打 `Torus 不可用` 并自动回退到系统字体（界面不会变成方框）。
-- Torus 是商业字体（Paulo Goode），osu! 官方有授权。本项目的发行包带上它属于非商业使用；
-  要商业分发请自行购买授权，或者删掉 `Fonts/` 并关掉上面的开关。详见 `Fonts/ATTRIBUTION.md`。
+- 「下载与高级设置」→「使用内置字体（Outfit）」可以随时关掉，**立刻生效、不用重启**。
+- 启动日志会有一行 `字体：内置 Outfit（N 字形）；汉字回退 Microsoft YaHei UI`；
+  字体没加载出来会打 `不可用` 并自动回退到系统字体（界面不会变成方框）。
+- `google/fonts` 只发可变字体，而 WPF 不认可变轴，所以仓库里放的是用 fonttools
+  `varLib.instancer` 切出来的静态字面，切法见 `Fonts/ATTRIBUTION.md`。
 
 ## 构建
 
