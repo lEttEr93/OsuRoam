@@ -3,6 +3,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Media.Animation;
 using OsuRoam.Models;
 using OsuRoam.Services;
 
@@ -58,29 +59,65 @@ public partial class HistoryWindow : Window
     }
 
     /// <summary>
-    /// 面板出现动画：窗口整体淡入 + 卡片从左侧滑入。
-    /// 这两个 Transform 声明在 Window 里（不在 DataTemplate 中），不会被冻结，可以直接动画。
+    /// 在 Show() 之前调用：把基值设成入场起点。
+    /// 如果先 Show 再设，第一帧会是终态（全亮、就位），然后才跳回去淡入——就是那下抽搐。
     /// </summary>
-    public void PlayEntrance()
+    public void PrepareEntrance()
     {
         if (!SystemParameters.ClientAreaAnimation)
             return;
 
         try
         {
-            BeginAnimation(OpacityProperty, null);
-            SetCurrentValue(OpacityProperty, 1.0);
-            BeginAnimation(OpacityProperty, Controls.Motion.tween(0, 1, 170));
+            Opacity = 0;
+            RootSlide.SetCurrentValue(TranslateTransform.XProperty, 14.0);
+        }
+        catch (Exception exception)
+        {
+            Services.AppLog.Error("历史面板入场准备失败", exception);
+            Opacity = 1;
+        }
+    }
 
-            RootSlide.BeginAnimation(TranslateTransform.XProperty, null);
+    /// <summary>在 Show() 之后调用：基值已是起点，动画用 HoldEnd 持有终点，完成后回写基值。</summary>
+    public void PlayEntrance()
+    {
+        if (!SystemParameters.ClientAreaAnimation)
+        {
+            Opacity = 1;
             RootSlide.SetCurrentValue(TranslateTransform.XProperty, 0.0);
-            RootSlide.BeginAnimation(TranslateTransform.XProperty, Controls.Motion.tween(14, 0, 220));
+            return;
+        }
+
+        try
+        {
+            DoubleAnimation fade = Controls.Motion.tween(0, 1, 170);
+            fade.FillBehavior = FillBehavior.HoldEnd;
+            fade.Completed += (_, _) =>
+            {
+                BeginAnimation(OpacityProperty, null);
+                Opacity = 1;
+            };
+            BeginAnimation(OpacityProperty, null);
+            BeginAnimation(OpacityProperty, fade);
+
+            DoubleAnimation slide = Controls.Motion.tween(14, 0, 220);
+            slide.FillBehavior = FillBehavior.HoldEnd;
+            slide.Completed += (_, _) =>
+            {
+                RootSlide.BeginAnimation(TranslateTransform.XProperty, null);
+                RootSlide.SetCurrentValue(TranslateTransform.XProperty, 0.0);
+            };
+            RootSlide.BeginAnimation(TranslateTransform.XProperty, null);
+            RootSlide.BeginAnimation(TranslateTransform.XProperty, slide);
         }
         catch (Exception exception)
         {
             Services.AppLog.Error("历史面板入场动画失败", exception);
             BeginAnimation(OpacityProperty, null);
-            SetCurrentValue(OpacityProperty, 1.0);
+            Opacity = 1;
+            RootSlide.BeginAnimation(TranslateTransform.XProperty, null);
+            RootSlide.SetCurrentValue(TranslateTransform.XProperty, 0.0);
         }
     }
 

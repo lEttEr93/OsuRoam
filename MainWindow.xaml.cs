@@ -434,6 +434,7 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
 
         // 集合本身实时绑定，这里只重算 tag 高亮/补封面。
         historyWindow.RefreshEntries(archiveStore.Entries);
+        historyWindow.PrepareEntrance();
         historyWindow.Show();
         historyWindow.Activate();
         historyWindow.PlayEntrance();
@@ -1431,7 +1432,7 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
             refreshMiniPlayer();
             MinHeight = 64;
             MinWidth = 390;
-            animateWindowHeight(64);
+            animateWindowHeight(64, 64, 64);
             Width = Math.Max(390, expandedWidth);
             ResizeMode = ResizeMode.NoResize;
             CollapseButton.Content = "+";
@@ -1446,40 +1447,61 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
             if (historyWasVisible && historyWindow is not null)
             {
                 historyWasVisible = false;
+                historyWindow.PrepareEntrance();
                 historyWindow.Show();
                 historyWindow.PlayEntrance();
             }
             ResizeMode = ResizeMode.CanResizeWithGrip;
-            MinHeight = 300;
             MinWidth = 390;
-            animateWindowHeight(Math.Max(300, expandedHeight));
+            // 展开过程中先把 MinHeight 压住，否则 64→300 会被 MinHeight 立刻夹到 300。
+            animateWindowHeight(Math.Max(300, expandedHeight), 64, 300);
             Width = Math.Max(390, expandedWidth);
             CollapseButton.Content = "−";
             CollapseButton.ToolTip = "迷你播放器";
         }
     }
 
-    /// <summary>折叠/展开时的高度过渡；结束后停在目标值，不把动画值留在属性上。</summary>
-    private void animateWindowHeight(double target, double milliseconds = 190)
+    /// <summary>
+    /// 折叠/展开时的高度过渡。
+    /// 注意不能用「基值先设终点 + Stop」：那样基值一改窗口立刻跳到终点，下一帧
+    /// 动画再把它拉回起点，肉眼就是抽搐一下。这里基值保持不动，动画用 HoldEnd
+    /// 持有终点，结束后再回写基值。
+    /// </summary>
+    private void animateWindowHeight(double target, double minHeightDuring, double minHeightAfter, double milliseconds = 190)
     {
         double from = ActualHeight > 0 ? ActualHeight : Height;
-        Height = target;
+        MinHeight = minHeightDuring;
+
         if (!SystemParameters.ClientAreaAnimation || double.IsNaN(from) || Math.Abs(from - target) < 0.5)
+        {
+            BeginAnimation(HeightProperty, null);
+            Height = target;
+            MinHeight = minHeightAfter;
             return;
+        }
 
         try
         {
-            BeginAnimation(HeightProperty, null);
-            BeginAnimation(HeightProperty, new DoubleAnimation(from, target, TimeSpan.FromMilliseconds(milliseconds))
+            DoubleAnimation animation = new(from, target, TimeSpan.FromMilliseconds(milliseconds))
             {
                 EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut },
-                FillBehavior = FillBehavior.Stop
-            });
+                FillBehavior = FillBehavior.HoldEnd
+            };
+            animation.Completed += (_, _) =>
+            {
+                BeginAnimation(HeightProperty, null);
+                Height = target;
+                MinHeight = minHeightAfter;
+            };
+            BeginAnimation(HeightProperty, null);
+            BeginAnimation(HeightProperty, animation);
         }
         catch (Exception exception)
         {
             AppLog.Error("窗口高度动画失败", exception);
             BeginAnimation(HeightProperty, null);
+            Height = target;
+            MinHeight = minHeightAfter;
         }
     }
 

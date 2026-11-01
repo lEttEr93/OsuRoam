@@ -26,6 +26,8 @@ public static class Motion
 
         try
         {
+            // 元素级动画基值保持 1：动画从 0 走到 1（Stop 后回到基值 1）。
+            // 这里不动基值，避免动画被打断时卡片停在透明状态。
             TranslateTransform slide = new();
             element.RenderTransform = slide;
             element.BeginAnimation(UIElement.OpacityProperty, tween(0, 1, milliseconds));
