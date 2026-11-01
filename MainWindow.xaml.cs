@@ -786,22 +786,39 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
         if (!SystemParameters.ClientAreaAnimation || !IsLoaded)
             return;
 
-        switch (kind)
+        try
         {
-            case ChangeKind.Song:
-                startMiniAnimation(MiniPlayerHeader, UIElement.OpacityProperty, 0, 1, 420);
-                startMiniAnimation(MiniHeaderSlide, TranslateTransform.YProperty, 12, 0, 420);
-                startMiniAnimation(MiniHeaderScale, ScaleTransform.ScaleXProperty, 0.985, 1, 420);
-                startMiniAnimation(MiniHeaderScale, ScaleTransform.ScaleYProperty, 0.985, 1, 420);
-                startMiniAnimation(MiniTrackDetailText, UIElement.OpacityProperty, 0, 1, 360);
-                startMiniAnimation(MiniDetailSlide, TranslateTransform.XProperty, 22, 0, 360);
-                break;
+            switch (kind)
+            {
+                case ChangeKind.Song:
+                    startMiniAnimation(MiniPlayerHeader, UIElement.OpacityProperty, 0, 1, 420);
+                    startMiniAnimation(MiniHeaderSlide, TranslateTransform.YProperty, 12, 0, 420);
+                    startMiniAnimation(MiniHeaderScale, ScaleTransform.ScaleXProperty, 0.985, 1, 420);
+                    startMiniAnimation(MiniHeaderScale, ScaleTransform.ScaleYProperty, 0.985, 1, 420);
+                    startMiniAnimation(MiniTrackDetailText, UIElement.OpacityProperty, 0, 1, 360);
+                    startMiniAnimation(MiniDetailSlide, TranslateTransform.XProperty, 22, 0, 360);
+                    break;
 
-            case ChangeKind.Difficulty:
-                startMiniAnimation(MiniTrackDetailText, UIElement.OpacityProperty, 0.4, 1, 260);
-                startMiniAnimation(MiniDetailSlide, TranslateTransform.YProperty, 6, 0, 260);
-                break;
+                case ChangeKind.Difficulty:
+                    startMiniAnimation(MiniTrackDetailText, UIElement.OpacityProperty, 0.4, 1, 260);
+                    startMiniAnimation(MiniDetailSlide, TranslateTransform.YProperty, 6, 0, 260);
+                    break;
+            }
         }
+        catch (Exception exception)
+        {
+            AppLog.Error("迷你播放器入场动画失败", exception);
+        }
+    }
+
+    /// <summary>
+    /// 卡片入场。动画对象必须在运行时新建：模板里声明的 TranslateTransform 会被
+    /// FrameworkTemplate 冻结，冻结后不能再挂动画（会抛 XamlParseException）。
+    /// </summary>
+    private void RecommendationCard_Loaded(object sender, RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement card)
+            Controls.Motion.PlayEnter(card);
     }
 
     /// <summary>从 from 走到 to；结束后回到属性基值（Stop），不会把动画值留在属性上。</summary>

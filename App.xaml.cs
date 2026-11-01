@@ -1,5 +1,6 @@
 using System.Threading;
 using System.Windows;
+using OsuRoam.Services;
 
 namespace OsuRoam;
 
@@ -19,6 +20,13 @@ public partial class App : Application
             Shutdown();
             return;
         }
+
+        // 任何漏网的 UI 线程异常至少要先落盘再退出：
+        // 1.3.0 的模板动画崩溃当时只留下一条 Event Log，日志里什么都没有。
+        DispatcherUnhandledException += (_, args) =>
+        {
+            AppLog.Error("未处理的界面异常", args.Exception);
+        };
 
         base.OnStartup(e);
     }

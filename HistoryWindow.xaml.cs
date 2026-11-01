@@ -56,6 +56,13 @@ public partial class HistoryWindow : Window
         }
     }
 
+    /// <summary>卡片入场；Transform 必须在运行时新建（模板内的 Freezable 会被冻结）。</summary>
+    private void HistoryCard_Loaded(object sender, RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement card)
+            Controls.Motion.PlayEnter(card);
+    }
+
     private void DetailButton_Click(object sender, RoutedEventArgs e)
     {
         if (sender is FrameworkElement { Tag: RecommendationArchiveEntry entry })

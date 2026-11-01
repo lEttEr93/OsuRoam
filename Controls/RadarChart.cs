@@ -127,14 +127,24 @@ public sealed class RadarChart : FrameworkElement
         fromValues = current.Length == count ? current : new double[count];
         targetValues = next;
 
-        BeginAnimation(GrowthProperty, null);
-        SetCurrentValue(GrowthProperty, 1.0);
-        DoubleAnimation animation = new(0.0, 1.0, TimeSpan.FromMilliseconds(GrowthMilliseconds))
+        try
         {
-            EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut },
-            FillBehavior = FillBehavior.Stop
-        };
-        BeginAnimation(GrowthProperty, animation, HandoffBehavior.SnapshotAndReplace);
+            BeginAnimation(GrowthProperty, null);
+            SetCurrentValue(GrowthProperty, 1.0);
+            DoubleAnimation animation = new(0.0, 1.0, TimeSpan.FromMilliseconds(GrowthMilliseconds))
+            {
+                EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut },
+                FillBehavior = FillBehavior.Stop
+            };
+            BeginAnimation(GrowthProperty, animation, HandoffBehavior.SnapshotAndReplace);
+        }
+        catch (Exception exception)
+        {
+            // 生长动画失败就退化成直接显示最终形状，别让绘制层抛出去。
+            Services.AppLog.Error("雷达图生长动画失败", exception);
+            BeginAnimation(GrowthProperty, null);
+            SetCurrentValue(GrowthProperty, 1.0);
+        }
     }
 
     private double[] displayedValues()
