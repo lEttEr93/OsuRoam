@@ -6,6 +6,8 @@ namespace OsuRoam;
 
 public partial class App : Application
 {
+    private const string SingleInstanceMutexName = "OsuRoam.SingleInstance";
+
     private Mutex? singleInstance;
     private bool ownsSingleInstance;
 
@@ -15,9 +17,18 @@ public partial class App : Application
 
         // 配置和缓存是单写入设计（File.Create 独占），两个实例会互相报
         // "Access to the path ... settings.json is denied"，这里直接拦住第二个。
-        singleInstance = new Mutex(true, "OsuRoam.SingleInstance", out bool createdNew);
+        // 截图 / 诊断这类开发模式用独立的锁名：它们本来就会和用户正在用的实例并存，
+        // 不该把「已经有一个在运行了」的弹窗糊到用户脸上。
+        bool developmentRun = e.Args.Any(argument =>
+            argument.StartsWith("--snapshot=", StringComparison.OrdinalIgnoreCase) ||
+            argument is "--diagnose" or "--diagnose-opaque");
+        string mutexName = developmentRun
+            ? $"{SingleInstanceMutexName}.dev-{Environment.ProcessId}"
+            : SingleInstanceMutexName;
+
+        singleInstance = new Mutex(true, mutexName, out bool createdNew);
         ownsSingleInstance = createdNew;
-        AppLog.Info($"单实例锁：{(createdNew ? "获得" : "已被占用")}");
+        AppLog.Info($"单实例锁：{(createdNew ? "获得" : "已被占用")}（{mutexName}）");
         if (!createdNew)
         {
             AppLog.Info("另一个实例在运行，本次启动退出");
