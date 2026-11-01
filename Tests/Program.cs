@@ -235,6 +235,14 @@ static void testArchiveEntryDetailLayer()
     assertTrue(!empty.HasPattern, "没有键型时应标记为缺失");
     assertTrue(empty.DetailLines.Any(line => line.Contains("没有键型数据", StringComparison.Ordinal)),
         "缺键型数据时应给出提示");
+
+    // 取消已选 tag 后高亮必须消失（推荐池和历史面板共用这套刷新逻辑）
+    RecommendationArchiveEntry tagged = new() { Tags = ["stream", "ln"] };
+    tagged.RefreshTagInclusion(["stream"]);
+    assertTrue(tagged.TagItems.First(tag => tag.Name == "stream").IsIncluded, "命中已选 tag 时应高亮");
+    assertTrue(!tagged.TagItems.First(tag => tag.Name == "ln").IsIncluded, "未命中的 tag 不应高亮");
+    tagged.RefreshTagInclusion([]);
+    assertTrue(!tagged.TagItems.Any(tag => tag.IsIncluded), "取消已选 tag 后历史记录的高亮必须一起消失");
 }
 
 static RecommendationItem sampleRecommendationItem() => new()

@@ -1133,6 +1133,9 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
         ExcludedTagsItems.ItemsSource = settings.ExcludedTags;
         foreach (RecommendationItem item in recommendations)
             item.RefreshTagInclusion(settings.IncludedTags);
+        // 历史面板里的同名 tag 也要一起跟着变亮/变暗，否则取消一个已选 tag 后
+        // 推荐池的高亮消失了、历史面板还亮着。
+        historyWindow?.RefreshEntries(archiveStore.Entries);
     }
     private void updateDifficultyControls()
     {
