@@ -162,6 +162,21 @@ public partial class MainWindow : Window
         await Task.Delay(2600);
         if (historyWindow is null && archiveStore.Entries.Count > 0)
             HistoryButton_Click(this, new RoutedEventArgs());
+
+        // 折叠 / 展开各测一次，用来对比"先隐藏内容"和"先显示内容"的差别。
+        await Task.Delay(1900);
+        if (!isCollapsed)
+        {
+            CollapseButton_Click(this, new RoutedEventArgs());
+            RenderDiagnostics.MeasureOnce("collapse");
+        }
+
+        await Task.Delay(1900);
+        if (isCollapsed)
+        {
+            CollapseButton_Click(this, new RoutedEventArgs());
+            RenderDiagnostics.MeasureOnce("expand");
+        }
     }
 
     /// <summary>
@@ -1511,10 +1526,15 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
         }
         else
         {
-            MainContent.Visibility = Visibility.Visible;
+            // 展开时主内容树先不挂出来：卡片列表每帧重排一次就是掉帧来源
+            // （实测内容可见时 max 77ms，隐藏后降到 ~37ms）。
+            // 窗口长完再让内容以很短的淡入显形，避免逐帧布局。
+            double target = Math.Max(300, expandedHeight);
+            MainContent.Visibility = Visibility.Collapsed;
             Footer.Visibility = Visibility.Visible;
             NormalHeader.Visibility = Visibility.Visible;
             MiniPlayerHeader.Visibility = Visibility.Collapsed;
+            MainContent.ClearValue(HeightProperty);
             if (historyWasVisible && historyWindow is not null)
             {
                 historyWasVisible = false;
@@ -1525,11 +1545,44 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
             ResizeMode = ResizeMode.CanResizeWithGrip;
             MinWidth = 390;
             // 展开过程中先把 MinHeight 压住，否则 64→300 会被 MinHeight 立刻夹到 300。
-            animateWindowHeight(Math.Max(300, expandedHeight), 64, 300);
+            animateWindowHeight(target, 64, 300, revealMainContent);
             Width = Math.Max(390, expandedWidth);
             CollapseButton.Content = "−";
             CollapseButton.ToolTip = "迷你播放器";
         }
+    }
+
+    /// <summary>
+    /// 展开动画结束后才把主内容挂出来：先以 0 透明度显示完成一次布局，
+    /// 下一帧再淡入，避免"出现的那一刻"正好撞在窗口 resize 的帧上。
+    /// </summary>
+    private void revealMainContent()
+    {
+        MainContent.Opacity = SystemParameters.ClientAreaAnimation ? 0 : 1;
+        MainContent.Visibility = Visibility.Visible;
+        if (!SystemParameters.ClientAreaAnimation)
+            return;
+
+        Dispatcher.BeginInvoke(() =>
+        {
+            try
+            {
+                DoubleAnimation fade = Controls.Motion.tween(0, 1, 120);
+                fade.FillBehavior = FillBehavior.HoldEnd;
+                fade.Completed += (_, _) =>
+                {
+                    MainContent.BeginAnimation(UIElement.OpacityProperty, null);
+                    MainContent.Opacity = 1;
+                };
+                MainContent.BeginAnimation(UIElement.OpacityProperty, fade);
+            }
+            catch (Exception exception)
+            {
+                AppLog.Error("主内容淡入失败", exception);
+                MainContent.BeginAnimation(UIElement.OpacityProperty, null);
+                MainContent.Opacity = 1;
+            }
+        }, System.Windows.Threading.DispatcherPriority.Background);
     }
 
     /// <summary>
@@ -1538,7 +1591,8 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
     /// 动画再把它拉回起点，肉眼就是抽搐一下。这里基值保持不动，动画用 HoldEnd
     /// 持有终点，结束后再回写基值。
     /// </summary>
-    private void animateWindowHeight(double target, double minHeightDuring, double minHeightAfter, double milliseconds = 190)
+    private void animateWindowHeight(double target, double minHeightDuring, double minHeightAfter,
+        Action? completed = null, double milliseconds = 160)
     {
         double from = ActualHeight > 0 ? ActualHeight : Height;
         MinHeight = minHeightDuring;
@@ -1548,6 +1602,7 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
             BeginAnimation(HeightProperty, null);
             Height = target;
             MinHeight = minHeightAfter;
+            completed?.Invoke();
             return;
         }
 
@@ -1563,6 +1618,7 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
                 BeginAnimation(HeightProperty, null);
                 Height = target;
                 MinHeight = minHeightAfter;
+                completed?.Invoke();
             };
             BeginAnimation(HeightProperty, null);
             BeginAnimation(HeightProperty, animation);
@@ -1573,8 +1629,10 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
             BeginAnimation(HeightProperty, null);
             Height = target;
             MinHeight = minHeightAfter;
+            completed?.Invoke();
         }
     }
+
 
     private void CloseButton_Click(object sender, RoutedEventArgs e) => Close();
 
