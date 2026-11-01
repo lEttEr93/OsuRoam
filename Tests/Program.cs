@@ -13,6 +13,7 @@ await testArchiveStorePublishesCollectionChangesAsync();
 testArchiveEntryDetailLayer();
 testChangeKindDetection();
 testTranslateStoryboardPathResolves();
+testNoTemplateAnimatesFrozenTransforms();
 testDifficultyProfilesAreIndependent();
 testUnlimitedDifficultyRange();
 testManiaKeysAreFiltered();
@@ -337,6 +338,47 @@ static void testTranslateStoryboardPathResolves()
 
     if (captured is not null)
         throw new InvalidOperationException($"入场动画的属性路径解析失败：{captured.Message}", captured);
+}
+
+/// <summary>
+/// 1.3.0 的崩溃教训：DataTemplate 里声明的 Freezable 会被模板冻结，再去动画它的子属性
+/// 会在卡片实例化时抛 XamlParseException。这条用例扫描 XAML，禁止动画 RenderTransform 子属性
+/// （入场/翻面动画必须走 Controls/Motion.cs，在运行时新建可变 Transform）。
+/// </summary>
+static void testNoTemplateAnimatesFrozenTransforms()
+{
+    string? root = null;
+    DirectoryInfo? dir = new(AppContext.BaseDirectory);
+    for (int depth = 0; depth < 6 && dir is not null; depth++, dir = dir.Parent)
+    {
+        if (File.Exists(Path.Combine(dir.FullName, "OsuRoam.csproj")))
+        {
+            root = dir.FullName;
+            break;
+        }
+    }
+    if (root is null)
+        return;
+
+    foreach (string file in Directory.EnumerateFiles(root, "*.xaml", SearchOption.AllDirectories))
+    {
+        if (file.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}", StringComparison.OrdinalIgnoreCase))
+            continue;
+
+        int line = 0;
+        foreach (string text in File.ReadLines(file))
+        {
+            line++;
+            if (!text.Contains("Storyboard.TargetProperty", StringComparison.Ordinal))
+                continue;
+            if (!text.Contains("RenderTransform", StringComparison.Ordinal))
+                continue;
+
+            throw new InvalidOperationException(
+                $"{Path.GetFileName(file)}:{line} 在动画 RenderTransform 子属性；" +
+                "模板内声明的 Transform 会被冻结，运行时会抛 XamlParseException。请改用 Controls/Motion.cs。");
+        }
+    }
 }
 
 static void assertKind(ChangeKind expected, ChangeKind actual, string message)
