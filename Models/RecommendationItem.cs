@@ -41,7 +41,24 @@ public sealed class RecommendationItem : INotifyPropertyChanged
         }
     }
 
-    public void LoadCover() => Services.CoverLoader.Load(BeatmapsetId, image => Cover = image);
+    private System.Windows.Media.ImageSource? backdrop;
+
+    /// <summary>低分辨率背影（96px 宽），卡片背景层放大铺开，天然带模糊。</summary>
+    public System.Windows.Media.ImageSource? Backdrop
+    {
+        get => backdrop;
+        private set
+        {
+            backdrop = value;
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Backdrop)));
+        }
+    }
+
+    public void LoadCover() => Services.CoverLoader.Load(BeatmapsetId, art =>
+    {
+        Cover = art.Cover;
+        Backdrop = art.Backdrop;
+    });
     public string PreviewUrl => $"https://b.ppy.sh/preview/{BeatmapsetId}.mp3";
     public string DisplayTitle => $"{Artist} - {Title}";
     public string DifficultySummary => (KeyCount > 0 ? $"{KeyCount}K  " : string.Empty) +

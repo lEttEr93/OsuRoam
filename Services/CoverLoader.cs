@@ -15,26 +15,38 @@ namespace OsuRoam.Services;
 /// 线程注意：解码必须离开 UI 线程。之前 await 之后会回到 UI 上下文再 EndInit，
 /// 一张封面解码十几毫秒，预取/翻页时会直接吃掉动画的帧预算（渲染诊断里的 p95 尖峰）。
 /// </summary>
+/// <summary>一张曲绘的两种用途：<paramref name="Cover"/> 给缩略图，<paramref name="Backdrop"/> 给卡片背景。</summary>
+public sealed record CoverArt(ImageSource? Cover, ImageSource? Backdrop);
+
 public static class CoverLoader
 {
+    /// <summary>缩略图解码宽度：最坏的用途是信息窗 56px 头像，256 足够，还省解码时间。</summary>
+    private const int ThumbnailWidth = 256;
+
+    /// <summary>
+    /// 背影宽度：卡片背景要铺到 ~360px，这里只留 96px，剩下交给 WPF 放大。
+    /// 放大本身就是天然的模糊，比挂 BlurEffect 便宜得多，也不会把圆角裁切糊成直角。
+    /// </summary>
+    private const int BackdropWidth = 96;
+
     private static readonly HttpClient Http = new() { Timeout = TimeSpan.FromSeconds(20) };
-    private static readonly Dictionary<int, ImageSource?> Cache = [];
+    private static readonly Dictionary<int, CoverArt> Cache = [];
     private static readonly HashSet<int> Loading = [];
 
     /// <summary>下载 + 解码超过这个耗时就记一条日志，便于确认卡顿来源。</summary>
     private const long SlowLoadMilliseconds = 60;
 
-    public static async void Load(int beatmapsetId, Action<ImageSource?> apply)
+    public static async void Load(int beatmapsetId, Action<CoverArt> apply)
     {
         if (beatmapsetId <= 0)
         {
-            apply(null);
+            apply(new CoverArt(null, null));
             return;
         }
 
         lock (Cache)
         {
-            if (Cache.TryGetValue(beatmapsetId, out ImageSource? cached))
+            if (Cache.TryGetValue(beatmapsetId, out CoverArt? cached))
             {
                 apply(cached);
                 return;
@@ -52,20 +64,20 @@ public static class CoverLoader
                 .GetByteArrayAsync($"https://assets.ppy.sh/beatmaps/{beatmapsetId}/covers/cover.jpg")
                 .ConfigureAwait(false);
 
-            ImageSource? image = decode(bytes);
+            CoverArt art = decode(bytes);
 
             long elapsed = clock.ElapsedMilliseconds;
             if (elapsed > SlowLoadMilliseconds)
                 AppLog.Info($"曲绘加载较慢：set={beatmapsetId}，{elapsed}ms（解码已在后台线程）");
 
-            lock (Cache) Cache[beatmapsetId] = image;
-            post(() => apply(image));
+            lock (Cache) Cache[beatmapsetId] = art;
+            post(() => apply(art));
         }
         catch (Exception exception)
         {
             AppLog.Error($"加载曲绘失败：set={beatmapsetId}", exception);
-            lock (Cache) Cache[beatmapsetId] = null;
-            post(() => apply(null));
+            lock (Cache) Cache[beatmapsetId] = new CoverArt(null, null);
+            post(() => apply(new CoverArt(null, null)));
         }
         finally
         {
@@ -73,7 +85,7 @@ public static class CoverLoader
         }
     }
 
-    private static ImageSource? decode(byte[] bytes)
+    private static CoverArt decode(byte[] bytes)
     {
         try
         {
@@ -82,15 +94,38 @@ public static class CoverLoader
             {
                 image.BeginInit();
                 image.CacheOption = BitmapCacheOption.OnLoad;
+                image.DecodePixelWidth = ThumbnailWidth;
                 image.StreamSource = stream;
                 image.EndInit();
             }
             image.Freeze();
-            return image;
+            return new CoverArt(image, createBackdrop(image));
         }
         catch (Exception exception)
         {
             AppLog.Error("曲绘解码失败", exception);
+            return new CoverArt(null, null);
+        }
+    }
+
+    /// <summary>把缩略图缩到 96px 宽当背影用；放大到卡片宽度时自然是模糊的。</summary>
+    private static ImageSource? createBackdrop(BitmapSource source)
+    {
+        try
+        {
+            if (source.PixelWidth <= BackdropWidth)
+            {
+                return source;
+            }
+
+            double scale = (double)BackdropWidth / source.PixelWidth;
+            TransformedBitmap backdrop = new(source, new ScaleTransform(scale, scale));
+            backdrop.Freeze();
+            return backdrop;
+        }
+        catch (Exception exception)
+        {
+            AppLog.Error("曲绘背影生成失败", exception);
             return null;
         }
     }

@@ -37,7 +37,8 @@
                         <ColumnDefinition Width="58" />
                     </Grid.ColumnDefinitions>
                     <Border Width="34" Height="34" CornerRadius="4" ClipToBounds="True" Background="#30353A">
-                        <Image Source="{Binding CoverUrl}" Stretch="UniformToFill" />
+                        <Image Source="{Binding Cover}" Stretch="UniformToFill"
+                               HorizontalAlignment="Center" VerticalAlignment="Center" />
                     </Border>
                     <StackPanel Grid.Column="1" Margin="7,0,7,0" VerticalAlignment="Center">
                         <TextBlock Text="{Binding DisplayTitle, FallbackValue=尚未导入谱面, TargetNullValue=尚未导入谱面}"
@@ -80,9 +81,33 @@
                         <ItemsControl.ItemTemplate>
                             <DataTemplate>
                                 <Border Background="{StaticResource SurfaceBrush}" BorderBrush="{StaticResource BorderBrush}"
-                                        BorderThickness="1" CornerRadius="6" Margin="0,0,0,8" Padding="9"
+                                        BorderThickness="1" CornerRadius="6" Margin="0,0,0,8" ClipToBounds="True"
                                         Loaded="RecommendationCard_Loaded">
                                     <Grid>
+                                        <!-- 曲绘背影：Backdrop 是 96px 宽的低分辨率版，放大到卡片宽度天然是糊的，
+                                             所以不需要 BlurEffect（模糊位图会把圆角裁切糊成直角，还多一层离屏渲染）。
+                                             Stretch=Uniform → 整幅可见不裁切，顶部对齐 + 向下渐隐。 -->
+                                        <Border CornerRadius="6" Opacity="0.5" IsHitTestVisible="False"
+                                                RenderOptions.BitmapScalingMode="HighQuality">
+                                            <Border.Background>
+                                                <ImageBrush ImageSource="{Binding Backdrop}" Stretch="Uniform"
+                                                            AlignmentX="Center" AlignmentY="Top" />
+                                            </Border.Background>
+                                        </Border>
+                                        <!-- 向下渐隐到卡片底色：曲绘是 3.6:1，整幅铺进去只占顶部一条，
+                                             用渐隐把下边缘化掉，看起来像背景而不是贴了张图 -->
+                                        <Border IsHitTestVisible="False">
+                                            <Border.Background>
+                                                <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
+                                                    <GradientStop Color="#9A121416" Offset="0" />
+                                                    <GradientStop Color="#C4121416" Offset="0.30" />
+                                                    <GradientStop Color="#EC121416" Offset="0.62" />
+                                                    <GradientStop Color="#FF121416" Offset="1" />
+                                                </LinearGradientBrush>
+                                            </Border.Background>
+                                        </Border>
+
+                                        <Grid Margin="9">
                                         <Grid Visibility="{Binding IsSummaryVisible, Converter={StaticResource BoolToVis}}">
                                             <Grid.Style>
                                                 <Style TargetType="Grid">
@@ -110,21 +135,18 @@
                                             <RowDefinition Height="Auto" />
                                         </Grid.RowDefinitions>
                                         <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="72" />
+                                            <ColumnDefinition Width="48" />
                                             <ColumnDefinition Width="*" />
                                             <ColumnDefinition Width="42" />
                                         </Grid.ColumnDefinitions>
-                                        <Grid Width="64" Height="64">
-                                            <Border CornerRadius="4" ClipToBounds="True" Background="#30353A">
-                                                <Image Source="{Binding Cover}" Stretch="UniformToFill" />
-                                            </Border>
-                                            <Button x:Name="PreviewButton" Width="64" Height="64" Padding="0"
+                                        <Grid Width="40" Height="40" VerticalAlignment="Top" Margin="0,1,0,0">
+                                            <Button x:Name="PreviewButton" Width="40" Height="40" Padding="0"
                                                     Tag="{Binding}"
                                                     Click="PreviewButton_Click" ToolTip="播放预览"
-                                                    Background="#99000000" BorderBrush="Transparent">
+                                                    Background="#33FFFFFF" BorderBrush="#55FFFFFF">
                                                 <Button.Style>
                                                     <Style TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
-                                                        <Setter Property="Opacity" Value="0" />
+                                                        <Setter Property="Opacity" Value="0.55" />
                                                         <Style.Triggers>
                                                             <DataTrigger Binding="{Binding IsPreviewLoading}" Value="True">
                                                                 <Setter Property="Opacity" Value="1" />
@@ -136,7 +158,7 @@
                                                     </Style>
                                                 </Button.Style>
                                                 <Grid>
-                                                    <controls:ProgressRing Width="38" Height="38" StrokeThickness="3"
+                                                    <controls:ProgressRing Width="26" Height="26" StrokeThickness="2.5"
                                                                            Progress="{Binding PreviewProgress}"
                                                                            TrackBrush="#66778088"
                                                                            ProgressBrush="{StaticResource AccentBrush}"
@@ -152,12 +174,12 @@
                                                             </Style>
                                                         </controls:ProgressRing.Style>
                                                     </controls:ProgressRing>
-                                                    <TextBlock Text="{Binding PreviewButtonContent}" FontSize="18"
+                                                    <TextBlock Text="{Binding PreviewButtonContent}" FontSize="14"
                                                                HorizontalAlignment="Center" VerticalAlignment="Center" />
                                                 </Grid>
                                             </Button>
                                         </Grid>
-                                        <StackPanel Grid.Column="1" Grid.Row="0" Margin="8,0,8,0">
+                                        <StackPanel Grid.Column="1" Grid.Row="0" Margin="6,0,8,0">
                                             <TextBlock Text="{Binding DisplayTitle}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
                                             <TextBlock Text="{Binding DifficultyName}" Foreground="{StaticResource SecondaryBrush}"
                                                        FontSize="12" TextTrimming="CharacterEllipsis" />
@@ -177,7 +199,7 @@
                                             <Button Content="↷" Height="29" Margin="0,6,0,0" Padding="0" Tag="{Binding}" Click="SkipButton_Click" ToolTip="跳过" />
                                             <Button Content="..." Height="29" Margin="0,6,0,0" Padding="0" Tag="{Binding}" Click="DetailButton_Click" ToolTip="详情" />
                                         </StackPanel>
-                                        <Expander Grid.Row="1" Grid.ColumnSpan="3" Header="Tags" Margin="72,7,42,0">
+                                        <Expander Grid.Row="1" Grid.ColumnSpan="3" Header="Tags" Margin="54,7,42,0">
                                             <ItemsControl ItemsSource="{Binding TagItems}">
                                                 <ItemsControl.ItemsPanel>
                                                     <ItemsPanelTemplate>
@@ -253,6 +275,7 @@
                                                 <Button Content="‹ 返回" Tag="{Binding}" Click="DetailButton_Click"
                                                         HorizontalAlignment="Left" Margin="0,8,0,0" Padding="12,2" FontSize="10" />
                                             </StackPanel>
+                                        </Grid>
                                         </Grid>
                                     </Grid>
                                 </Border>

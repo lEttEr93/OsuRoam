@@ -32,9 +32,29 @@
                     <ItemsControl.ItemTemplate>
                         <DataTemplate>
                             <Border Background="{StaticResource SurfaceBrush}" BorderBrush="{StaticResource BorderBrush}"
-                                    BorderThickness="1" CornerRadius="5" Margin="0,0,0,8" Padding="8"
+                                    BorderThickness="1" CornerRadius="5" Margin="0,0,0,8" ClipToBounds="True"
                                     Loaded="HistoryCard_Loaded">
-                                <StackPanel>
+                                <Grid>
+                                    <!-- 曲绘背影：低分辨率位图放大，模糊来自放大本身 -->
+                                    <Border CornerRadius="5" Opacity="0.5" IsHitTestVisible="False"
+                                            RenderOptions.BitmapScalingMode="HighQuality">
+                                        <Border.Background>
+                                            <ImageBrush ImageSource="{Binding Backdrop}" Stretch="Uniform"
+                                                        AlignmentX="Center" AlignmentY="Top" />
+                                        </Border.Background>
+                                    </Border>
+                                    <Border IsHitTestVisible="False">
+                                        <Border.Background>
+                                            <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
+                                                <GradientStop Color="#9A121416" Offset="0" />
+                                                <GradientStop Color="#C4121416" Offset="0.30" />
+                                                <GradientStop Color="#EC121416" Offset="0.62" />
+                                                <GradientStop Color="#FF121416" Offset="1" />
+                                            </LinearGradientBrush>
+                                        </Border.Background>
+                                        </Border>
+
+                                    <StackPanel Margin="8">
                                     <!-- 第一层：摘要 -->
                                     <Grid Visibility="{Binding IsSummaryVisible, Converter={StaticResource BoolToVis}}">
                                         <Grid.Style>
@@ -58,14 +78,10 @@
                                             </Style>
                                         </Grid.Style>
                                         <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="52" />
                                             <ColumnDefinition Width="*" />
                                             <ColumnDefinition Width="Auto" />
                                         </Grid.ColumnDefinitions>
-                                        <Border Width="52" Height="52" CornerRadius="4" ClipToBounds="True" Background="#30353A">
-                                            <Image Source="{Binding Cover}" Stretch="UniformToFill" />
-                                        </Border>
-                                        <StackPanel Grid.Column="1" Margin="8,0,0,0" VerticalAlignment="Center">
+                                        <StackPanel VerticalAlignment="Center">
                                             <TextBlock Text="{Binding DisplayTitle}" FontSize="12" FontWeight="SemiBold"
                                                        Foreground="{StaticResource TextBrush}" TextTrimming="CharacterEllipsis" />
                                             <TextBlock Text="{Binding DifficultyName}" FontSize="11"
@@ -154,7 +170,8 @@
                                             </ItemsControl.ItemTemplate>
                                         </ItemsControl>
                                     </Expander>
-                                </StackPanel>
+                                    </StackPanel>
+                                </Grid>
                             </Border>
                         </DataTemplate>
                     </ItemsControl.ItemTemplate>

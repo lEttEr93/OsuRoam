@@ -209,9 +209,18 @@ public partial class MainWindow : Window
     {
         RecommendationItem item = buildSnapshotItem();
         recommendations.Add(item);
-        item.ToggleDetail();
-        await Task.Delay(900);
+        for (int index = 1; index < 3; index++)
+            recommendations.Add(buildSnapshotItem(index));
+
+        // 先拍摘要层（曲绘背景 + 40px 预览按钮），再翻详情层
+        // 等久一点：截图模式下三张曲绘是并发现下载的（本机实测最慢 3.3s），太早拍背景还是空的
+        await Task.Delay(5200);
         RenderDiagnostics.CaptureWindow(this, path);
+        item.ToggleDetail();
+        await Task.Delay(500);
+        RenderDiagnostics.CaptureWindow(this, path.EndsWith(".png", StringComparison.OrdinalIgnoreCase)
+            ? path[..^4] + "-detail.png"
+            : path + "-detail.png");
 
         if (!Environment.GetCommandLineArgs().Any(arg => arg == "--with-history"))
         {
@@ -235,17 +244,25 @@ public partial class MainWindow : Window
     }
 
     /// <summary>截图用的条目：缓存里有真 .osz 就用真数据，没有就造一份接近真实的。</summary>
-    private RecommendationItem buildSnapshotItem()
+    private static readonly (int SetId, int MapId, string Artist, string Title, double Stars)[] SnapshotMaps =
+    [
+        (1411397, 5075177, "Camellia", "Exit This Earth's Atomosphere", 6.42),
+        (2242540, 4686608, "TaKo", "Everything is blue", 4.35),
+        (591660, 1300612, "Yunomi", "Mentai Cosmic", 4.57)
+    ];
+
+    private RecommendationItem buildSnapshotItem(int index = 0)
     {
+        (int setId, int mapId, string artist, string title, double stars) = SnapshotMaps[index % SnapshotMaps.Length];
         RecommendationItem item = new()
         {
-            BeatmapId = 5075177,
-            BeatmapsetId = 1411397,
-            Artist = "Camellia",
-            Title = "Exit This Earth's Atomosphere",
+            BeatmapId = mapId,
+            BeatmapsetId = setId,
+            Artist = artist,
+            Title = title,
             DifficultyName = "[4K] 1.1x",
             Mapper = "Sotarks",
-            Stars = 6.42,
+            Stars = stars,
             Bpm = 180,
             LengthSeconds = 252,
             RankedYear = 2019,
@@ -319,6 +336,8 @@ public partial class MainWindow : Window
             SkillAxes = [0.82, 0.74, 0.41, 0.55, 0.33, 0.28, 0.61]
         });
 
+        // 截图时把曲绘真的拉下来，否则卡片背景层是空的、看不出效果。
+        item.LoadCover();
         return item;
     }
 

@@ -34,6 +34,7 @@ public sealed class RecommendationArchiveEntry : INotifyPropertyChanged
     public string CoverUrl => $"https://assets.ppy.sh/beatmaps/{BeatmapsetId}/covers/cover.jpg";
 
     private System.Windows.Media.ImageSource? cover;
+    private System.Windows.Media.ImageSource? backdrop;
 
     /// <summary>由 CoverLoader 用程序自己的 HttpClient 拉下来的封面。</summary>
     [JsonIgnore]
@@ -47,7 +48,23 @@ public sealed class RecommendationArchiveEntry : INotifyPropertyChanged
         }
     }
 
-    public void LoadCover() => Services.CoverLoader.Load(BeatmapsetId, image => Cover = image);
+    /// <summary>低分辨率背影（96px 宽），卡片背景层放大铺开，天然带模糊。</summary>
+    [JsonIgnore]
+    public System.Windows.Media.ImageSource? Backdrop
+    {
+        get => backdrop;
+        private set
+        {
+            backdrop = value;
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Backdrop)));
+        }
+    }
+
+    public void LoadCover() => Services.CoverLoader.Load(BeatmapsetId, art =>
+    {
+        Cover = art.Cover;
+        Backdrop = art.Backdrop;
+    });
 
     [JsonIgnore]
     public string RecommendedLabel => RecommendedAtUtc.ToLocalTime().ToString("MM-dd HH:mm");

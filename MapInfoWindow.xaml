@@ -43,7 +43,8 @@
                 </Grid.ColumnDefinitions>
 
                 <Border Width="56" Height="56" CornerRadius="4" Background="#30353A" ClipToBounds="True">
-                    <Image Source="{Binding Cover}" Stretch="UniformToFill" />
+                    <Image Source="{Binding Cover}" Stretch="UniformToFill"
+                           HorizontalAlignment="Center" VerticalAlignment="Center" />
                 </Border>
 
                 <StackPanel Grid.Column="1" Margin="9,0,6,0" VerticalAlignment="Center">
