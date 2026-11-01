@@ -414,7 +414,10 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
     {
         if (historyWindow is { IsVisible: true })
         {
-            historyWindow.Hide();
+            if (historyWindow.IsExiting)
+                historyWindow.PlayEntrance();   // 正在退场时再点一次：直接回场
+            else
+                historyWindow.PlayExit();       // 有淡出动画，结束后才 Hide
             return;
         }
 

@@ -20,6 +20,13 @@ public partial class HistoryWindow : Window
     private Window? dockOwner;
     private bool hiddenByOwner;
 
+    /// <summary>入场/退场滑动的水平位移量。</summary>
+    private const double SlideOffset = 14;
+
+    /// <summary>入场/退场代次：退场完成时若代次变了，说明期间又被打开过，不能隐藏。</summary>
+    private int entranceToken;
+    private bool exiting;
+
     public HistoryWindow(
         ObservableCollection<RecommendationArchiveEntry> entries,
         AppSettings settings,
@@ -59,8 +66,11 @@ public partial class HistoryWindow : Window
     }
 
     /// <summary>
-    /// 在 Show() 之前调用：把基值设成入场起点。
-    /// 如果先 Show 再设，第一帧会是终态（全亮、就位），然后才跳回去淡入——就是那下抽搐。
+    /// 在 Show() 之前调用：把面板内容设成入场起点。
+    ///
+    /// 注意这里动的是 <c>RootCard.Opacity</c> 而不是 <c>Window.Opacity</c>：
+    /// 窗口本身是 AllowsTransparency 的透明窗口，改窗口不透明度会让 WPF 切换
+    /// 分层窗口的渲染路径，入场第一帧容易抖一下。
     /// </summary>
     public void PrepareEntrance()
     {
@@ -69,22 +79,25 @@ public partial class HistoryWindow : Window
 
         try
         {
-            Opacity = 0;
-            RootSlide.SetCurrentValue(TranslateTransform.XProperty, 14.0);
+            RootCard.Opacity = 0;
+            RootSlide.SetCurrentValue(TranslateTransform.XProperty, SlideOffset);
         }
         catch (Exception exception)
         {
             Services.AppLog.Error("历史面板入场准备失败", exception);
-            Opacity = 1;
+            RootCard.Opacity = 1;
         }
     }
 
     /// <summary>在 Show() 之后调用：基值已是起点，动画用 HoldEnd 持有终点，完成后回写基值。</summary>
     public void PlayEntrance()
     {
+        entranceToken++;
+        exiting = false;
+
         if (!SystemParameters.ClientAreaAnimation)
         {
-            Opacity = 1;
+            RootCard.Opacity = 1;
             RootSlide.SetCurrentValue(TranslateTransform.XProperty, 0.0);
             return;
         }
@@ -95,13 +108,13 @@ public partial class HistoryWindow : Window
             fade.FillBehavior = FillBehavior.HoldEnd;
             fade.Completed += (_, _) =>
             {
-                BeginAnimation(OpacityProperty, null);
-                Opacity = 1;
+                RootCard.BeginAnimation(UIElement.OpacityProperty, null);
+                RootCard.Opacity = 1;
             };
-            BeginAnimation(OpacityProperty, null);
-            BeginAnimation(OpacityProperty, fade);
+            RootCard.BeginAnimation(UIElement.OpacityProperty, null);
+            RootCard.BeginAnimation(UIElement.OpacityProperty, fade);
 
-            DoubleAnimation slide = Controls.Motion.tween(14, 0, 220);
+            DoubleAnimation slide = Controls.Motion.tween(SlideOffset, 0, 220);
             slide.FillBehavior = FillBehavior.HoldEnd;
             slide.Completed += (_, _) =>
             {
@@ -114,12 +127,64 @@ public partial class HistoryWindow : Window
         catch (Exception exception)
         {
             Services.AppLog.Error("历史面板入场动画失败", exception);
-            BeginAnimation(OpacityProperty, null);
-            Opacity = 1;
+            RootCard.BeginAnimation(UIElement.OpacityProperty, null);
+            RootCard.Opacity = 1;
             RootSlide.BeginAnimation(TranslateTransform.XProperty, null);
             RootSlide.SetCurrentValue(TranslateTransform.XProperty, 0.0);
         }
     }
+
+    /// <summary>关闭动画：淡出 + 右移，结束后才真正 Hide。</summary>
+    public void PlayExit()
+    {
+        if (!IsVisible || exiting)
+            return;
+
+        if (!SystemParameters.ClientAreaAnimation)
+        {
+            Hide();
+            return;
+        }
+
+        exiting = true;
+        int token = ++entranceToken;
+
+        try
+        {
+            DoubleAnimation fade = Controls.Motion.tween(1, 0, 140);
+            fade.FillBehavior = FillBehavior.HoldEnd;
+            fade.Completed += (_, _) => finishExit(token);
+            RootCard.BeginAnimation(UIElement.OpacityProperty, null);
+            RootCard.BeginAnimation(UIElement.OpacityProperty, fade);
+
+            DoubleAnimation slide = Controls.Motion.tween(0, SlideOffset, 180);
+            slide.FillBehavior = FillBehavior.HoldEnd;
+            RootSlide.BeginAnimation(TranslateTransform.XProperty, null);
+            RootSlide.BeginAnimation(TranslateTransform.XProperty, slide);
+        }
+        catch (Exception exception)
+        {
+            Services.AppLog.Error("历史面板退场动画失败", exception);
+            finishExit(token);
+        }
+    }
+
+    private void finishExit(int token)
+    {
+        // 退场途中又被打开过就别藏了（token 变了）。
+        if (token != entranceToken)
+            return;
+
+        exiting = false;
+        RootCard.BeginAnimation(UIElement.OpacityProperty, null);
+        RootCard.Opacity = 1;
+        RootSlide.BeginAnimation(TranslateTransform.XProperty, null);
+        RootSlide.SetCurrentValue(TranslateTransform.XProperty, 0.0);
+        Hide();
+    }
+
+    /// <summary>退场动画是否正在进行。</summary>
+    public bool IsExiting => exiting;
 
     /// <summary>卡片入场；Transform 必须在运行时新建（模板内的 Freezable 会被冻结）。</summary>
     private void HistoryCard_Loaded(object sender, RoutedEventArgs e)
