@@ -84,25 +84,31 @@
                                         BorderThickness="1" CornerRadius="6" Margin="0,0,0,8" ClipToBounds="True"
                                         Loaded="RecommendationCard_Loaded">
                                     <Grid>
-                                        <!-- 曲绘背影：Backdrop 是 96px 宽的低分辨率版，放大到卡片宽度天然是糊的，
-                                             所以不需要 BlurEffect（模糊位图会把圆角裁切糊成直角，还多一层离屏渲染）。
-                                             Stretch=Uniform → 整幅可见不裁切，顶部对齐 + 向下渐隐。 -->
-                                        <Border CornerRadius="6" Opacity="0.5" IsHitTestVisible="False"
+                                        <!-- 2. 铺满整卡的模糊副本：让下半部分也有曲绘的颜色，不是纯黑 -->
+                                        <Border CornerRadius="6" Opacity="0.18" IsHitTestVisible="False"
+                                                RenderOptions.BitmapScalingMode="HighQuality">
+                                            <Border.Background>
+                                                <ImageBrush ImageSource="{Binding Backdrop}" Stretch="UniformToFill" />
+                                            </Border.Background>
+                                        </Border>
+
+                                        <!-- 3. 顶部整幅曲绘：alpha 渐隐已烘在位图里，下边缘天然透明 -->
+                                        <Border CornerRadius="6" Opacity="0.6" IsHitTestVisible="False"
                                                 RenderOptions.BitmapScalingMode="HighQuality">
                                             <Border.Background>
                                                 <ImageBrush ImageSource="{Binding Backdrop}" Stretch="Uniform"
                                                             AlignmentX="Center" AlignmentY="Top" />
                                             </Border.Background>
                                         </Border>
-                                        <!-- 向下渐隐到卡片底色：曲绘是 3.6:1，整幅铺进去只占顶部一条，
-                                             用渐隐把下边缘化掉，看起来像背景而不是贴了张图 -->
+
+                                        <!-- 4. 压暗：不再到全不透明，否则下半部分会被压成死黑 -->
                                         <Border IsHitTestVisible="False">
                                             <Border.Background>
                                                 <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
-                                                    <GradientStop Color="#9A121416" Offset="0" />
-                                                    <GradientStop Color="#C4121416" Offset="0.30" />
-                                                    <GradientStop Color="#EC121416" Offset="0.62" />
-                                                    <GradientStop Color="#FF121416" Offset="1" />
+                                                    <GradientStop Color="#70121416" Offset="0" />
+                                                    <GradientStop Color="#AE121416" Offset="0.32" />
+                                                    <GradientStop Color="#CC121416" Offset="0.68" />
+                                                    <GradientStop Color="#DC121416" Offset="1" />
                                                 </LinearGradientBrush>
                                             </Border.Background>
                                         </Border>

@@ -29,6 +29,9 @@ public static class CoverLoader
     /// </summary>
     private const int BackdropWidth = 96;
 
+    /// <summary>背影从这一比例开始往下渐隐（0.3 = 上方 30% 完全保留）。</summary>
+    private const double FadeStart = 0.30;
+
     private static readonly HttpClient Http = new() { Timeout = TimeSpan.FromSeconds(20) };
     private static readonly Dictionary<int, CoverArt> Cache = [];
     private static readonly HashSet<int> Loading = [];
@@ -108,20 +111,60 @@ public static class CoverLoader
         }
     }
 
-    /// <summary>把缩略图缩到 96px 宽当背影用；放大到卡片宽度时自然是模糊的。</summary>
+    /// <summary>
+    /// 把缩略图缩到 96px 宽当背影用，并烘一条竖直 alpha 渐隐：
+    /// 上方 <see cref="FadeStart"/> 保持原样，往下按 smoothstep 收到完全透明。
+    ///
+    /// 这样图的下边缘是"透明"的，不会在卡片上留一条硬横线；渐隐比例又是烘在位图里的，
+    /// 卡片高度怎么变、放大多少倍都自动成立。
+    /// </summary>
     private static ImageSource? createBackdrop(BitmapSource source)
     {
         try
         {
-            if (source.PixelWidth <= BackdropWidth)
+            double scale = Math.Min(1.0, (double)BackdropWidth / source.PixelWidth);
+            BitmapSource scaled = scale < 1.0
+                ? new TransformedBitmap(source, new ScaleTransform(scale, scale))
+                : source;
+
+            BitmapSource pixels = scaled.Format == PixelFormats.Bgra32 || scaled.Format == PixelFormats.Pbgra32
+                ? scaled
+                : new FormatConvertedBitmap(scaled, PixelFormats.Pbgra32, null, 0);
+
+            int width = pixels.PixelWidth;
+            int height = pixels.PixelHeight;
+            if (width <= 0 || height <= 0)
+                return scaled;
+
+            int stride = width * 4;
+            byte[] buffer = new byte[stride * height];
+            pixels.CopyPixels(buffer, stride, 0);
+
+            for (int y = 0; y < height; y++)
             {
-                return source;
+                double progress = height <= 1 ? 1 : y / (double)(height - 1);
+                double t = (progress - FadeStart) / (1 - FadeStart);
+                if (t <= 0)
+                    continue;
+
+                // smoothstep：两端导数为 0，交界处不会出现"折线"感
+                double keep = 1 - smoothstep(Math.Clamp(t, 0, 1));
+                int rowStart = y * stride;
+                for (int x = 0; x < width; x++)
+                {
+                    int index = rowStart + x * 4;
+                    // Pbgra32 是预乘 alpha：整体乘 keep 等价于"再多一层透明度"，颜色不会偏亮
+                    buffer[index] = (byte)(buffer[index] * keep);
+                    buffer[index + 1] = (byte)(buffer[index + 1] * keep);
+                    buffer[index + 2] = (byte)(buffer[index + 2] * keep);
+                    buffer[index + 3] = (byte)(buffer[index + 3] * keep);
+                }
             }
 
-            double scale = (double)BackdropWidth / source.PixelWidth;
-            TransformedBitmap backdrop = new(source, new ScaleTransform(scale, scale));
-            backdrop.Freeze();
-            return backdrop;
+            BitmapSource faded = BitmapSource.Create(
+                width, height, 96, 96, PixelFormats.Pbgra32, null, buffer, stride);
+            faded.Freeze();
+            return faded;
         }
         catch (Exception exception)
         {
@@ -129,6 +172,8 @@ public static class CoverLoader
             return null;
         }
     }
+
+    private static double smoothstep(double t) => t * t * (3 - 2 * t);
 
     /// <summary>把回写 ImageSource 的动作送回 UI 线程；没有 Application 时直接执行。</summary>
     private static void post(Action action)

@@ -35,24 +35,34 @@
                                     BorderThickness="1" CornerRadius="5" Margin="0,0,0,8" ClipToBounds="True"
                                     Loaded="HistoryCard_Loaded">
                                 <Grid>
-                                    <!-- 曲绘背影：低分辨率位图放大，模糊来自放大本身 -->
-                                    <Border CornerRadius="5" Opacity="0.5" IsHitTestVisible="False"
+                                    <!-- 2. 铺满整卡的模糊副本：让下半部分也有曲绘的颜色，不是纯黑 -->
+                                    <Border CornerRadius="6" Opacity="0.18" IsHitTestVisible="False"
                                             RenderOptions.BitmapScalingMode="HighQuality">
                                         <Border.Background>
-                                            <ImageBrush ImageSource="{Binding Backdrop}" Stretch="Uniform"
-                                                        AlignmentX="Center" AlignmentY="Top" />
+                                        <ImageBrush ImageSource="{Binding Backdrop}" Stretch="UniformToFill" />
                                         </Border.Background>
                                     </Border>
+
+                                    <!-- 3. 顶部整幅曲绘：alpha 渐隐已烘在位图里，下边缘天然透明 -->
+                                    <Border CornerRadius="6" Opacity="0.6" IsHitTestVisible="False"
+                                            RenderOptions.BitmapScalingMode="HighQuality">
+                                        <Border.Background>
+                                        <ImageBrush ImageSource="{Binding Backdrop}" Stretch="Uniform"
+                                                    AlignmentX="Center" AlignmentY="Top" />
+                                        </Border.Background>
+                                    </Border>
+
+                                    <!-- 4. 压暗：不再到全不透明，否则下半部分会被压成死黑 -->
                                     <Border IsHitTestVisible="False">
                                         <Border.Background>
-                                            <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
-                                                <GradientStop Color="#9A121416" Offset="0" />
-                                                <GradientStop Color="#C4121416" Offset="0.30" />
-                                                <GradientStop Color="#EC121416" Offset="0.62" />
-                                                <GradientStop Color="#FF121416" Offset="1" />
-                                            </LinearGradientBrush>
+                                        <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
+                                            <GradientStop Color="#70121416" Offset="0" />
+                                            <GradientStop Color="#AE121416" Offset="0.32" />
+                                            <GradientStop Color="#CC121416" Offset="0.68" />
+                                            <GradientStop Color="#DC121416" Offset="1" />
+                                        </LinearGradientBrush>
                                         </Border.Background>
-                                        </Border>
+                                    </Border>
 
                                     <StackPanel Margin="8">
                                     <!-- 第一层：摘要 -->
