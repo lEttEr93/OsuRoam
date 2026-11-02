@@ -130,6 +130,16 @@ public partial class MainWindow : Window
         await patternLibrary.LoadAsync();
         await archiveStore.LoadAsync();
         AppLog.Info($"键型库：{patternLibrary.ParsedCount} 条真实解析 / {patternLibrary.Count} 条总计");
+
+        // 开发用：--experiment，跑几个干净场景对比「推荐」和「谱池」的键型分布，写一份报告后退出。
+        if (Environment.GetCommandLineArgs().Any(argument =>
+                argument.StartsWith("--experiment", StringComparison.OrdinalIgnoreCase)))
+        {
+            await runExperimentAsync();
+            Close();
+            return;
+        }
+
         refreshTagList();
         applySettingsToControls();
         if (!double.IsNaN(settings.WindowLeft) && !double.IsNaN(settings.WindowTop))
@@ -145,6 +155,35 @@ public partial class MainWindow : Window
             await runDiagnosticsAsync();
         else if (snapshotPath() is { } capturePath)
             await runSnapshotAsync(capturePath);
+    }
+
+    /// <summary>--experiment[=bpm]：跑推荐实验并落一份报告，然后退出。</summary>
+    private async Task runExperimentAsync()
+    {
+        api.Configure(settings.ClientId, settingsStore.ReadSecret(settings));
+        string mode = "profile";
+        foreach (string argument in Environment.GetCommandLineArgs())
+        {
+            if (argument.StartsWith("--experiment=", StringComparison.OrdinalIgnoreCase))
+                mode = argument["--experiment=".Length..].Trim().ToLowerInvariant();
+        }
+
+        string path = Path.Combine(StoragePaths.Root, $"experiment-{mode}-{DateTime.Now:yyyyMMdd-HHmmss}.txt");
+        string report;
+        try
+        {
+            report = mode == "bpm"
+                ? await RecommendationExperiment.RunBpmAsync(api, settings, 4.0, 5.0, 60, sessionCancellation.Token)
+                : await RecommendationExperiment.RunAsync(api, settings, settings.Username, sessionCancellation.Token);
+        }
+        catch (Exception exception)
+        {
+            AppLog.Error("推荐实验失败", exception);
+            report = $"推荐实验失败：{exception}";
+        }
+
+        await File.WriteAllTextAsync(path, report, new UTF8Encoding(false));
+        AppLog.Info($"推荐实验报告：{path}");
     }
 
     /// <summary>开发用：--snapshot=路径，把当前界面渲染成 PNG 后退退出。</summary>
@@ -777,14 +816,19 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
         try
         {
             setStatus("status.withtitle", Loc.T(statusKey), item.DisplayTitle);
-            if (item.DownloadState is not DownloadState.Downloading)
+            string oszPath = Path.Combine(settingsStore.CacheDirectory, $"{item.BeatmapsetId}.osz");
+            bool wantPattern = settings.Mode == "mania";
+
+            // 已经下好的不再走下载（否则会排在预下载后面白等），只有真正没下过才下。
+            if (item.DownloadState is not (DownloadState.Downloaded or DownloadState.Downloading))
             {
                 item.DownloadState = DownloadState.Queued;
                 await downloader.DownloadAsync(item, settings, sessionCancellation.Token);
+            }
 
-                string oszPath = Path.Combine(settingsStore.CacheDirectory, $"{item.BeatmapsetId}.osz");
-                bool wantPattern = settings.Mode == "mania";
-
+            bool fileReady = File.Exists(oszPath) && new FileInfo(oszPath).Length >= 1024;
+            if (fileReady && (item.Detail is null || (wantPattern && item.Pattern is null)))
+            {
                 // 谱面详情（CS/OD/AR/物件数）和键型都来自同一个 .osu：解压 + 解析要几十到几百毫秒，
                 // 放 UI 线程会吃掉动画帧预算，所以丢到线程池；键型那块还要串行化，避免并发写同一份键型库。
                 await patternGate.WaitAsync();
@@ -935,9 +979,10 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
     /// 导入发起后弹出谱面信息窗（贴在主窗口/迷你播放器下方）。
     /// 数据来自刚解析好的 <see cref="RecommendationItem.Detail"/> 和键型库。
     /// </summary>
-    private void showMapInfoFor(RecommendationItem item)
+    private void showMapInfoFor(RecommendationItem item, bool manual = false)
     {
-        if (!settings.ShowMapInfo)
+        // manual = 用户自己点「i」：这时不受设置里「导入后自动弹出」的开关限制。
+        if (!manual && !settings.ShowMapInfo)
             return;
 
         try
@@ -955,6 +1000,18 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
         {
             AppLog.Error("显示谱面信息窗失败", exception);
         }
+    }
+
+    /// <summary>迷你播放器里的「i」：手动呼出当前谱面的信息栏。</summary>
+    private void MiniInfoButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (currentRoamItem is null)
+        {
+            setStatus("status.nothingimported");
+            return;
+        }
+
+        showMapInfoFor(currentRoamItem, manual: true);
     }
 
     /// <summary>收起信息窗（开局 / 关掉设置选项 / 用户点 ×）。</summary>

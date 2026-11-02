@@ -37,6 +37,7 @@ public static class LocTable
         ["tip.status"] = "可选中并复制完整状态",
         ["tip.embeddedfont"] = "数字和英文字母用内置的 Outfit；关掉回退系统字体",
         ["tip.mapinfo"] = "在迷你播放器下方弹出谱面详情（雷达图 / CS·OD·AR·物件数），开局时自动关闭",
+        ["tip.showinfo"] = "呼出谱面信息栏",
 
         // 顶部 / 状态
         ["conn.idle"] = "尚未启动",
@@ -180,6 +181,7 @@ public static class LocTable
         ["status.installing"] = "正在安装下一首",
         ["status.installingafter"] = "结算后安装下一首",
         ["status.minibuilding"] = "正在下载并导入...",
+        ["status.nothingimported"] = "还没有导入谱面",
         ["status.handedover"] = "已交给 {0} 导入",
         ["status.nextdownloaded"] = "下一首已下载：{0}",
         ["status.downloadfail"] = "下载失败：{0}",
@@ -271,6 +273,7 @@ public static class LocTable
         ["tip.status"] = "Click to select and copy the whole status",
         ["tip.embeddedfont"] = "Digits and Latin letters use the bundled Outfit; turn it off to fall back to the system font",
         ["tip.mapinfo"] = "Pops the beatmap details up under the mini player (radar, CS/OD/AR, object counts) and closes itself when a play starts",
+        ["tip.showinfo"] = "Show the beatmap info panel",
 
         // 顶部 / 状态
         ["conn.idle"] = "Not started",
@@ -414,6 +417,7 @@ public static class LocTable
         ["status.installing"] = "Installing the next beatmap",
         ["status.installingafter"] = "Installing the next beatmap after the result",
         ["status.minibuilding"] = "Downloading and importing…",
+        ["status.nothingimported"] = "Nothing imported yet",
         ["status.handedover"] = "Handed to {0} for import",
         ["status.nextdownloaded"] = "Next beatmap downloaded: {0}",
         ["status.downloadfail"] = "Download failed: {0}",

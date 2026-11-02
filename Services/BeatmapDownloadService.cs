@@ -19,6 +19,8 @@ public sealed class BeatmapDownloadService : IDisposable
         DefaultVersionPolicy = HttpVersionPolicy.RequestVersionExact
     };
     private readonly SemaphoreSlim queue = new(1, 1);
+    /// <summary>导入单独一把锁：只串行化「读缓存 + 启动 osu!」，不跟下载抢。</summary>
+    private readonly SemaphoreSlim importGate = new(1, 1);
     private readonly string cacheDirectory;
 
     public BeatmapDownloadService(string cacheDirectory)
@@ -38,11 +40,21 @@ public sealed class BeatmapDownloadService : IDisposable
 
     public async Task DownloadAsync(RecommendationItem item, AppSettings settings, CancellationToken cancellationToken)
     {
+        string path = Path.Combine(cacheDirectory, $"{item.BeatmapsetId}.osz");
+
+        // 已经在缓存里就别排队了。预下载正占着 queue 的时候，导入下一首会在这里
+        // 白等一整首谱面的下载（1.5.0 的「导入总要等新那张下完」就是卡在这）。
+        if (File.Exists(path) && new FileInfo(path).Length >= 1024)
+        {
+            item.DownloadProgress = 1;
+            item.DownloadState = DownloadState.Downloaded;
+            return;
+        }
+
         await queue.WaitAsync(cancellationToken);
         try
         {
             Directory.CreateDirectory(cacheDirectory);
-            string path = Path.Combine(cacheDirectory, $"{item.BeatmapsetId}.osz");
             if (!File.Exists(path) || new FileInfo(path).Length < 1024)
                 await downloadWithFallbackAsync(item, settings, path, cancellationToken);
             else
@@ -69,7 +81,9 @@ public sealed class BeatmapDownloadService : IDisposable
 
     public async Task ImportAsync(RecommendationItem item, AppSettings settings, CancellationToken cancellationToken)
     {
-        await queue.WaitAsync(cancellationToken);
+        // 导入走自己的闸门：不能排在下载后面。导入只是校验 + Process.Start（几十毫秒），
+        // 而一次下载要好几秒——预下载占着 queue 时，用户会眼看着「下一首」迟迟不动。
+        await importGate.WaitAsync(cancellationToken);
         try
         {
             string path = Path.Combine(cacheDirectory, $"{item.BeatmapsetId}.osz");
@@ -92,7 +106,7 @@ public sealed class BeatmapDownloadService : IDisposable
         }
         finally
         {
-            queue.Release();
+            importGate.Release();
         }
     }
 
@@ -289,5 +303,6 @@ public sealed class BeatmapDownloadService : IDisposable
     {
         http.Dispose();
         queue.Dispose();
+        importGate.Dispose();
     }
 }

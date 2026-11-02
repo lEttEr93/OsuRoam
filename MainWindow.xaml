@@ -63,6 +63,7 @@
                     </Grid.RenderTransform>
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
                         <ColumnDefinition Width="58" />
                     </Grid.ColumnDefinitions>
                     <StackPanel Margin="0,0,7,0" VerticalAlignment="Center">
@@ -75,7 +76,10 @@
                             </TextBlock.RenderTransform>
                         </TextBlock>
                     </StackPanel>
-                    <Button x:Name="MiniNextButton" Grid.Column="1" Width="58" Height="30" Padding="0"
+                    <Button x:Name="MiniInfoButton" Grid.Column="1" Width="30" Height="30" Padding="0" Margin="0,0,6,0"
+                            Content="i" FontWeight="SemiBold" Click="MiniInfoButton_Click"
+                            ToolTip="{DynamicResource L.tip.showinfo}" />
+                    <Button x:Name="MiniNextButton" Grid.Column="2" Width="58" Height="30" Padding="0"
                             Content="{DynamicResource L.btn.next}" Click="MiniNextButton_Click" ToolTip="{DynamicResource L.tip.next}" />
                 </Grid>
                 <StackPanel Grid.Column="1" Orientation="Horizontal" Margin="0,7,7,7">
