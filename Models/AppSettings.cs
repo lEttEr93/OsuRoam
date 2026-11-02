@@ -79,6 +79,8 @@ public sealed class AppSettings
     /// <summary>导入谱面后自动弹出谱面信息窗。</summary>
     public bool ShowMapInfo { get; set; } = true;
     public bool ExcludeRecentlyPlayed { get; set; } = true;
+    /// <summary>扫描 osu! 谱面目录，已经装在机器上的难度不再推荐（同曲其他难度仍可推荐）。</summary>
+    public bool ExcludeInstalledBeatmaps { get; set; } = true;
     public double Exploration { get; set; } = 0.45;
     /// <summary>键型偏好在排序里的权重（0 = 不参与）。</summary>
     public double PatternWeight { get; set; } = 0.12;

@@ -520,7 +520,9 @@
                     <Expander x:Name="AdvancedExpander" Header="{DynamicResource L.section.advanced}" Margin="0,8,0,0">
                         <StackPanel Margin="0,10,0,4">
                             <WrapPanel Margin="0,0,0,9">
-                                <CheckBox x:Name="ExcludeRecentCheck" Content="{DynamicResource L.check.excluderecent}" />
+                                <CheckBox x:Name="ExcludeRecentCheck" Content="{DynamicResource L.check.excluderecent}" Margin="0,0,18,0" />
+                                <CheckBox x:Name="ExcludeInstalledCheck" Content="{DynamicResource L.check.excludeinstalled}"
+                                          ToolTip="{DynamicResource L.tip.excludeinstalled}" Click="ExcludeInstalledCheck_Click" />
                             </WrapPanel>
                             <WrapPanel Margin="0,0,0,9">
                                 <CheckBox x:Name="AutoDownloadCheck" Content="{DynamicResource L.check.autodownload}" Margin="0,0,18,0" />

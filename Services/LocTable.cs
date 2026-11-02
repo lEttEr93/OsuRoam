@@ -85,6 +85,8 @@ public static class LocTable
 
         // 开关
         ["check.excluderecent"] = "排除近期玩过",
+        ["check.excludeinstalled"] = "排除已安装的谱面",
+        ["tip.excludeinstalled"] = "扫一遍 osu! 的谱面目录，已经在你机器上的难度不再推荐；同一首歌的其他难度仍会出现",
         ["check.autodownload"] = "自动下载",
         ["check.autoimport"] = "自动导入",
         ["check.embeddedfont"] = "使用内置字体（Outfit）",
@@ -321,6 +323,8 @@ public static class LocTable
 
         // 开关
         ["check.excluderecent"] = "Exclude recently played",
+        ["check.excludeinstalled"] = "Skip installed beatmaps",
+        ["tip.excludeinstalled"] = "Scans the osu! beatmap folder and skips difficulties you already have; other difficulties of the same song can still show up",
         ["check.autodownload"] = "Auto-download",
         ["check.autoimport"] = "Auto-import",
         ["check.embeddedfont"] = "Use the bundled font (Outfit)",

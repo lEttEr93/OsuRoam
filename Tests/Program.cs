@@ -46,6 +46,7 @@ testSimpleFilterLabelsFollowLanguage();
 testLocalizationTablesAreInSync();
 testLocalizationSwitchesAtRuntime();
 testFlavorDownloadDefaults();
+testInstalledLibraryParsesMetadata();
 testSimpleFiltersUseApiGenreAndLanguageIds();
 testTosuStringStateWorksInMultiplayerPayload();
 testTosuDashboardConfigIsDisabled();
@@ -1203,6 +1204,22 @@ static void testFlavorDownloadDefaults()
     string expectedLanguage = Flavor.IsEnglish ? Loc.EnglishTag : Loc.AutoTag;
     if (settings.Language != expectedLanguage)
         throw new InvalidOperationException($"默认语言应为 {expectedLanguage}，实际是 {settings.Language}");
+}
+
+/// <summary>本地谱面扫描只依赖 [Metadata] 里的两个 ID，解析错了会把整库都算错。</summary>
+static void testInstalledLibraryParsesMetadata()
+{
+    const string chart = "osu file format v128\n\n[General]\nMode: 3\n\n[Metadata]\nTitle:X\nBeatmapID:1234\nBeatmapSetID:5678\n";
+    if (!LocalBeatmapLibrary.tryParseIds(chart, out int beatmapId, out int setId) || beatmapId != 1234 || setId != 5678)
+        throw new InvalidOperationException($"应解析出 beatmap=1234 set=5678，实际 {beatmapId}/{setId}");
+
+    // 本地自建谱面没有 BeatmapID，不能算进「已安装」
+    if (LocalBeatmapLibrary.tryParseIds("osu file format v128\n[Metadata]\nTitle:Y\n", out _, out _))
+        throw new InvalidOperationException("缺少 BeatmapID 的谱面不应计入已安装");
+
+    // 负数 ID 也要丢掉
+    if (LocalBeatmapLibrary.tryParseIds("osu file format v128\n[Metadata]\nBeatmapID:-5\nBeatmapSetID:7\n", out _, out _))
+        throw new InvalidOperationException("负数 BeatmapID 不应计入已安装");
 }
 
 static string placeholderIndices(string value)

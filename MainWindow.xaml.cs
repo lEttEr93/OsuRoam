@@ -129,6 +129,8 @@ public partial class MainWindow : Window
         }
         await patternLibrary.LoadAsync();
         await archiveStore.LoadAsync();
+        // 扫一遍已安装谱面（lazer 的内容寻址仓库要遍历两万个文件，放后台，别挡启动）
+        _ = refreshInstalledLibraryAsync();
         AppLog.Info($"键型库：{patternLibrary.ParsedCount} 条真实解析 / {patternLibrary.Count} 条总计");
 
         // 开发用：--experiment，跑几个干净场景对比「推荐」和「谱池」的键型分布，写一份报告后退出。
@@ -172,9 +174,24 @@ public partial class MainWindow : Window
         string report;
         try
         {
-            report = mode == "bpm"
-                ? await RecommendationExperiment.RunBpmAsync(api, settings, 4.0, 5.0, 60, sessionCancellation.Token)
-                : await RecommendationExperiment.RunAsync(api, settings, settings.Username, sessionCancellation.Token);
+            if (mode == "library")
+            {
+                System.Diagnostics.Stopwatch clock = System.Diagnostics.Stopwatch.StartNew();
+                await LocalBeatmapLibrary.RefreshAsync(StoragePaths.Root, CancellationToken.None);
+                clock.Stop();
+                report = $"已安装谱面扫描（{clock.ElapsedMilliseconds} ms）\n{LocalBeatmapLibrary.Note}\n" +
+                         $"BeatmapID 数量：{LocalBeatmapLibrary.InstalledBeatmapIds.Count}\n" +
+                         $"谱面集数量：{LocalBeatmapLibrary.InstalledBeatmapsetIds.Count}\n" +
+                         $"扫描目录：{string.Join("、", LocalBeatmapLibrary.ResolveRoots())}\n";
+            }
+            else if (mode == "bpm")
+            {
+                report = await RecommendationExperiment.RunBpmAsync(api, settings, 4.0, 5.0, 60, sessionCancellation.Token);
+            }
+            else
+            {
+                report = await RecommendationExperiment.RunAsync(api, settings, settings.Username, sessionCancellation.Token);
+            }
         }
         catch (Exception exception)
         {
@@ -663,7 +680,10 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
             IReadOnlyList<RecommendationItem> additions = recommendationEngine.RankAvoidingHistory(
                 candidates, profile, settings, settings.MinimumStars, settings.MaximumStars,
                 excluded, lowerPriority, missing,
-                patternLookup, patternPreference, settings.PatternWeight);
+                patternLookup, patternPreference, settings.PatternWeight,
+                settings.ExcludeInstalledBeatmaps && LocalBeatmapLibrary.HasData
+                    ? LocalBeatmapLibrary.InstalledBeatmapIds
+                    : null);
             foreach (RecommendationItem item in additions)
             {
                 recommendations.Add(item);
@@ -1490,6 +1510,7 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
         value.PoolSize = int.TryParse((PoolSizeBox.SelectedItem as ComboBoxItem)?.Content?.ToString(), out int size) ? size : 5;
         value.CacheLimitMegabytes = parseInt(CacheLimitBox, 128, 65536);
         value.ExcludeRecentlyPlayed = ExcludeRecentCheck.IsChecked == true;
+        value.ExcludeInstalledBeatmaps = ExcludeInstalledCheck.IsChecked == true;
         value.AutoDownload = AutoDownloadCheck.IsChecked == true;
         value.AutoImport = AutoImportCheck.IsChecked == true;
         value.UseEmbeddedFont = EmbeddedFontCheck.IsChecked == true;
@@ -1522,6 +1543,7 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
         MaximumLengthBox.Text = settings.MaximumLengthSeconds.ToString();
         ExplorationSlider.Value = settings.Exploration;
         ExcludeRecentCheck.IsChecked = settings.ExcludeRecentlyPlayed;
+        ExcludeInstalledCheck.IsChecked = settings.ExcludeInstalledBeatmaps;
         AutoDownloadCheck.IsChecked = settings.AutoDownload;
         AutoImportCheck.IsChecked = settings.AutoImport;
         EmbeddedFontCheck.IsChecked = settings.UseEmbeddedFont;
@@ -1564,6 +1586,39 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
         Typography.EnsureUsable();
         Typography.Apply(settings.UseEmbeddedFont);
         AppLog.Info(Typography.Describe());
+    }
+
+    /// <summary>后台扫本地已安装谱面；失败只记日志，去重退回「历史 + 近期玩过」。</summary>
+    private static async Task refreshInstalledLibraryAsync()
+    {
+        try
+        {
+            await LocalBeatmapLibrary.RefreshAsync(StoragePaths.Root, CancellationToken.None);
+            if (LocalBeatmapLibrary.Note is { } note)
+                AppLog.Info(note);
+        }
+        catch (Exception exception)
+        {
+            AppLog.Error("扫描已安装谱面失败", exception);
+        }
+    }
+
+    private async void ExcludeInstalledCheck_Click(object sender, RoutedEventArgs e)
+    {
+        if (!settingsControlsReady)
+            return;
+        settings.ExcludeInstalledBeatmaps = ExcludeInstalledCheck.IsChecked == true;
+        try
+        {
+            await settingsStore.SaveAsync(settings);
+        }
+        catch (Exception exception)
+        {
+            AppLog.Error("保存已安装谱面去重设置失败", exception);
+        }
+
+        if (settings.ExcludeInstalledBeatmaps && !LocalBeatmapLibrary.HasData)
+            await refreshInstalledLibraryAsync();
     }
 
     private async void MapInfoCheck_Click(object sender, RoutedEventArgs e)

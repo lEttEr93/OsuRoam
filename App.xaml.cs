@@ -25,6 +25,7 @@ public partial class App : Application
         // 不该把「已经有一个在运行了」的弹窗糊到用户脸上。
         bool developmentRun = e.Args.Any(argument =>
             argument.StartsWith("--snapshot=", StringComparison.OrdinalIgnoreCase) ||
+            argument.StartsWith("--experiment", StringComparison.OrdinalIgnoreCase) ||
             argument is "--diagnose" or "--diagnose-opaque");
         string mutexName = developmentRun
             ? $"{SingleInstanceMutexName}.dev-{Environment.ProcessId}"

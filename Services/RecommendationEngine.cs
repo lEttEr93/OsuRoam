@@ -15,13 +15,14 @@ public sealed class RecommendationEngine
         int count,
         Func<int, ManiaPattern?>? patternLookup = null,
         double[]? patternPreference = null,
-        double patternWeight = 0)
+        double patternWeight = 0,
+        IReadOnlySet<int>? excludedBeatmapIds = null)
     {
         if (count <= 0) return [];
         List<OsuBeatmapset> source = beatmapsets.ToList();
         HashSet<int> historyIds = recommendationHistory.Where(id => id > 0).ToHashSet();
         HashSet<int> excludedFresh = [.. excludedBeatmapsetIds, .. historyIds];
-        List<RecommendationItem> result = Rank(source, profile, settings, minimumStars, maximumStars, excludedFresh, count, false, patternLookup, patternPreference, patternWeight).ToList();
+        List<RecommendationItem> result = Rank(source, profile, settings, minimumStars, maximumStars, excludedFresh, count, false, patternLookup, patternPreference, patternWeight, excludedBeatmapIds).ToList();
         HashSet<int> selectedIds = [.. excludedBeatmapsetIds, .. result.Select(item => item.BeatmapsetId)];
         if (result.Count >= count) return result;
 
@@ -29,7 +30,7 @@ public sealed class RecommendationEngine
         foreach (int beatmapsetId in recommendationHistory)
         {
             if (beatmapsetId <= 0 || !checkedHistoryIds.Add(beatmapsetId) || selectedIds.Contains(beatmapsetId)) continue;
-            RecommendationItem? reusable = Rank(source.Where(set => set.Id == beatmapsetId), profile, settings, minimumStars, maximumStars, selectedIds, 1, isRecycled: true, patternLookup, patternPreference, patternWeight).FirstOrDefault();
+            RecommendationItem? reusable = Rank(source.Where(set => set.Id == beatmapsetId), profile, settings, minimumStars, maximumStars, selectedIds, 1, isRecycled: true, patternLookup, patternPreference, patternWeight, excludedBeatmapIds).FirstOrDefault();
             if (reusable is null) continue;
             result.Add(reusable);
             selectedIds.Add(reusable.BeatmapsetId);
@@ -49,7 +50,8 @@ public sealed class RecommendationEngine
         bool isRecycled = false,
         Func<int, ManiaPattern?>? patternLookup = null,
         double[]? patternPreference = null,
-        double patternWeight = 0)
+        double patternWeight = 0,
+        IReadOnlySet<int>? excludedBeatmapIds = null)
     {
         double starCenter = (minimumStars + maximumStars) / 2;
         double starRadius = Math.Max(0.2, (maximumStars - minimumStars) / 2);
@@ -76,6 +78,8 @@ public sealed class RecommendationEngine
             {
                 if (!string.Equals(beatmap.Mode, settings.Mode, StringComparison.OrdinalIgnoreCase)) continue;
                 if (settings.Mode == "mania" && (int)Math.Round(beatmap.CircleSize) != settings.ManiaKeys) continue;
+                // 按「难度」去重：同一首曲子的其他难度仍然可以推荐。
+                if (excludedBeatmapIds is not null && excludedBeatmapIds.Contains(beatmap.Id)) continue;
                 if (beatmap.DifficultyRating < minimumStars || beatmap.DifficultyRating > maximumStars) continue;
                 if (beatmap.TotalLength < settings.MinimumLengthSeconds || beatmap.TotalLength > settings.MaximumLengthSeconds) continue;
 
