@@ -61,7 +61,7 @@ How it works:
 
 ## Quick start
 
-1. Extract `osu-roam-v1.5.0-en-portable.zip` (download from [Releases](https://github.com/lEttEr93/OsuRoam/releases/latest); it is self-contained with the .NET runtime, no separate .NET install needed). For the pre-download / auto-advance flow also grab [tosu](https://github.com/tosuapp/tosu) and drop `tosu.exe` next to `OsuRoam.exe`, or point at it in the settings later.
+1. Extract `osu-roam-v1.5.0-en-portable.zip` (download from [Releases](https://github.com/lEttEr93/OsuRoam/releases/latest); nothing else to install — the .NET runtime is baked into `OsuRoam.exe` and `tosu.exe` is already in the folder).
 2. Double-click `OsuRoam.exe`.
 3. Under "Account & connection" fill in the OAuth Client ID, Client Secret and player name.
 4. Choose the game mode (osu! / taiko / catch / mania 1K–10K).
@@ -215,14 +215,22 @@ Requires the .NET 8 SDK:
 ```powershell
 dotnet build OsuRoam.csproj -c Release
 
-# standard build (self-contained, not single-file; Fonts\*.ttf compiled into the assembly as WPF Resources)
+# standard build: one self-contained exe (Fonts\*.ttf are compiled in as WPF Resources)
 dotnet publish OsuRoam.csproj -c Release -r win-x64 --self-contained true `
-  -p:PublishSingleFile=false -p:RoamFlavor=zh -o bin\v1.5.0-zh
+  -p:PublishSingleFile=true -p:DebugType=none -p:RoamFlavor=zh -o bin\v1.5.0-zh
 
 # English build
 dotnet publish OsuRoam.csproj -c Release -r win-x64 --self-contained true `
-  -p:PublishSingleFile=false -p:RoamFlavor=en -o bin\v1.5.0-en
+  -p:PublishSingleFile=true -p:DebugType=none -p:RoamFlavor=en -o bin\v1.5.0-en
+
+# both packages also ship tosu.exe next to the exe
+copy tosu.exe bin\v1.5.0-zh\
+copy tosu.exe bin\v1.5.0-en\
 ```
+
+`PublishSingleFile` bundles the whole .NET runtime into `OsuRoam.exe`; six native WPF / audio DLLs
+(`wpfgfx_cor3`, `PresentationNative_cor3`, `D3DCompiler_47_cor3`, `PenImc_cor3`, `vcruntime140_cor3`,
+`wasmtime`) stay next to it, which is why a package is nine entries instead of a few hundred.
 
 `-p:RoamFlavor=en` only adds the `EN_BUILD` constant, which flips the default UI language and the download
 sources. Delete `obj\` and `bin\Release\` when switching flavors: incremental compilation does not reliably
@@ -318,7 +326,7 @@ mania 模式下会用键型提高推荐针对性。分类体系移植自 [osuman
 
 ## 快速使用
 
-1. 解压 `osu-roam-v1.5.0-portable.zip`（从 [Releases](https://github.com/lEttEr93/OsuRoam/releases/latest) 下载；自包含 .NET 运行时，不用另装 .NET）。想用「开局预下载 / 结算自动推进」再单独下载 [tosu](https://github.com/tosuapp/tosu)，把 `tosu.exe` 放到 `OsuRoam.exe` 旁边，或之后在设置里填路径。
+1. 解压 `osu-roam-v1.5.0-portable.zip`（从 [Releases](https://github.com/lEttEr93/OsuRoam/releases/latest) 下载；不用另装 .NET，运行时已打进 `OsuRoam.exe`，[tosu](https://github.com/tosuapp/tosu) 的 `tosu.exe` 也已经在包里）。
 2. 双击 `OsuRoam.exe`。
 3. 在「账号与连接」填 OAuth Client ID、Client Secret 和玩家名。
 4. 选游戏模式（osu! / taiko / catch / mania 1K–10K）。
@@ -481,14 +489,22 @@ Outfit 只有拉丁字母和数字，**没有汉字字形**：中文照旧由系
 ```powershell
 dotnet build OsuRoam.csproj -c Release
 
-# 中文版（自包含，非单文件；Fonts\*.ttf 作为 WPF Resource 编进程序集）
+# 中文版：自包含单文件（Fonts\*.ttf 作为 WPF Resource 编进程序集）
 dotnet publish OsuRoam.csproj -c Release -r win-x64 --self-contained true `
-  -p:PublishSingleFile=false -p:RoamFlavor=zh -o bin\v1.5.0-zh
+  -p:PublishSingleFile=true -p:DebugType=none -p:RoamFlavor=zh -o bin\v1.5.0-zh
 
 # 英文版
 dotnet publish OsuRoam.csproj -c Release -r win-x64 --self-contained true `
-  -p:PublishSingleFile=false -p:RoamFlavor=en -o bin\v1.5.0-en
+  -p:PublishSingleFile=true -p:DebugType=none -p:RoamFlavor=en -o bin\v1.5.0-en
+
+# 两个包都把 tosu.exe 放在 exe 旁边
+copy tosu.exe bin\v1.5.0-zh\
+copy tosu.exe bin\v1.5.0-en\
 ```
+
+`PublishSingleFile` 把整个 .NET 运行时打进了 `OsuRoam.exe`；六个 WPF / 音频的原生 DLL
+（`wpfgfx_cor3`、`PresentationNative_cor3`、`D3DCompiler_47_cor3`、`PenImc_cor3`、`vcruntime140_cor3`、
+`wasmtime`）留在 exe 外面，所以一个包里只有九个条目，而不是几百个。
 
 `-p:RoamFlavor=en` 只多加一个 `EN_BUILD` 常量，用来切换界面默认语言和下载源。
 **切风味前先删掉 `obj\` 和 `bin\Release\`**：增量编译不一定能察觉 `DefineConstants` 变了，
