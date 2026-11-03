@@ -1,4 +1,4 @@
-# osu! Roam v1.5.1-1
+# osu! Roam v1.5.1+1
 
 [English](#english) · [中文](#中文)
 
@@ -15,8 +15,8 @@ keep roaming without touching it.
 
 | Package | UI language | Default download source |
 |---|---|---|
-| `osu-roam-v1.5.1-1-portable.zip` | follows the system language | sayobot mirrors (China) |
-| `osu-roam-v1.5.1-1-en-portable.zip` | English | catboy / beatconnect (international) |
+| `osu-roam-v1.5.1+1-portable.zip` | follows the system language | sayobot mirrors (China) |
+| `osu-roam-v1.5.1+1-en-portable.zip` | English | catboy / beatconnect (international) |
 
 The .NET runtime and `tosu.exe` are already inside the archive — extract and run. Each build keeps its own `data`
 folder, so **do not install one over the other**.
@@ -97,8 +97,8 @@ osu! 谱面漫游推荐工具，Windows / WPF / .NET 8。读你的成绩样本�
 
 | 包 | 界面语言 | 默认下载源 |
 |---|---|---|
-| `osu-roam-v1.5.1-1-portable.zip` | 跟随系统 | sayobot 镜像（国内） |
-| `osu-roam-v1.5.1-1-en-portable.zip` | 英文 | catboy / beatconnect（国际） |
+| `osu-roam-v1.5.1+1-portable.zip` | 跟随系统 | sayobot 镜像（国内） |
+| `osu-roam-v1.5.1+1-en-portable.zip` | 英文 | catboy / beatconnect（国际） |
 
 .NET 运行时和 `tosu.exe` 都在包里，解压即用。两版各有自己的 `data` 目录，**不要覆盖安装**。
 
