@@ -20,7 +20,9 @@ public sealed record TosuSnapshot(
     string DifficultyName = "",
     string Mapper = "",
     double Stars = 0,
-    double LengthSeconds = 0);
+    double LengthSeconds = 0,
+    /// <summary>当前游玩进度（毫秒）。加载阶段是 0；暂停时停在某个正数上。</summary>
+    double LiveTime = 0);
 
 public sealed class TosuClient : IAsyncDisposable
 {
@@ -136,7 +138,8 @@ public sealed class TosuClient : IAsyncDisposable
                 readString(root, "beatmap", "version"),
                 readString(root, "beatmap", "mapper"),
                 readNumber(root, "beatmap", "stats", "stars", "total"),
-                lengthSecondsOf(root));
+                lengthSecondsOf(root),
+                readNumber(root, "beatmap", "time", "live"));
             SnapshotReceived?.Invoke(snapshot);
 
             if (state == "play" && beatmapId > 0)

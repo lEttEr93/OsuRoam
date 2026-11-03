@@ -50,6 +50,7 @@ testInstalledLibraryParsesMetadata();
 testSimpleFiltersUseApiGenreAndLanguageIds();
 testTosuStringStateWorksInMultiplayerPayload();
 testTosuSnapshotCarriesBeatmapMetadata();
+testPlayVisibilityPredicate();
 testTosuDashboardConfigIsDisabled();
 testTosuExecutableResolution();
 testOsuExecutableCandidatesSupportStable();
@@ -1324,6 +1325,30 @@ static void testTosuSnapshotCarriesBeatmapMetadata()
     assertNear(5.49, captured.Stars, "stats.stars.total");
     // 143811-2380 = 141431 ms
     assertNear(141.431, captured.LengthSeconds, "time.lastObject - firstObject");
+}
+
+/// <summary>
+/// 「什么算在游玩」直接决定窗口什么时候收起。加载阶段是 play + paused（时间没走），
+/// 如果按 paused 判断，窗口会在加载时弹回来、开局才收，两边就不同步了。
+/// </summary>
+static void testPlayVisibilityPredicate()
+{
+    // 加载中：state=play、paused=true、live=0 → 算游玩中，要收起
+    if (!OsuRoam.MainWindow.IsInPlayState(new TosuSnapshot("play", 1, 1, "", true, false, "", 0, LiveTime: 0)))
+        throw new InvalidOperationException("加载阶段应视为游玩中（否则窗口会先弹回来）");
+
+    // 正常游玩
+    if (!OsuRoam.MainWindow.IsInPlayState(new TosuSnapshot("play", 1, 1, "", false, false, "", 0, LiveTime: 5000)))
+        throw new InvalidOperationException("游玩中应视为游玩中");
+
+    // 真暂停（时间已经走过）：不收起，方便看推荐
+    if (OsuRoam.MainWindow.IsInPlayState(new TosuSnapshot("play", 1, 1, "", true, false, "", 0, LiveTime: 5000)))
+        throw new InvalidOperationException("暂停时应恢复窗口");
+
+    // 结算 / 选歌 / 菜单都不算
+    foreach (string state in new[] { "resultScreen", "selectPlay", "menu" })
+        if (OsuRoam.MainWindow.IsInPlayState(new TosuSnapshot(state, 1, 1, "", false, false, "", 0, LiveTime: 5000)))
+            throw new InvalidOperationException($"{state} 不该收起窗口");
 }
 
 static void assertText(string expected, string actual, string message)

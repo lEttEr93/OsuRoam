@@ -26,6 +26,8 @@ public partial class MainWindow : Window
     private readonly TosuFileClient tosuFiles = new();
     private string? ingameInfoKey;
     private RecommendationItem? ingameInfoItem;
+    /// <summary>窗口整体的淡入淡出位移，运行时创建（模板里的 Freezable 会被冻结）。</summary>
+    private readonly TranslateTransform rootSlide = new();
     private readonly TopmostKeeper topmostKeeper;
     private readonly ObservableCollection<RecommendationItem> recommendations = [];
     private readonly HashSet<int> sessionImportedBeatmapsetIds = [];
@@ -83,6 +85,7 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+        RootCard.RenderTransform = rootSlide;
         MiniTitleText.Text = Loc.T("mini.nobeatmap");
         Loc.Changed += applyLanguage;
         applyDiagnosticWindowMode();
@@ -1431,18 +1434,16 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
 
     /// <summary>
     /// 游玩中把 Roam 整个收起来（主窗口、迷你播放器、信息栏、历史面板），
-    /// 结算 / 中途退出 / 暂停等任何「不在游玩」的状态再恢复。暂停也算恢复，
-    /// 因为这时候玩家可能要看一眼推荐。
+    /// 结算 / 中途退出 / 暂停再恢复。
     ///
-    /// 两个坑：
-    /// 1. 光调 Hide()/Show() 不记状态，回来时窗口会沿用上一次的呈现尺寸，
-    ///    于是「进入游戏前是展开的，回来后变成迷你播放器」。这里显式记住并恢复布局。
-    /// 2. 直接 Hide() 会残留一帧（迷你播放器「逗留、闪现一下」）。先把内容淡掉再收窗口，
-    ///    和信息窗退场的做法一致。
+    /// 关键在「什么算在游玩」：加载阶段 tosu 报的是 state=play 且 paused=true
+    /// （playTime 还没开始走），按 paused 判断就会在加载期间把窗口放出来、
+    /// 等真正开局再收起——于是信息栏早关了、迷你播放器还在，回来只剩迷你播放器。
+    /// 所以用 time.live 区分：live==0 是加载，算游玩中；live&gt;0 且 paused 才是真暂停。
     /// </summary>
     private void updatePlayVisibility(TosuSnapshot snapshot)
     {
-        bool inPlay = string.Equals(snapshot.StateName, "play", StringComparison.OrdinalIgnoreCase) && !snapshot.IsPaused;
+        bool inPlay = IsInPlayState(snapshot);
         if (inPlay == hiddenForPlay)
             return;
 
@@ -1460,6 +1461,18 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
         showRestoringLayout();
     }
 
+    /// <summary>
+    /// 判断「现在该不该把 Roam 藏起来」。拆出来是为了能单独测：
+    /// 加载阶段 tosu 报 play + paused（时间还没走），必须算作游玩中，
+    /// 否则窗口会在加载时先弹回来、进入游戏才收起，造成两边不同步。
+    /// </summary>
+    internal static bool IsInPlayState(TosuSnapshot snapshot)
+    {
+        if (!string.Equals(snapshot.StateName, "play", StringComparison.OrdinalIgnoreCase))
+            return false;
+        return !(snapshot.IsPaused && snapshot.LiveTime > 0);
+    }
+
     private bool layoutWasCollapsed;
     private double layoutWidth;
     private double layoutHeight;
@@ -1472,24 +1485,26 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
     {
         layoutWasCollapsed = isCollapsed;
         layoutWidth = Width;
-        layoutHeight = Height;
+        layoutHeight = isCollapsed ? expandedHeight : Height;
         layoutLeft = Left;
         layoutTop = Top;
     }
 
+    /// <summary>淡出 + 轻微下沉后收窗口；信息窗退场用的也是这一套，不会残留一帧。</summary>
     private void fadeOutThenHide()
     {
         int token = ++playVisibilityToken;
         if (!SystemParameters.ClientAreaAnimation)
         {
             RootCard.Opacity = 1;
+            rootSlide.Y = 0;
             Hide();
             return;
         }
 
         try
         {
-            DoubleAnimation fade = Controls.Motion.tween(1, 0, 120);
+            DoubleAnimation fade = Controls.Motion.tween(1, 0, 150);
             fade.FillBehavior = FillBehavior.HoldEnd;
             fade.Completed += (_, _) =>
             {
@@ -1498,58 +1513,115 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
                     return;
                 RootCard.BeginAnimation(UIElement.OpacityProperty, null);
                 RootCard.Opacity = 1;
+                rootSlide.BeginAnimation(TranslateTransform.YProperty, null);
+                rootSlide.Y = 0;
                 Hide();
             };
             RootCard.BeginAnimation(UIElement.OpacityProperty, fade);
+            rootSlide.BeginAnimation(TranslateTransform.YProperty, Controls.Motion.tween(0, 8, 150));
         }
         catch (Exception exception)
         {
             AppLog.Error("游玩时隐藏窗口失败", exception);
             RootCard.BeginAnimation(UIElement.OpacityProperty, null);
             RootCard.Opacity = 1;
+            rootSlide.BeginAnimation(TranslateTransform.YProperty, null);
+            rootSlide.Y = 0;
             Hide();
         }
     }
 
+    /// <summary>恢复：先按「进游戏前」的布局摆好，再淡入上浮。</summary>
     private void showRestoringLayout()
     {
         int token = ++playVisibilityToken;
         RootCard.BeginAnimation(UIElement.OpacityProperty, null);
+        rootSlide.BeginAnimation(TranslateTransform.YProperty, null);
         RootCard.Opacity = SystemParameters.ClientAreaAnimation ? 0 : 1;
+        rootSlide.Y = SystemParameters.ClientAreaAnimation ? 8 : 0;
+
         Show();
 
-        // 布局按「进游戏之前」的样子恢复，而不是沿用窗口上一次的呈现状态
-        if (isCollapsed != layoutWasCollapsed)
-            CollapseButton_Click(this, new RoutedEventArgs());
+        // 布局按记录恢复。这里必须用「无动画」的强制布局：
+        // CollapseButton_Click 带 190ms 高度动画，中途被打断会让 isCollapsed 和
+        // 实际可见性不一致，那正是「回来只剩迷你播放器」的来源。
+        forceLayout(layoutWasCollapsed, layoutWidth, layoutHeight);
+
         if (!double.IsNaN(layoutLeft)) Left = layoutLeft;
         if (!double.IsNaN(layoutTop)) Top = layoutTop;
-        if (layoutWidth > 0) Width = Math.Max(MinWidth, layoutWidth);
-        if (layoutHeight > 0 && !isCollapsed) Height = layoutHeight;
 
         if (!SystemParameters.ClientAreaAnimation || token != playVisibilityToken)
             return;
 
         try
         {
-            DoubleAnimation fade = Controls.Motion.tween(0, 1, 140);
+            DoubleAnimation fade = Controls.Motion.tween(0, 1, 170);
             fade.FillBehavior = FillBehavior.HoldEnd;
             fade.Completed += (_, _) =>
             {
                 RootCard.BeginAnimation(UIElement.OpacityProperty, null);
                 RootCard.Opacity = 1;
+                rootSlide.BeginAnimation(TranslateTransform.YProperty, null);
+                rootSlide.Y = 0;
             };
             RootCard.BeginAnimation(UIElement.OpacityProperty, fade);
+            rootSlide.BeginAnimation(TranslateTransform.YProperty, Controls.Motion.tween(8, 0, 170));
         }
         catch (Exception exception)
         {
             AppLog.Error("游玩回来恢复窗口失败", exception);
             RootCard.BeginAnimation(UIElement.OpacityProperty, null);
             RootCard.Opacity = 1;
+            rootSlide.BeginAnimation(TranslateTransform.YProperty, null);
+            rootSlide.Y = 0;
         }
 
         if (restoreHistoryAfterPlay && historyWindow is not null)
             historyWindow.Show();
         restoreHistoryAfterPlay = false;
+    }
+
+    /// <summary>
+    /// 不走动画，直接把窗口切到指定布局。收/放两边都要用到它
+    /// （按钮那条路径有动画，恢复布局时不能复用）。
+    /// </summary>
+    private void forceLayout(bool collapsed, double keepWidth, double keepExpandedHeight)
+    {
+        isCollapsed = collapsed;
+        MainContent.BeginAnimation(HeightProperty, null);
+        MainContent.ClearValue(HeightProperty);
+
+        if (collapsed)
+        {
+            MainContent.Visibility = Visibility.Collapsed;
+            Footer.Visibility = Visibility.Collapsed;
+            NormalHeader.Visibility = Visibility.Collapsed;
+            MiniPlayerHeader.Visibility = Visibility.Visible;
+            MiniBackdrop.Visibility = Visibility.Visible;
+            MinHeight = 64;
+            MinWidth = 390;
+            ResizeMode = ResizeMode.NoResize;
+            Height = 64;
+            Width = Math.Max(390, keepWidth);
+            CollapseButton.Content = "+";
+            CollapseButton.ToolTip = Loc.T("tip.expand");
+            refreshMiniPlayer();
+            return;
+        }
+
+        MainContent.Visibility = Visibility.Visible;
+        MainContent.Opacity = 1;
+        Footer.Visibility = Visibility.Visible;
+        NormalHeader.Visibility = Visibility.Visible;
+        MiniPlayerHeader.Visibility = Visibility.Collapsed;
+        MiniBackdrop.Visibility = Visibility.Collapsed;
+        MinHeight = 300;
+        MinWidth = 390;
+        ResizeMode = ResizeMode.CanResizeWithGrip;
+        Height = Math.Max(300, keepExpandedHeight);
+        Width = Math.Max(390, keepWidth);
+        CollapseButton.Content = "−";
+        CollapseButton.ToolTip = Loc.T("tip.miniplayer");
     }
 
     private static string connectionTextFor(TosuSnapshot snapshot) => Loc.T(snapshot.StateName switch
@@ -2393,7 +2465,7 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
             Width = Math.Max(390, expandedWidth);
             ResizeMode = ResizeMode.NoResize;
             CollapseButton.Content = "+";
-            CollapseButton.ToolTip = "展开";
+            CollapseButton.ToolTip = Loc.T("tip.expand");
         }
         else
         {
@@ -2420,7 +2492,7 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
             animateWindowHeight(target, 64, 300, revealMainContent);
             Width = Math.Max(390, expandedWidth);
             CollapseButton.Content = "−";
-            CollapseButton.ToolTip = "迷你播放器";
+            CollapseButton.ToolTip = Loc.T("tip.miniplayer");
         }
     }
 
