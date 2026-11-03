@@ -1,4 +1,4 @@
-# osu! Roam v1.5.0
+# osu! Roam v1.5.1
 
 [English](#english) · [中文](#中文)
 
@@ -15,8 +15,8 @@ keep roaming without touching it.
 
 | Package | UI language | Default download source |
 |---|---|---|
-| `osu-roam-v1.5.0-portable.zip` | follows the system language | sayobot mirrors (China) |
-| `osu-roam-v1.5.0-en-portable.zip` | English | catboy / beatconnect (international) |
+| `osu-roam-v1.5.1-portable.zip` | follows the system language | sayobot mirrors (China) |
+| `osu-roam-v1.5.1-en-portable.zip` | English | catboy / beatconnect (international) |
 
 The .NET runtime and `tosu.exe` are already inside the archive — extract and run. Each build keeps its own `data`
 folder, so **do not install one over the other**.
@@ -49,6 +49,11 @@ folder, so **do not install one over the other**.
 - **Tags**: a candidate must hit at least one recommended tag; any excluded tag knocks it out. Double-click a tag
   under a card to add it to the recommended list.
 - **Language**: Interface → Language — system default / 简体中文 / English, applied immediately.
+- **Skip installed beatmaps** (on by default): scans the osu! beatmap folder — `Songs` for stable, `files`
+  for lazer — and never recommends a difficulty you already have. Other difficulties of the same song still
+  show up. Costs ~2 s on the first run, then it is cached.
+- **Info panel shows**: the beatmap Roam just imported, or whatever is selected in osu! (read live from
+  tosu, no download needed).
 - **History** (title bar) shows the last 50 recommendations.
 
 ## Download and tosu
@@ -92,8 +97,8 @@ osu! 谱面漫游推荐工具，Windows / WPF / .NET 8。读你的成绩样本�
 
 | 包 | 界面语言 | 默认下载源 |
 |---|---|---|
-| `osu-roam-v1.5.0-portable.zip` | 跟随系统 | sayobot 镜像（国内） |
-| `osu-roam-v1.5.0-en-portable.zip` | 英文 | catboy / beatconnect（国际） |
+| `osu-roam-v1.5.1-portable.zip` | 跟随系统 | sayobot 镜像（国内） |
+| `osu-roam-v1.5.1-en-portable.zip` | 英文 | catboy / beatconnect（国际） |
 
 .NET 运行时和 `tosu.exe` 都在包里，解压即用。两版各有自己的 `data` 目录，**不要覆盖安装**。
 
@@ -121,6 +126,9 @@ osu! 谱面漫游推荐工具，Windows / WPF / .NET 8。读你的成绩样本�
 - **简易筛选**（状态 / 流派 / 语言）：勾选 = 偏好（命中加分），中间态 = 严格（不匹配就排除），不勾 = 不限。
 - **Tag**：推荐 tag 必须命中至少一个才入选，排除 tag 命中即出局；卡片下方的 Tags 里双击任意 tag 可直接加入。
 - **界面语言**：「界面」→「界面语言」，跟随系统 / 简体中文 / English，切换即时生效。
+- **排除已安装的谱面**（默认开）：扫一遍 osu! 的谱面目录（stable 的 `Songs`、lazer 的 `files`），
+  已经在你机器上的难度不再推荐；同一首歌的其他难度仍会出现。首次约 2 秒，之后走缓存。
+- **信息栏显示**：可以选「导入的谱面」或「游戏内选中的谱面」（后者直接读 tosu，不用下载）。
 - **历史**（标题栏）看最近推荐的 50 首。
 
 ## 下载与 tosu
