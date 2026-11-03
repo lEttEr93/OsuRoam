@@ -37,13 +37,8 @@ public sealed class AppSettings
         [11] = "italian", [12] = "polish", [13] = "russian", [14] = "other"
     };
     private static readonly string[] DefaultStatusFilters = ["ranked", "approved", "qualified", "loved"];
-    private static readonly string[] DefaultTagPool = [
-        "anime", "classical", "electronic", "hip hop", "jazz", "jpop", "kpop", "metal", "pop", "rock", "vocaloid",
-        "ambient", "drum and bass", "dubstep", "hardcore", "house", "instrumental", "orchestral", "trance",
-        "1k", "2k", "3k", "4k", "5k", "6k", "7k", "8k", "9k", "10k",
-        "rice", "ln", "jack", "chordjack", "handstream", "stream", "speed", "stamina", "tech", "sv", "scroll",
-        "米", "面", "叠", "技", "乱", "切"
-    ];
+    /// <summary>爬到的、不在白名单里的 tag 最多留这么多，避免设置文件无限膨胀。</summary>
+    private const int MaxSeenTags = 2000;
     // osu! exposes beatmapset tags as one space-separated string, so the API
     // does not preserve the boundary in common multi-word tags. Keep this
     // list deliberately curated and match longer phrases before shorter ones.
@@ -113,6 +108,13 @@ public sealed class AppSettings
     /// </summary>
     public int SearchRotation { get; set; }
     public List<string> TagPool { get; set; } = [];
+    /// <summary>
+    /// 候选谱面里出现过、但不在白名单里的 tag（有上限、旧的先丢）。
+    /// 它们仍然可以选，只是排在白名单之后 —— 这样池子不会被几万条歌名撑爆。
+    /// </summary>
+    public List<string> SeenTags { get; set; } = [];
+    /// <summary>池子格式版本，2 = 白名单 + SeenTags。旧版本升级时用来做一次迁移。</summary>
+    public int TagPoolVersion { get; set; }
     public List<string> IncludedTags { get; set; } = [];
     public List<string> ExcludedTags { get; set; } = [];
     public List<string> IncludedStatuses { get; set; } = [.. DefaultStatusFilters];
@@ -160,10 +162,48 @@ public sealed class AppSettings
 
     public void NormalizeTags()
     {
-        TagPool = normalizeTags(DefaultTagPool.Concat(TagPool));
+        if (TagPoolVersion < TagPoolFormat)
+        {
+            migrateLegacyTagPool();
+            TagPoolVersion = TagPoolFormat;
+        }
+
+        SeenTags ??= [];
+        if (SeenTags.Count > MaxSeenTags)
+            SeenTags = SeenTags.Skip(SeenTags.Count - MaxSeenTags).ToList();
+
         IncludedTags = normalizeTags(IncludedTags);
         ExcludedTags = normalizeTags(ExcludedTags);
         ExcludedTags.RemoveAll(tag => IncludedTags.Contains(tag, StringComparer.OrdinalIgnoreCase));
+        // 池子 = 白名单（按审计顺序）+ 见过的 + 已选的，同一条只出现一次。
+        TagPool = normalizeTags(TagCatalog.Pool.Concat(SeenTags).Concat(IncludedTags).Concat(ExcludedTags))
+            .OrderBy(TagCatalog.Rank)
+            .ThenBy(tag => tag, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    /// <summary>池子格式版本：2 起 = 白名单 + SeenTags。</summary>
+    public const int TagPoolFormat = 2;
+
+    /// <summary>
+    /// 旧版本的池子是从每个候选谱面里无条件攒出来的（实测能到 1.6 万条，绝大多数是歌名和符号）。
+    /// 升级时把白名单以外、看起来还像 tag 的挪进 SeenTags，池子本身重置。
+    /// </summary>
+    private void migrateLegacyTagPool()
+    {
+        if (TagPool is { Count: > 0 })
+        {
+            foreach (string tag in TagPool)
+            {
+                string canonical = TagCatalog.Canonical(tag);
+                if (!IsMeaningfulTag(canonical) || TagCatalog.Contains(canonical))
+                    continue;
+                if (!SeenTags.Contains(canonical, StringComparer.OrdinalIgnoreCase))
+                    SeenTags.Add(canonical);
+            }
+        }
+
+        TagPool = [];
     }
 
     public void NormalizeSimpleFilters()
@@ -281,7 +321,16 @@ public sealed class AppSettings
 
     public void RecordTags(IEnumerable<string> tags)
     {
-        TagPool = normalizeTags(TagPool.Concat(tags));
+        SeenTags ??= [];
+        foreach (string tag in normalizeTags(tags))
+        {
+            if (TagCatalog.Contains(tag))
+                continue;
+            if (!SeenTags.Contains(tag, StringComparer.OrdinalIgnoreCase))
+                SeenTags.Add(tag);
+        }
+
+        NormalizeTags();
     }
 
     public static IReadOnlyList<string> ParseTags(string tags)
@@ -325,7 +374,8 @@ public sealed class AppSettings
     private static int getWordCount(string value) => value.Split(' ', StringSplitOptions.RemoveEmptyEntries).Length;
 
     private static List<string> normalizeTags(IEnumerable<string>? tags) => (tags ?? [])
-        .Select(tag => tag.Trim().ToLowerInvariant())
+        .Where(tag => !string.IsNullOrWhiteSpace(tag))
+        .Select(tag => TagCatalog.Canonical(tag.Trim().ToLowerInvariant()))
         .Where(IsMeaningfulTag)
         .Distinct(StringComparer.OrdinalIgnoreCase)
         .OrderBy(tag => tag, StringComparer.OrdinalIgnoreCase)
@@ -340,6 +390,14 @@ public sealed class AppSettings
         if (value.Length < 2 || value.Length > 40 || value.Contains('\uFFFD') || value.Contains('?'))
             return false;
         if (value.Any(char.IsControl))
+            return false;
+        // 谱面 tag 里混进来的排版垃圾：引号、括号、井号、路径、运算符。保留 - ! ' 三种（j-core、osu!、mappers' guild）。
+        if (value.Any(character => character is '"' or '(' or ')' or '[' or ']' or '{' or '}' or '#'
+                or '$' or '%' or '^' or '*' or '+' or '=' or '|' or '<' or '>' or '/' or '\\' or '~' or '@' or '`'))
+            return false;
+        if (value[0] is '-' or '.' or '_')
+            return false;
+        if (!value.Any(char.IsLetter))
             return false;
 
         int usefulCharacters = value.Count(char.IsLetterOrDigit);

@@ -39,5 +39,7 @@
   <ItemGroup>
     <EmbeddedResource Include="Resources\minacalc.wasm" />
     <EmbeddedResource Include="Resources\minacalc-75.wasm" />
+    <!-- 审核过的 tag 白名单（Tools/build-tag-pool.py 生成），运行时按资源名 OsuRoam.Resources.tag-pool.json 读。 -->
+    <EmbeddedResource Include="Resources\tag-pool.json" />
   </ItemGroup>
 </Project>

@@ -36,6 +36,10 @@ testPatternAnalyzerDetectsLnChart();
 testPatternPreferenceShapesRanking();
 testCacheCleanerSkipsPoolItems();
 testDirtyTagsAreFiltered();
+testTagPoolComesFromWhitelist();
+testTagAliasesCollapse();
+testLegacyTagPoolMigratesToSeen();
+testSeenTagsRejectJunk();
 testCompoundTagsRemainTogether();
 testCommonCompoundTagsUseLongestMatches();
 testSimpleFiltersOnlyStrictAreAbsolute();
@@ -844,6 +848,60 @@ static void testDirtyTagsAreFiltered()
         throw new InvalidOperationException("dirty tags should not enter the tag pool");
     if (!settings.TagPool.Contains("anime", StringComparer.Ordinal))
         throw new InvalidOperationException("meaningful tags should remain in the tag pool");
+}
+
+static void testTagPoolComesFromWhitelist()
+{
+    AppSettings settings = new();
+    settings.NormalizeTags();
+
+    // 池子来自白名单，而不是把每个候选谱面的 tag 无脑攒进来。
+    assertTrue(settings.TagPool.Contains("electronic"), "白名单条目应进入池子");
+    assertTrue(settings.TagPool.Contains("drum and bass"), "白名单条目应进入池子");
+    assertTrue(settings.TagPool.Contains("ln"), "键型 tag 目前在白名单里（1.5.2 再废弃）");
+    assertTrue(!settings.TagPool.Contains("the"), "歌名里常见的普通词不应进入池子");
+    assertTrue(!settings.TagPool.Contains("fa"), "两字母噪声不应进入池子");
+
+    // 白名单顺序 = 审计顺序，排在最前面（见 Resources/tag-pool.json 的组内排序）。
+    int electronic = settings.TagPool.IndexOf("electronic");
+    int ln = settings.TagPool.IndexOf("ln");
+    assertTrue(electronic >= 0 && ln > electronic, "白名单顺序应保留在池子前面");
+}
+
+static void testTagAliasesCollapse()
+{
+    // dnb / j-pop / jacks / game music 都是别名，解析后应归一成同一个名字。
+    IReadOnlyList<string> parsed = AppSettings.ParseTags("dnb j-pop jacks game music");
+    assertSequenceStrings(["drum and bass", "jack", "jpop", "video game music"], parsed, "别名应折叠成同一个 tag");
+}
+
+static void testLegacyTagPoolMigratesToSeen()
+{
+    // 旧版本的池子是从候选里无条件攒出来的，升级时要搬进 SeenTags 并重置池子。
+    AppSettings settings = new()
+    {
+        TagPool = ["complextro", "\"canon\"", "(cv:", "x", "the"],
+        TagPoolVersion = 0
+    };
+    settings.NormalizeTags();
+
+    assertEqual(AppSettings.TagPoolFormat, settings.TagPoolVersion, "迁移后应写入格式版本");
+    assertTrue(settings.SeenTags.Contains("complextro"), "白名单以外的正常 tag 应进 SeenTags");
+    assertTrue(settings.TagPool.Contains("complextro"), "SeenTags 仍然可选");
+    assertTrue(!settings.TagPool.Contains("\"canon\""), "引号包起来的噪声应被丢掉");
+    assertTrue(!settings.TagPool.Contains("x"), "单字符不应进池子");
+}
+
+static void testSeenTagsRejectJunk()
+{
+    AppSettings settings = new();
+    settings.RecordTags(["electronic", "artist", "#lookatcurren", "s", "12", "长条"]);
+    assertTrue(settings.TagPool.Contains("electronic"), "白名单命中后仍应在池子里");
+    assertTrue(settings.SeenTags.Contains("artist"), "白名单外的正常词应进 SeenTags");
+    assertTrue(!settings.SeenTags.Contains("#lookatcurren"), "井号开头的噪声不应进 SeenTags");
+    assertTrue(!settings.SeenTags.Contains("s"), "单字符不应进 SeenTags");
+    assertTrue(!settings.SeenTags.Contains("12"), "纯数字不应进 SeenTags");
+    assertTrue(settings.SeenTags.Contains("长条"), "中文 tag 应可用");
 }
 
 static void testCompoundTagsRemainTogether()
