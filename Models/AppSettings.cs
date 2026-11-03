@@ -322,7 +322,8 @@ public sealed class AppSettings
     public void RecordTags(IEnumerable<string> tags)
     {
         SeenTags ??= [];
-        foreach (string tag in normalizeTags(tags))
+        List<string> normalized = normalizeTags(tags);
+        foreach (string tag in normalized)
         {
             if (TagCatalog.Contains(tag))
                 continue;
@@ -330,6 +331,8 @@ public sealed class AppSettings
                 SeenTags.Add(tag);
         }
 
+        // 白名单外的 tag 顺手进待审队列（本地文件，用户自己决定要不要提交）。
+        TagIntake.Offer(normalized);
         NormalizeTags();
     }
 

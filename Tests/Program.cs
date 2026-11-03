@@ -41,6 +41,7 @@ testTagAliasesCollapse();
 testLegacyTagPoolMigratesToSeen();
 testSeenTagsRejectJunk();
 testTagPoolPayloadValidation();
+testTagIntakeQueuesUnknownTags();
 testCompoundTagsRemainTogether();
 testCommonCompoundTagsUseLongestMatches();
 testSimpleFiltersOnlyStrictAreAbsolute();
@@ -913,6 +914,24 @@ static void testTagPoolPayloadValidation()
     assertTrue(!TagCatalog.TryParse("""{"version":2,"groups":[{"id":"genre","tags":[]}]}"""), "空 tag 列表应判为无效");
     assertTrue(TagCatalog.TryParse("""{"version":2,"groups":[{"id":"genre","label":"曲风","tags":["electronic"]}]}"""),
         "正常内容应判为有效");
+}
+
+static void testTagIntakeQueuesUnknownTags()
+{
+    TagIntake.Clear();
+    TagIntake.Offer(["electronic", "complextro", "#junk", "x", "长条"]);
+    IReadOnlyList<TagIntake.Entry> queued = TagIntake.Snapshot();
+    assertTrue(queued.Any(entry => entry.Name == "complextro"), "白名单外的正常 tag 应进待审队列");
+    assertTrue(queued.Any(entry => entry.Name == "长条"), "中文 tag 应进待审队列");
+    assertTrue(!queued.Any(entry => entry.Name == "electronic"), "白名单命中不应进待审队列");
+    assertTrue(!queued.Any(entry => entry.Name == "#junk"), "粗筛应拦住井号开头的噪声");
+
+    TagIntake.Offer(["complextro"]);
+    assertEqual(2, TagIntake.Snapshot().First(entry => entry.Name == "complextro").Count, "重复出现应累加次数");
+    assertTrue(TagIntake.BuildPayloadJson().Contains("complextro"), "提交载荷应含待审 tag");
+
+    TagIntake.Clear();
+    assertEqual(0, TagIntake.Count, "清空后队列应为空");
 }
 
 static void testCompoundTagsRemainTogether()
