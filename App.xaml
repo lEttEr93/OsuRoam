@@ -239,20 +239,39 @@
                 </Setter.Value>
             </Setter>
         </Style>
+        <!-- 滚动条：轨道透明、滑块圆角带内缩，悬停/拖动才变亮。
+             原来的 10px 实心轨道在深色卡片上像一条硬边。 -->
+        <Style x:Key="ScrollThumbStyle" TargetType="Thumb">
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Thumb">
+                        <Border x:Name="ThumbBody" Background="#3C4348" CornerRadius="3" Margin="1,0" />
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="ThumbBody" Property="Background" Value="#5A646B" />
+                            </Trigger>
+                            <Trigger Property="IsDragging" Value="True">
+                                <Setter TargetName="ThumbBody" Property="Background" Value="#7C878F" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
         <Style TargetType="ScrollBar">
-            <Setter Property="Background" Value="#181B1E" />
-            <Setter Property="Foreground" Value="#4E5961" />
-            <Setter Property="Width" Value="10" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Foreground" Value="#3C4348" />
+            <Setter Property="Width" Value="9" />
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="ScrollBar">
-                        <Grid Background="{TemplateBinding Background}">
+                        <Grid Background="Transparent" Margin="1,2">
                             <Track x:Name="PART_Track" IsDirectionReversed="True">
                                 <Track.DecreaseRepeatButton>
                                     <RepeatButton Command="{x:Static ScrollBar.PageUpCommand}" Style="{StaticResource ScrollBarButtonStyle}" />
                                 </Track.DecreaseRepeatButton>
                                 <Track.Thumb>
-                                    <Thumb Background="{TemplateBinding Foreground}" MinHeight="24" />
+                                    <Thumb Style="{StaticResource ScrollThumbStyle}" MinHeight="28" />
                                 </Track.Thumb>
                                 <Track.IncreaseRepeatButton>
                                     <RepeatButton Command="{x:Static ScrollBar.PageDownCommand}" Style="{StaticResource ScrollBarButtonStyle}" />

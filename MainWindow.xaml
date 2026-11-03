@@ -86,7 +86,19 @@
                     <Button x:Name="HistoryButton" Content="{DynamicResource L.btn.history}" MinWidth="46" Padding="8,0" Margin="0,0,6,0"
                             Click="HistoryButton_Click" ToolTip="{DynamicResource L.tip.history}" />
                     <Button x:Name="CollapseButton" Content="−" Width="34" Padding="0" Click="CollapseButton_Click" ToolTip="{DynamicResource L.tip.miniplayer}" />
-                    <Button Content="×" Width="34" Margin="6,0,0,0" Padding="0" Click="CloseButton_Click" ToolTip="{DynamicResource L.tip.close}" />
+                    <Button x:Name="CloseButton" Width="34" Margin="6,0,0,0" Padding="0"
+                            PreviewMouseLeftButtonDown="CloseButton_HoldStart"
+                            PreviewMouseLeftButtonUp="CloseButton_HoldEnd"
+                            MouseLeave="CloseButton_HoldCancel"
+                            ToolTip="{DynamicResource L.tip.closehold}">
+                        <Grid>
+                            <!-- 长按 650ms 才真的退出：进度环填满即触发，松手就弹回 -->
+                            <controls:ProgressRing x:Name="CloseHoldRing" Width="26" Height="26" StrokeThickness="2.5"
+                                                   TrackBrush="Transparent" ProgressBrush="{StaticResource AccentBrush}"
+                                                   IsHitTestVisible="False" />
+                            <TextBlock Text="×" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Grid>
+                    </Button>
                 </StackPanel>
             </Grid>
 

@@ -25,6 +25,7 @@ public partial class MainWindow : Window
     private readonly TosuProcessManager tosuProcess = new();
     private readonly TosuFileClient tosuFiles = new();
     private string? ingameInfoKey;
+    private RecommendationItem? ingameInfoItem;
     private readonly TopmostKeeper topmostKeeper;
     private readonly ObservableCollection<RecommendationItem> recommendations = [];
     private readonly HashSet<int> sessionImportedBeatmapsetIds = [];
@@ -76,6 +77,8 @@ public partial class MainWindow : Window
     private object?[]? statusArgs;
     private string? statusRaw;
     private TosuSnapshot? lastSnapshot;
+    private bool hiddenForPlay;
+    private bool restoreHistoryAfterPlay;
 
     public MainWindow()
     {
@@ -1032,16 +1035,61 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
         }
     }
 
-    /// <summary>迷你播放器里的「i」：手动呼出当前谱面的信息栏。</summary>
+    /// <summary>迷你播放器里的「i」：信息栏没开就打开，已经开着就关掉。</summary>
     private void MiniInfoButton_Click(object sender, RoutedEventArgs e)
     {
-        if (currentRoamItem is null)
+        if (mapInfoWindow?.IsVisible == true)
+        {
+            dismissMapInfo();
+            return;
+        }
+
+        RecommendationItem? target = settings.MapInfoSource == MapInfoSources.InGame
+            ? ingameInfoItem ?? currentRoamItem
+            : currentRoamItem;
+        if (target is null)
         {
             setStatus("status.nothingimported");
             return;
         }
 
-        showMapInfoFor(currentRoamItem, manual: true);
+        showMapInfoFor(target, manual: true);
+    }
+
+    /// <summary>长按 × 才退出：650ms 内松手就取消，进度环弹回。</summary>
+    private Storyboard? closeHold;
+
+    private void CloseButton_HoldStart(object sender, MouseButtonEventArgs e)
+    {
+        if (closeHold is not null)
+            return;
+
+        DoubleAnimation fill = new(0, 1, TimeSpan.FromMilliseconds(650)) { FillBehavior = FillBehavior.HoldEnd };
+        Storyboard.SetTarget(fill, CloseHoldRing);
+        Storyboard.SetTargetProperty(fill, new PropertyPath(Controls.ProgressRing.ProgressProperty));
+        Storyboard board = new();
+        board.Children.Add(fill);
+        board.Completed += (_, _) =>
+        {
+            closeHold = null;
+            Close();
+        };
+        closeHold = board;
+        board.Begin();
+    }
+
+    private void CloseButton_HoldEnd(object sender, MouseButtonEventArgs e) => cancelCloseHold();
+
+    private void CloseButton_HoldCancel(object sender, MouseEventArgs e) => cancelCloseHold();
+
+    private void cancelCloseHold()
+    {
+        if (closeHold is null)
+            return;
+        closeHold.Stop();
+        closeHold = null;
+        CloseHoldRing.BeginAnimation(Controls.ProgressRing.ProgressProperty, null);
+        CloseHoldRing.Progress = 0;
     }
 
     /// <summary>收起信息窗（开局 / 关掉设置选项 / 用户点 ×）。</summary>
@@ -1378,6 +1426,34 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
             ProfileText.Text = snapshot.ProfileName;
         lastSnapshot = snapshot;
         ConnectionText.Text = connectionTextFor(snapshot);
+        updatePlayVisibility(snapshot);
+    }
+
+    /// <summary>
+    /// 游玩中把 Roam 整个收起来（主窗口、迷你播放器、信息栏、历史面板），
+    /// 结算 / 中途退出 / 暂停等任何「不在游玩」的状态再恢复。暂停也算恢复，
+    /// 因为这时候玩家可能要看一眼推荐。
+    /// </summary>
+    private void updatePlayVisibility(TosuSnapshot snapshot)
+    {
+        bool inPlay = string.Equals(snapshot.StateName, "play", StringComparison.OrdinalIgnoreCase) && !snapshot.IsPaused;
+        if (inPlay == hiddenForPlay)
+            return;
+
+        hiddenForPlay = inPlay;
+        if (inPlay)
+        {
+            restoreHistoryAfterPlay = historyWindow?.IsVisible == true;
+            dismissMapInfo();
+            historyWindow?.Hide();
+            Hide();
+            return;
+        }
+
+        Show();
+        if (restoreHistoryAfterPlay && historyWindow is not null)
+            historyWindow.Show();
+        restoreHistoryAfterPlay = false;
     }
 
     private static string connectionTextFor(TosuSnapshot snapshot) => Loc.T(snapshot.StateName switch
@@ -1737,7 +1813,10 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
 
         RecommendationItem? item = await buildItemFromTosuAsync(snapshot);
         if (item is not null)
+        {
+            ingameInfoItem = item;
             showMapInfoFor(item);
+        }
     }
 
     /// <summary>把 tosu 的当前谱面拼成一个和推荐卡片同构的条目，信息窗不用区分数据来源。</summary>
@@ -1770,6 +1849,9 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
         };
         item.ApplyDetail(detail);
         item.ApplyPattern(pattern);
+        // 曲绘走的是 Roam 自己的 CoverLoader（和推荐卡片同一套模糊底），
+        // 不加载的话信息窗就只剩纯色背景。
+        item.LoadCover();
         return item;
     }
 
