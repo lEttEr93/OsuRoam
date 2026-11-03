@@ -33,18 +33,25 @@ public static class PatternPrefetcher
         IProgress<(int Done, int Total)>? progress,
         CancellationToken cancellationToken)
     {
-        List<(int BeatmapId, int BeatmapsetId, double Stars)> pending = collect(candidates, settings, library);
+        List<(int BeatmapId, int BeatmapsetId, double Stars, bool TagHint)> pending =
+            collect(candidates, settings, library);
         int considered = pending.Count;
         if (pending.Count == 0)
             return new PrefetchResult(0, 0, 0, 0, false);
 
-        // 越接近目标星级越值得抓：星级是唯一在抓之前就知道的强信号。
+        // 排两档：tag 里已经点名的先抓（关键字命中率高得离谱），再按离目标星级的距离。
         double center = (settings.MinimumStars + settings.MaximumStars) / 2;
         pending.Sort((left, right) =>
-            Math.Abs(left.Stars - center).CompareTo(Math.Abs(right.Stars - center)));
+        {
+            int byHint = right.TagHint.CompareTo(left.TagHint);
+            return byHint != 0
+                ? byHint
+                : Math.Abs(left.Stars - center).CompareTo(Math.Abs(right.Stars - center));
+        });
 
         int target = Math.Max(4, settings.PoolSize * 2);
-        List<(int BeatmapId, int BeatmapsetId, double Stars)> batch = pending.Take(Math.Max(1, budget)).ToList();
+        List<(int BeatmapId, int BeatmapsetId, double Stars, bool TagHint)> batch =
+            pending.Take(Math.Max(1, budget)).ToList();
 
         int attempted = 0;
         int parsed = 0;
@@ -67,7 +74,7 @@ public static class PatternPrefetcher
                         return;
                 }
 
-                (int beatmapId, int beatmapsetId, _) = batch[index];
+                (int beatmapId, int beatmapsetId, _, _) = batch[index];
                 string? text = await fetch(beatmapId, cancellationToken).ConfigureAwait(false);
                 bool ingested = false;
                 if (text is not null)
@@ -114,15 +121,19 @@ public static class PatternPrefetcher
         return true;
     }
 
-    private static List<(int, int, double)> collect(
+    private static List<(int BeatmapId, int BeatmapsetId, double Stars, bool TagHint)> collect(
         IEnumerable<OsuBeatmapset> candidates,
         AppSettings settings,
         PatternLibrary library)
     {
-        List<(int, int, double)> pending = [];
+        IReadOnlyList<string> hints = PatternSearchHints.For(settings);
+        List<(int, int, double, bool)> pending = [];
         HashSet<int> seen = [];
         foreach (OsuBeatmapset set in candidates)
         {
+            // tag 里已经点名了所选键型 → 值得先抓，命中率远高于盲抽。
+            bool tagHint = hints.Count > 0 && hints.Any(hint =>
+                (set.Tags ?? string.Empty).Contains(hint, StringComparison.OrdinalIgnoreCase));
             foreach (OsuBeatmap beatmap in set.Beatmaps)
             {
                 if (!string.Equals(beatmap.Mode, settings.Mode, StringComparison.OrdinalIgnoreCase))
@@ -134,7 +145,7 @@ public static class PatternPrefetcher
                 // tag 推断出来的不算「有真实键型」——那是预取要替换掉的东西。
                 if (library.TryGet(beatmap.Id) is { IsInferred: false })
                     continue;
-                pending.Add((beatmap.Id, set.Id, beatmap.DifficultyRating));
+                pending.Add((beatmap.Id, set.Id, beatmap.DifficultyRating, tagHint));
             }
         }
         return pending;

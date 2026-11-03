@@ -38,6 +38,7 @@ testBpmDoesNotAffectRanking();
 testPatternSelectionNormalizes();
 testSelectedPatternShapesRanking();
 testPatternPrefetchFillsLibrary();
+testPatternSearchHints();
 testCacheCleanerSkipsPoolItems();
 testDirtyTagsAreFiltered();
 testTagPoolComesFromWhitelist();
@@ -1696,6 +1697,48 @@ static void testPatternPrefetchFillsLibrary()
     PrefetchResult limited = PatternPrefetcher.RunAsync(
         sets, settings, second, fetch, 1, null, CancellationToken.None).GetAwaiter().GetResult();
     assertEqual(1, limited.Attempted, "预算为 1 时只抓一张");
+
+    // tag 里点名了所选键型的候选要优先抓，哪怕它离目标星级更远
+    AppSettings hinted = recommendationSettings();
+    hinted.PoolSize = 1;
+    hinted.SelectedPatterns = ["Jacks"];
+    hinted.MinimumStars = 4;
+    hinted.MaximumStars = 5;
+    OsuBeatmapset tagged = maniaSet(910, 9101, 4);
+    tagged.Tags = "jack chordjack";
+    tagged.Beatmaps[0].DifficultyRating = 9;
+    OsuBeatmapset plain = maniaSet(911, 9102, 4);
+    plain.Beatmaps[0].DifficultyRating = 4.5;
+    List<int> order = [];
+    PatternPrefetcher.RunAsync([plain, tagged], hinted, new PatternLibrary(), (beatmapId, _) =>
+    {
+        order.Add(beatmapId);
+        return Task.FromResult<string?>(osuFile(4, lnNotes));
+    }, 1, null, CancellationToken.None).GetAwaiter().GetResult();
+    assertEqual(9101, order[0], "tag 命中所选键型的候选应优先预取");
+}
+
+static void testPatternSearchHints()
+{
+    AppSettings settings = recommendationSettings();
+    assertEqual(0, PatternSearchHints.For(settings).Count, "没勾键型时不该带关键字");
+
+    settings.SelectedPatterns = ["Jacks"];
+    assertSequenceStrings(["jack"], PatternSearchHints.For(settings), "Jacks 应翻译成 jack");
+
+    settings.SelectedPatterns = ["Coordination", "Density"];
+    assertSequenceStrings(["ln"], PatternSearchHints.For(settings), "协调/密度都是 ln，应去重成一个");
+
+    settings.SelectedPatterns = ["Stream", "Jacks"];
+    assertSequenceStrings(["stream", "jack"], PatternSearchHints.For(settings), "两个关键字都保留");
+
+    settings.SelectedPatterns = [];
+    settings.PreferLn = true;
+    assertSequenceStrings(["ln"], PatternSearchHints.For(settings), "「只要面谱」应带 ln");
+
+    settings.Mode = "osu";
+    settings.SelectedPatterns = ["Jacks"];
+    assertEqual(0, PatternSearchHints.For(settings).Count, "非 mania 不带键型关键字");
 }
 
 static void testPatternAnalyzerDetectsStream()

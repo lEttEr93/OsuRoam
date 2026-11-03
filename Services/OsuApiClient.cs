@@ -140,6 +140,28 @@ public sealed class OsuApiClient : IDisposable
         string[] sortPlan = BuildSortPlan(settings.SearchRotation, pageBudget);
         string? activeSort = null;
 
+        // 勾了键型/面谱时，先用关键字搜一轮（q 会匹配 mapper tags，见 PatternSearchHints）。
+        // 这一轮是为了「快速启动」：拿到大概率符合的候选，再让默认轮换取更广的池子。
+        foreach (string hint in PatternSearchHints.For(settings))
+        {
+            string hinted = $"{query} {hint}";
+            string path = $"api/v2/beatmapsets/search?m={mode}&s={status}&sort=relevance&q={Uri.EscapeDataString(hinted)}";
+            try
+            {
+                OsuBeatmapsetSearch response = await getAsync<OsuBeatmapsetSearch>(path, cancellationToken);
+                if (response.Beatmapsets.Count > 0)
+                {
+                    resultCount += response.Beatmapsets.Count;
+                    await onBatch(response.Beatmapsets);
+                    AppLog.Info($"键型关键字搜索「{hint}」：{response.Beatmapsets.Count} 个谱面集");
+                }
+            }
+            catch (Exception exception)
+            {
+                AppLog.Info($"键型关键字搜索「{hint}」跳过：{exception.GetType().Name} {exception.Message}");
+            }
+        }
+
         for (int page = 0; page < pageBudget && resultCount < 400; page++)
         {
             string sort = sortPlan[page];
