@@ -35,6 +35,8 @@ testPatternAnalyzerDetectsJacks();
 testPatternAnalyzerDetectsLnChart();
 testPatternPreferenceShapesRanking();
 testBpmDoesNotAffectRanking();
+testPatternSelectionNormalizes();
+testSelectedPatternShapesRanking();
 testCacheCleanerSkipsPoolItems();
 testDirtyTagsAreFiltered();
 testTagPoolComesFromWhitelist();
@@ -1532,6 +1534,47 @@ static void testBpmDoesNotAffectRanking()
         [slow, fast], profile, settings, 1, 10, new HashSet<int>(), [], 2);
     assertEqual(2, ranked.Count, "两张谱都应参与排序");
     assertNear(ranked[0].Score, ranked[1].Score, "只有 BPM 不同不应改变排序分数");
+}
+
+static void testPatternSelectionNormalizes()
+{
+    AppSettings settings = new() { SelectedPatterns = ["stream", " Jacks ", "nonsense", "STREAM"] };
+    settings.NormalizePatternSelection();
+    assertSequenceStrings(["Stream", "Jacks"], settings.SelectedPatterns, "勾选的键型应收敛成核心型的规范写法");
+}
+
+static void testSelectedPatternShapesRanking()
+{
+    AppSettings settings = recommendationSettings();
+    PlayerProfile profile = emptyProfile();
+    List<OsuBeatmapset> sets = [maniaSet(800, 8001, 4), maniaSet(801, 8002, 4)];
+
+    ManiaPattern streamChart = new() { LnRatio = 0.0, CoreShares = new() { ["Stream"] = 0.9, ["Chordstream"] = 0.1 } };
+    ManiaPattern lnChart = new() { LnRatio = 0.5, CoreShares = new() { ["Coordination"] = 0.6, ["Density"] = 0.4 } };
+    Func<int, ManiaPattern?> lookup = id => id == 8001 ? streamChart : id == 8002 ? lnChart : null;
+
+    settings.SelectedPatterns = ["Stream"];
+    IReadOnlyList<RecommendationItem> streamFirst = new RecommendationEngine().RankAvoidingHistory(
+        sets, profile, settings, 1, 10, new HashSet<int>(), [], 2, lookup);
+    assertEqual(800, streamFirst[0].BeatmapsetId, "勾了 Stream 时流谱应排前面");
+
+    settings.SelectedPatterns = ["Coordination"];
+    IReadOnlyList<RecommendationItem> coordFirst = new RecommendationEngine().RankAvoidingHistory(
+        sets, profile, settings, 1, 10, new HashSet<int>(), [], 2, lookup);
+    assertEqual(801, coordFirst[0].BeatmapsetId, "勾了 Coordination 时长条谱应排前面");
+
+    settings.SelectedPatterns = [];
+    settings.PreferLn = true;
+    IReadOnlyList<RecommendationItem> lnOnly = new RecommendationEngine().RankAvoidingHistory(
+        sets, profile, settings, 1, 10, new HashSet<int>(), [], 2, lookup);
+    assertEqual(1, lnOnly.Count, "「只要面谱」应滤掉长条占比不足的谱");
+    assertEqual(801, lnOnly[0].BeatmapsetId, "剩下的应该是长条谱");
+
+    // 没有键型数据时不硬筛（预取落地前只能这样）
+    settings.PreferLn = true;
+    IReadOnlyList<RecommendationItem> unknown = new RecommendationEngine().RankAvoidingHistory(
+        sets, profile, settings, 1, 10, new HashSet<int>(), [], 2, _ => null);
+    assertEqual(2, unknown.Count, "拿不到键型时不应把候选全滤掉");
 }
 
 static void testPatternPreferenceShapesRanking()

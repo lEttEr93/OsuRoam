@@ -477,6 +477,18 @@
                                 </DockPanel>
                                 <Slider x:Name="ExplorationSlider" Minimum="0" Maximum="1" TickFrequency="0.05"
                                         ValueChanged="ExplorationSlider_ValueChanged" />
+                                <TextBlock Text="{DynamicResource L.label.patterns}" Margin="0,10,0,0"
+                                           Foreground="{StaticResource MutedTextBrush}" FontSize="11" />
+                                <WrapPanel Margin="0,2,0,0">
+                                    <CheckBox x:Name="PatternStreamCheck" Content="{DynamicResource L.pattern.stream}" Tag="Stream" Click="PatternCheck_Click" Margin="0,0,12,4" />
+                                    <CheckBox x:Name="PatternChordstreamCheck" Content="{DynamicResource L.pattern.chordstream}" Tag="Chordstream" Click="PatternCheck_Click" Margin="0,0,12,4" />
+                                    <CheckBox x:Name="PatternJacksCheck" Content="{DynamicResource L.pattern.jacks}" Tag="Jacks" Click="PatternCheck_Click" Margin="0,0,12,4" />
+                                    <CheckBox x:Name="PatternCoordinationCheck" Content="{DynamicResource L.pattern.coordination}" Tag="Coordination" Click="PatternCheck_Click" Margin="0,0,12,4" />
+                                    <CheckBox x:Name="PatternDensityCheck" Content="{DynamicResource L.pattern.density}" Tag="Density" Click="PatternCheck_Click" Margin="0,0,12,4" />
+                                    <CheckBox x:Name="PatternMiscCheck" Content="{DynamicResource L.pattern.misc}" Tag="Wildcard" Click="PatternCheck_Click" Margin="0,0,12,4" />
+                                </WrapPanel>
+                                <CheckBox x:Name="PreferLnCheck" Content="{DynamicResource L.label.preferln}" Margin="0,4,0,0"
+                                          Click="PreferLnCheck_Click" />
                             </StackPanel>
                         </Grid>
                     </Expander>

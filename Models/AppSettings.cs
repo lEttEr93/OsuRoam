@@ -121,6 +121,15 @@ public sealed class AppSettings
 
     /// <summary>上次提交时间，用来做冷却。</summary>
     public DateTimeOffset? LastTagSubmitUtc { get; set; }
+
+    /// <summary>
+    /// 用户显式勾选的键型（<see cref="ManiaPattern.CorePatterns"/> 的子集）。
+    /// 非空时用它算 patternFit 并给强权重，取代「从成绩反推」的旧路径。
+    /// </summary>
+    public List<string> SelectedPatterns { get; set; } = [];
+
+    /// <summary>只要面谱：LnRatio ≥ <see cref="ManiaPattern.LnChartThreshold"/> 的谱面。</summary>
+    public bool PreferLn { get; set; }
     public List<string> IncludedTags { get; set; } = [];
     public List<string> ExcludedTags { get; set; } = [];
     public List<string> IncludedStatuses { get; set; } = [.. DefaultStatusFilters];
@@ -168,6 +177,7 @@ public sealed class AppSettings
 
     public void NormalizeTags()
     {
+        NormalizePatternSelection();
         if (TagPoolVersion < TagPoolFormat)
         {
             migrateLegacyTagPool();
@@ -190,6 +200,21 @@ public sealed class AppSettings
 
     /// <summary>池子格式版本：2 起 = 白名单 + SeenTags。</summary>
     public const int TagPoolFormat = 2;
+
+    /// <summary>把勾选的键型收敛成核心型的规范写法，丢掉不认识的条目。</summary>
+    public void NormalizePatternSelection()
+    {
+        SelectedPatterns ??= [];
+        List<string> selected = [];
+        foreach (string name in SelectedPatterns)
+        {
+            string? canonical = ManiaPattern.CorePatterns
+                .FirstOrDefault(core => string.Equals(core, name?.Trim(), StringComparison.OrdinalIgnoreCase));
+            if (canonical is not null && !selected.Contains(canonical, StringComparer.Ordinal))
+                selected.Add(canonical);
+        }
+        SelectedPatterns = selected;
+    }
 
     /// <summary>
     /// 旧版本的池子是从每个候选谱面里无条件攒出来的（实测能到 1.6 万条，绝大多数是歌名和符号）。

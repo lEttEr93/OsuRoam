@@ -92,15 +92,33 @@ public sealed class RecommendationEngine
                 double simpleFilterFit = settings.SimpleFilterFit(set);
                 double simpleFilterBonus = simpleFilterFit * 0.18 + settings.DefaultStatusPriority(set) * 0.08;
                 double patternFit = 0;
-                ManiaPattern? pattern = patternPreference is not null && patternWeight > 0
-                    ? patternLookup?.Invoke(beatmap.Id)
+                double effectivePatternWeight = 0;
+                // 勾选了键型就用勾选结果当目标向量（强权重）；没勾才退回「从成绩反推」的旧路径。
+                bool usesSelection = settings.SelectedPatterns.Count > 0;
+                ManiaPattern? pattern = patternLookup is not null &&
+                                        (usesSelection || settings.PreferLn || (patternPreference is not null && patternWeight > 0))
+                    ? patternLookup(beatmap.Id)
                     : null;
-                if (pattern is not null)
+
+                // 「只要面谱」：拿得到键型才判，没数据的候选先放过（预取落地后会变严格）。
+                if (settings.PreferLn && pattern is not null && pattern.LnRatio < ManiaPattern.LnChartThreshold)
+                    continue;
+
+                if (usesSelection)
+                {
+                    if (pattern is not null)
+                        patternFit = selectedShare(pattern, settings.SelectedPatterns);
+                    effectivePatternWeight = SelectedPatternWeight;
+                }
+                else if (pattern is not null && patternPreference is not null && patternWeight > 0)
+                {
                     patternFit = PatternPreference.Fit(pattern, patternPreference!);
+                    effectivePatternWeight = patternWeight;
+                }
                 // BPM 不参与排序：实测它和键型分布几乎无关（vs Stream −0.06、vs Chordstream +0.13、
                 // vs Jacks −0.09），而「喜欢的 BPM」只是已打谱面的中位数，噪声比信号大。
                 // 原来的 0.15 权重按比例分给了其余三项（0.62/0.10/0.13 → 0.73/0.12/0.15）。
-                double score = familiarityWeight * (starFit * 0.73 + lengthFit * 0.12 + mapperFit * 0.15) + settings.Exploration * 0.55 * discovery + tagFit * 0.12 + simpleFilterBonus + patternFit * patternWeight;
+                double score = familiarityWeight * (starFit * 0.73 + lengthFit * 0.12 + mapperFit * 0.15) + settings.Exploration * 0.55 * discovery + tagFit * 0.12 + simpleFilterBonus + patternFit * effectivePatternWeight;
                 // 理由只记「哪种匹配 + 两个数值」，具体文字按当前语言现拼，
                 // 这样切语言时卡片上的理由会跟着变。
                 ReasonKind reasonKind = tagFit > 0
@@ -131,6 +149,26 @@ public sealed class RecommendationEngine
             .ThenByDescending(item => item.Score)
             .Take(count)
             .ToList();
+    }
+
+    /// <summary>
+    /// 勾选键型时给 patternFit 的权重。星级那一项折算后最高约 0.55（0.73 × 熟悉度权重），
+    /// 这里取 0.6 让「选了什么」能和星级掰手腕，但不至于完全盖过它。
+    /// </summary>
+    private const double SelectedPatternWeight = 0.60;
+
+    /// <summary>勾选的键型在谱面里占的份额（0–1）；份额之和按实际出现的核心型归一。</summary>
+    private static double selectedShare(ManiaPattern pattern, IReadOnlyList<string> selected)
+    {
+        double total = 0;
+        double hit = 0;
+        foreach ((string name, double share) in pattern.CoreShares)
+        {
+            total += share;
+            if (selected.Contains(name, StringComparer.OrdinalIgnoreCase))
+                hit += share;
+        }
+        return total <= 0 ? 0 : clamp01(hit / total);
     }
 
     private static double proximity(double value, double target, double tolerance) => clamp01(1 - Math.Abs(value - target) / Math.Max(1, tolerance));

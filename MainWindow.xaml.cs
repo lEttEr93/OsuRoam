@@ -1808,6 +1808,12 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
         EmbeddedFontCheck.IsChecked = settings.UseEmbeddedFont;
         MapInfoCheck.IsChecked = settings.ShowMapInfo;
         TagSubmitCheck.IsChecked = settings.TagSubmitEnabled;
+        foreach ((CheckBox? box, string name) in patternBoxes())
+        {
+            if (box is not null)
+                box.IsChecked = settings.SelectedPatterns.Contains(name, StringComparer.OrdinalIgnoreCase);
+        }
+        PreferLnCheck.IsChecked = settings.PreferLn;
         foreach (ComboBoxItem item in MapInfoSourceBox.Items)
             if (Equals(item.Tag?.ToString(), settings.MapInfoSource)) MapInfoSourceBox.SelectedItem = item;
         tosuFiles.Configure(settings.TosuWebSocketUrl);
@@ -2026,6 +2032,59 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
         // 不加载的话信息窗就只剩纯色背景。
         item.LoadCover();
         return item;
+    }
+
+    /// <summary>勾选键型：多选，勾中的核心型用强权重参与排序（不硬筛）。</summary>
+    private async void PatternCheck_Click(object sender, RoutedEventArgs e)
+    {
+        if (!settingsControlsReady)
+            return;
+        settings.SelectedPatterns = selectedPatterns();
+        settings.NormalizePatternSelection();
+        try
+        {
+            await settingsStore.SaveAsync(settings);
+        }
+        catch (Exception exception)
+        {
+            AppLog.Error("保存键型偏好失败", exception);
+        }
+    }
+
+    private List<string> selectedPatterns()
+    {
+        List<string> selected = [];
+        foreach ((CheckBox? box, string name) in patternBoxes())
+        {
+            if (box?.IsChecked == true)
+                selected.Add(name);
+        }
+        return selected;
+    }
+
+    private IEnumerable<(CheckBox? Box, string Name)> patternBoxes()
+    {
+        yield return (PatternStreamCheck, "Stream");
+        yield return (PatternChordstreamCheck, "Chordstream");
+        yield return (PatternJacksCheck, "Jacks");
+        yield return (PatternCoordinationCheck, "Coordination");
+        yield return (PatternDensityCheck, "Density");
+        yield return (PatternMiscCheck, "Wildcard");
+    }
+
+    private async void PreferLnCheck_Click(object sender, RoutedEventArgs e)
+    {
+        if (!settingsControlsReady)
+            return;
+        settings.PreferLn = PreferLnCheck.IsChecked == true;
+        try
+        {
+            await settingsStore.SaveAsync(settings);
+        }
+        catch (Exception exception)
+        {
+            AppLog.Error("保存「只要面谱」设置失败", exception);
+        }
     }
 
     private async void TagSubmitCheck_Click(object sender, RoutedEventArgs e)
