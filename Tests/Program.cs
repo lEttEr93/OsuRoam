@@ -34,6 +34,7 @@ testPatternAnalyzerDetectsStream();
 testPatternAnalyzerDetectsJacks();
 testPatternAnalyzerDetectsLnChart();
 testPatternPreferenceShapesRanking();
+testBpmDoesNotAffectRanking();
 testCacheCleanerSkipsPoolItems();
 testDirtyTagsAreFiltered();
 testTagPoolComesFromWhitelist();
@@ -1515,6 +1516,23 @@ static OsuBeatmapset taggedManiaSet(int setId, int beatmapId, string tags) => ne
         }
     ]
 };
+
+static void testBpmDoesNotAffectRanking()
+{
+    // BPM 已经不参与排序：两张只有 BPM 不同的谱，分数必须完全相同。
+    AppSettings settings = recommendationSettings();
+    PlayerProfile profile = emptyProfile();
+
+    OsuBeatmapset slow = maniaSet(700, 7001, 4);
+    slow.Beatmaps[0].Bpm = 120;
+    OsuBeatmapset fast = maniaSet(701, 7002, 4);
+    fast.Beatmaps[0].Bpm = 220;
+
+    IReadOnlyList<RecommendationItem> ranked = new RecommendationEngine().RankAvoidingHistory(
+        [slow, fast], profile, settings, 1, 10, new HashSet<int>(), [], 2);
+    assertEqual(2, ranked.Count, "两张谱都应参与排序");
+    assertNear(ranked[0].Score, ranked[1].Score, "只有 BPM 不同不应改变排序分数");
+}
 
 static void testPatternPreferenceShapesRanking()
 {

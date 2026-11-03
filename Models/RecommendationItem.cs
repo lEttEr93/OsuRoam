@@ -300,6 +300,7 @@ public enum ReasonKind
 {
     Tags,
     Mapper,
+    /// <summary>BPM 已不参与排序，这个值不再产生；保留枚举值以免旧历史记录反序列化错位。</summary>
     Rhythm,
     Explore
 }

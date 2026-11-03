@@ -120,6 +120,7 @@ public sealed record PlayerProfile(
     IReadOnlyList<OsuScore> BestScores,
     double SuggestedMinimumStars,
     double SuggestedMaximumStars,
+    /// <summary>已打谱面 BPM 的中位数。**只用于诊断报告**，不参与推荐排序（见 RecommendationEngine）。</summary>
     double PreferredBpm,
     double PreferredLength,
     int DifficultySampleCount,

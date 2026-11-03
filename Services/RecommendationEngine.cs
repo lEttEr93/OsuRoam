@@ -84,7 +84,6 @@ public sealed class RecommendationEngine
                 if (beatmap.TotalLength < settings.MinimumLengthSeconds || beatmap.TotalLength > settings.MaximumLengthSeconds) continue;
 
                 double starFit = clamp01(1 - Math.Abs(beatmap.DifficultyRating - starCenter) / starRadius);
-                double bpmFit = proximity(beatmap.Bpm, profile.PreferredBpm, 75);
                 double lengthFit = proximity(beatmap.TotalLength, profile.PreferredLength, 180);
                 double mapperFit = profile.MapperFrequency.TryGetValue(set.Creator, out int mapperCount) ? (double)mapperCount / maxMapperCount : 0;
                 double discovery = Random.Shared.NextDouble();
@@ -98,16 +97,17 @@ public sealed class RecommendationEngine
                     : null;
                 if (pattern is not null)
                     patternFit = PatternPreference.Fit(pattern, patternPreference!);
-                double score = familiarityWeight * (starFit * 0.62 + bpmFit * 0.15 + lengthFit * 0.10 + mapperFit * 0.13) + settings.Exploration * 0.55 * discovery + tagFit * 0.12 + simpleFilterBonus + patternFit * patternWeight;
+                // BPM 不参与排序：实测它和键型分布几乎无关（vs Stream −0.06、vs Chordstream +0.13、
+                // vs Jacks −0.09），而「喜欢的 BPM」只是已打谱面的中位数，噪声比信号大。
+                // 原来的 0.15 权重按比例分给了其余三项（0.62/0.10/0.13 → 0.73/0.12/0.15）。
+                double score = familiarityWeight * (starFit * 0.73 + lengthFit * 0.12 + mapperFit * 0.15) + settings.Exploration * 0.55 * discovery + tagFit * 0.12 + simpleFilterBonus + patternFit * patternWeight;
                 // 理由只记「哪种匹配 + 两个数值」，具体文字按当前语言现拼，
                 // 这样切语言时卡片上的理由会跟着变。
                 ReasonKind reasonKind = tagFit > 0
                     ? ReasonKind.Tags
                     : mapperFit > 0.3
                         ? ReasonKind.Mapper
-                        : bpmFit > 0.78
-                            ? ReasonKind.Rhythm
-                            : ReasonKind.Explore;
+                        : ReasonKind.Explore;
                 string reasonCategory = pattern is not null && pattern.Source == PatternSource.Osu
                     ? pattern.Category
                     : string.Empty;
