@@ -595,6 +595,7 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
                     candidates = candidates.Concat(newSets).ToList();
                     settings.RecordTags(newSets.SelectMany(set => AppSettings.ParseTags(set.Tags)));
                     refreshTagList();
+                    maybeSubmitTags();
                     await refillPoolAsync();
 
                     if (!roamStarted && recommendations.Count > 0)
@@ -1806,6 +1807,7 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
         AutoImportCheck.IsChecked = settings.AutoImport;
         EmbeddedFontCheck.IsChecked = settings.UseEmbeddedFont;
         MapInfoCheck.IsChecked = settings.ShowMapInfo;
+        TagSubmitCheck.IsChecked = settings.TagSubmitEnabled;
         foreach (ComboBoxItem item in MapInfoSourceBox.Items)
             if (Equals(item.Tag?.ToString(), settings.MapInfoSource)) MapInfoSourceBox.SelectedItem = item;
         tosuFiles.Configure(settings.TosuWebSocketUrl);
@@ -2024,6 +2026,21 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
         // 不加载的话信息窗就只剩纯色背景。
         item.LoadCover();
         return item;
+    }
+
+    private async void TagSubmitCheck_Click(object sender, RoutedEventArgs e)
+    {
+        if (!settingsControlsReady)
+            return;
+        settings.TagSubmitEnabled = TagSubmitCheck.IsChecked == true;
+        try
+        {
+            await settingsStore.SaveAsync(settings);
+        }
+        catch (Exception exception)
+        {
+            AppLog.Error("保存待审 tag 提交设置失败", exception);
+        }
     }
 
     private async void MapInfoCheck_Click(object sender, RoutedEventArgs e)
@@ -2257,6 +2274,27 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
         bool updated = await TagCatalog.RefreshAsync();
         if (!updated)
             AppLog.Info($"tag 池沿用本地：{TagCatalog.Pool.Count} 条（来源 {TagCatalog.Source}）");
+    }
+
+    /// <summary>攒够了就在后台提交一次待审 tag；失败只是不提交，不打扰用户。</summary>
+    private async void maybeSubmitTags()
+    {
+        try
+        {
+            if (!TagSubmission.ShouldSubmit(settings, TagIntake.Count, DateTimeOffset.UtcNow))
+                return;
+
+            int before = TagIntake.Count;
+            if (await TagSubmission.SubmitAsync(settings))
+            {
+                AppLog.Info($"待审 tag 已提交：{before} → {TagIntake.Count}");
+                await settingsStore.SaveAsync(settings);
+            }
+        }
+        catch (Exception exception)
+        {
+            AppLog.Error("提交待审 tag 失败", exception);
+        }
     }
     private void updateDifficultyControls()
     {

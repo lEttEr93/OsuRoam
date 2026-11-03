@@ -21,3 +21,7 @@ dist/
 
 # ---- 本机配置（含 OAuth secret，绝不入库）----
 settings.json
+
+# ---- 运行时密钥（不进仓库）----
+data/tag-submit-token.txt
+data/*.token

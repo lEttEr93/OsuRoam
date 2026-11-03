@@ -115,6 +115,12 @@ public sealed class AppSettings
     public List<string> SeenTags { get; set; } = [];
     /// <summary>池子格式版本，2 = 白名单 + SeenTags。旧版本升级时用来做一次迁移。</summary>
     public int TagPoolVersion { get; set; }
+
+    /// <summary>攒够数量后自动把待审 tag 提交到仓库（只发 tag 文本和次数）。</summary>
+    public bool TagSubmitEnabled { get; set; } = true;
+
+    /// <summary>上次提交时间，用来做冷却。</summary>
+    public DateTimeOffset? LastTagSubmitUtc { get; set; }
     public List<string> IncludedTags { get; set; } = [];
     public List<string> ExcludedTags { get; set; } = [];
     public List<string> IncludedStatuses { get; set; } = [.. DefaultStatusFilters];

@@ -43,5 +43,9 @@
          公开仓库的同一路径，app 启动时按 https://raw.githubusercontent.com/lEttEr93/OsuRoam/main/data/tag-pool.json 拉取；
          内嵌的这份是拿不到网络时的兜底，所以逻辑资源名保持不变。 -->
     <EmbeddedResource Include="data\tag-pool.json" LogicalName="OsuRoam.Resources.tag-pool.json" />
+    <!-- 待审 tag 的提交凭据（细粒度 PAT，只给该仓库 issues:write）。
+         这个文件在 .gitignore 里，不进仓库；没有它时自动提交功能关闭，其它功能不受影响。 -->
+    <EmbeddedResource Include="data\tag-submit-token.txt" LogicalName="OsuRoam.Resources.tag-submit-token.txt"
+                      Condition="Exists('data\tag-submit-token.txt')" />
   </ItemGroup>
 </Project>

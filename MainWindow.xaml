@@ -458,6 +458,7 @@
                                     <Button Content="{DynamicResource L.btn.include}" Click="IncludeTagsButton_Click" Margin="0,0,6,0" />
                                     <Button Content="{DynamicResource L.btn.exclude}" Click="ExcludeTagsButton_Click" />
                                 </WrapPanel>
+                                <CheckBox x:Name="TagSubmitCheck" Content="{DynamicResource L.label.submittags}" Margin="0,6,0,0" Click="TagSubmitCheck_Click" />
                                 <TextBlock Text="{DynamicResource L.label.includedtags}" Margin="0,5,0,2" FontSize="11" Foreground="{StaticResource SecondaryBrush}" />
                                 <ItemsControl x:Name="IncludedTagsItems">
                                     <ItemsControl.ItemsPanel><ItemsPanelTemplate><WrapPanel /></ItemsPanelTemplate></ItemsControl.ItemsPanel>

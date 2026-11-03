@@ -114,6 +114,22 @@ public static class TagIntake
         }
     }
 
+    /// <summary>提交成功后只删掉已提交的那批，之后新见的继续留在队列里。</summary>
+    public static void RemoveRange(IEnumerable<string> names)
+    {
+        HashSet<string> drop = new(names ?? [], StringComparer.OrdinalIgnoreCase);
+        if (drop.Count == 0)
+            return;
+
+        lock (Gate)
+        {
+            ensureLoaded();
+            int removed = Entries.RemoveAll(entry => drop.Contains(entry.Name));
+            if (removed > 0)
+                save();
+        }
+    }
+
     /// <summary>提交用的载荷：只带 tag 和次数。</summary>
     public static string BuildPayloadJson(int limit = 200)
     {

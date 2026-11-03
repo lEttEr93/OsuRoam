@@ -42,6 +42,8 @@ testLegacyTagPoolMigratesToSeen();
 testSeenTagsRejectJunk();
 testTagPoolPayloadValidation();
 testTagIntakeQueuesUnknownTags();
+testTagSubmitGates();
+testTagSubmitBodyFormat();
 testCompoundTagsRemainTogether();
 testCommonCompoundTagsUseLongestMatches();
 testSimpleFiltersOnlyStrictAreAbsolute();
@@ -932,6 +934,38 @@ static void testTagIntakeQueuesUnknownTags()
 
     TagIntake.Clear();
     assertEqual(0, TagIntake.Count, "清空后队列应为空");
+}
+
+static void testTagSubmitGates()
+{
+    DateTimeOffset now = new(2026, 11, 3, 12, 0, 0, TimeSpan.Zero);
+    AppSettings settings = new() { TagSubmitEnabled = true };
+
+    assertTrue(!TagSubmission.ShouldSubmit(settings, 100, now, hasToken: false), "没有凭据时不应提交");
+    assertTrue(!TagSubmission.ShouldSubmit(settings, TagSubmission.MinimumPending - 1, now, hasToken: true),
+        "没攒够条数不应提交");
+    assertTrue(TagSubmission.ShouldSubmit(settings, TagSubmission.MinimumPending, now, hasToken: true),
+        "攒够了且没冷却时应提交");
+
+    settings.TagSubmitEnabled = false;
+    assertTrue(!TagSubmission.ShouldSubmit(settings, 100, now, hasToken: true), "关掉开关后不应提交");
+    settings.TagSubmitEnabled = true;
+
+    settings.LastTagSubmitUtc = now - TimeSpan.FromDays(3);
+    assertTrue(!TagSubmission.ShouldSubmit(settings, 100, now, hasToken: true), "冷却期内不应重复提交");
+    settings.LastTagSubmitUtc = now - TimeSpan.FromDays(8);
+    assertTrue(TagSubmission.ShouldSubmit(settings, 100, now, hasToken: true), "过了冷却应可以再提交");
+}
+
+static void testTagSubmitBodyFormat()
+{
+    string body = TagSubmission.BuildBody([
+        new TagIntake.Entry { Name = "probe-alpha", Count = 2 }
+    ]);
+    assertTrue(!body.Contains("\\n"), "issue 正文里不能出现字面量反斜杠 n");
+    assertTrue(body.Contains("```json"), "必须带 json 代码块，审核脚本靠它解析");
+    assertTrue(body.Contains("\"tag\":\"probe-alpha\""), "载荷应含 tag 名");
+    assertTrue(body.Contains("\"count\":2"), "载荷应含出现次数");
 }
 
 static void testCompoundTagsRemainTogether()
