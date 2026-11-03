@@ -23,6 +23,8 @@ public partial class MainWindow : Window
     private readonly RecommendationEngine recommendationEngine = new();
     private readonly TosuClient tosu = new();
     private readonly TosuProcessManager tosuProcess = new();
+    private readonly TosuFileClient tosuFiles = new();
+    private string? ingameInfoKey;
     private readonly TopmostKeeper topmostKeeper;
     private readonly ObservableCollection<RecommendationItem> recommendations = [];
     private readonly HashSet<int> sessionImportedBeatmapsetIds = [];
@@ -101,7 +103,11 @@ public partial class MainWindow : Window
             AppLog.Info($"tosu process: {status}");
             Dispatcher.BeginInvoke(() => ConnectionText.Text = status);
         };
-        tosu.SnapshotReceived += snapshot => Dispatcher.BeginInvoke(() => updateGameState(snapshot));
+        tosu.SnapshotReceived += snapshot => Dispatcher.BeginInvoke(() =>
+        {
+            updateGameState(snapshot);
+            updateInGameInfo(snapshot);
+        });
         tosu.PlayStarted += snapshot => Dispatcher.BeginInvoke(async () => await handlePlayStartedAsync(snapshot));
         tosu.PlaySucceeded += snapshot => Dispatcher.BeginInvoke(async () => await handlePlaySucceededAsync(snapshot));
         previewPlayer.PlaybackStopped += (_, _) =>
@@ -174,7 +180,11 @@ public partial class MainWindow : Window
         string report;
         try
         {
-            if (mode == "library")
+            if (mode == "ingame")
+            {
+                report = await runInGameProbeAsync();
+            }
+            else if (mode == "library")
             {
                 System.Diagnostics.Stopwatch clock = System.Diagnostics.Stopwatch.StartNew();
                 await LocalBeatmapLibrary.RefreshAsync(StoragePaths.Root, CancellationToken.None);
@@ -1515,6 +1525,7 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
         value.AutoImport = AutoImportCheck.IsChecked == true;
         value.UseEmbeddedFont = EmbeddedFontCheck.IsChecked == true;
         value.ShowMapInfo = MapInfoCheck.IsChecked == true;
+        value.MapInfoSource = (MapInfoSourceBox.SelectedItem as ComboBoxItem)?.Tag?.ToString() ?? MapInfoSources.Imported;
         value.Language = (LanguageBox.SelectedItem as ComboBoxItem)?.Tag?.ToString() ?? Loc.AutoTag;
         value.OsuClient = (OsuClientBox.SelectedItem as ComboBoxItem)?.Tag?.ToString() ?? "lazer";
         value.OsuExecutablePath = BeatmapDownloadService.NormalizeExecutablePath(OsuPathBox.Text);
@@ -1548,6 +1559,9 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
         AutoImportCheck.IsChecked = settings.AutoImport;
         EmbeddedFontCheck.IsChecked = settings.UseEmbeddedFont;
         MapInfoCheck.IsChecked = settings.ShowMapInfo;
+        foreach (ComboBoxItem item in MapInfoSourceBox.Items)
+            if (Equals(item.Tag?.ToString(), settings.MapInfoSource)) MapInfoSourceBox.SelectedItem = item;
+        tosuFiles.Configure(settings.TosuWebSocketUrl);
         applyFontSetting();
         OsuPathBox.Text = BeatmapDownloadService.NormalizeExecutablePath(settings.OsuExecutablePath);
         string osuClient = string.Equals(settings.OsuClient, "stable", StringComparison.OrdinalIgnoreCase) ? "stable" : "lazer";
@@ -1588,6 +1602,67 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
         AppLog.Info(Typography.Describe());
     }
 
+    /// <summary>
+    /// --experiment=ingame：不用连 WebSocket，直接把 tosu 的 /json/v2 喂给同一条解析链路，
+    /// 再看「信息栏显示游戏内选中的谱面」能拼出什么。验证用。
+    /// </summary>
+    private async Task<string> runInGameProbeAsync()
+    {
+        tosuFiles.Configure(settings.TosuWebSocketUrl);
+        string ws = settings.TosuWebSocketUrl;
+        if (!Uri.TryCreate(ws, UriKind.Absolute, out Uri? uri))
+            return $"WebSocket 地址不合法：{ws}";
+        string http = (uri.Scheme == "wss" ? "https" : "http") + $"://{uri.Host}:{uri.Port}";
+
+        using System.Net.Http.HttpClient client = new() { Timeout = TimeSpan.FromSeconds(10) };
+        string json;
+        try
+        {
+            json = await client.GetStringAsync($"{http}/json/v2");
+        }
+        catch (Exception exception)
+        {
+            return $"连不上 tosu（{http}）：{exception.Message}";
+        }
+
+        TosuSnapshot? snapshot = null;
+        await using (TosuClient probe = new())
+        {
+            probe.SnapshotReceived += value => snapshot = value;
+            probe.ProcessSnapshotJson(json);
+        }
+        if (snapshot is null)
+            return "tosu 返回的 JSON 解析不出快照";
+
+        StringBuilder report = new();
+        report.AppendLine($"state={snapshot.StateName} id={snapshot.BeatmapId} set={snapshot.BeatmapsetId}");
+        report.AppendLine($"artist={snapshot.Artist}");
+        report.AppendLine($"title={snapshot.Title}");
+        report.AppendLine($"version={snapshot.DifficultyName}");
+        report.AppendLine($"mapper={snapshot.Mapper}");
+        report.AppendLine($"stars={snapshot.Stars:0.00} length={snapshot.LengthSeconds:0}s");
+
+        RecommendationItem? item = await buildItemFromTosuAsync(snapshot);
+        if (item is null)
+        {
+            report.AppendLine("拿不到 .osu（tosu 可能没在选歌界面，或 /files/beatmap/file 不可用）");
+            return report.ToString();
+        }
+
+        report.AppendLine($"mode={item.Detail?.ModeDisplay} keys={item.KeyCount} " +
+                          $"CS/OD/AR/HP={item.Detail?.CircleSize:0.0}/{item.Detail?.OverallDifficulty:0.0}/{item.Detail?.ApproachRate:0.0}/{item.Detail?.HPDrainRate:0.0}");
+        report.AppendLine($"bpm={item.Bpm:0} 物件={item.Detail?.ObjectCount}");
+        report.AppendLine($"键型={(item.Pattern is null ? "（非 mania 或分析失败）" : item.Pattern.Category)}");
+        if (item.Pattern is { } pattern)
+        {
+            report.AppendLine("占比：" + string.Join("，", pattern.CoreShares
+                .OrderByDescending(pair => pair.Value)
+                .Select(pair => $"{pair.Key} {pair.Value:P0}")));
+            report.AppendLine("雷达：" + string.Join(" ", pattern.SkillAxes.Select(value => value.ToString("0.00"))));
+        }
+        return report.ToString();
+    }
+
     /// <summary>后台扫本地已安装谱面；失败只记日志，去重退回「历史 + 近期玩过」。</summary>
     private static async Task refreshInstalledLibraryAsync()
     {
@@ -1619,6 +1694,83 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
 
         if (settings.ExcludeInstalledBeatmaps && !LocalBeatmapLibrary.HasData)
             await refreshInstalledLibraryAsync();
+    }
+
+    private async void MapInfoSourceBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (!settingsControlsReady)
+            return;
+
+        string source = (MapInfoSourceBox.SelectedItem as ComboBoxItem)?.Tag?.ToString() ?? MapInfoSources.Imported;
+        if (source == settings.MapInfoSource)
+            return;
+
+        settings.MapInfoSource = source;
+        ingameInfoKey = null;
+        dismissMapInfo();
+        try
+        {
+            await settingsStore.SaveAsync(settings);
+        }
+        catch (Exception exception)
+        {
+            AppLog.Error("保存信息栏来源设置失败", exception);
+        }
+    }
+
+    /// <summary>
+    /// 「信息栏显示游戏内选中的谱面」：选歌界面里换一首就刷新一次。
+    /// 数据全来自 tosu——元数据在快照里，键型从 `/files/beatmap/file` 取 `.osu` 现算。
+    /// 开局 / 结算 / 回菜单都不在这里处理，交给原有的「开局自动关闭」那套逻辑。
+    /// </summary>
+    private async void updateInGameInfo(TosuSnapshot snapshot)
+    {
+        if (settings.MapInfoSource != MapInfoSources.InGame || !settings.ShowMapInfo)
+            return;
+        if (snapshot.BeatmapId <= 0 || !string.Equals(snapshot.StateName, "selectPlay", StringComparison.OrdinalIgnoreCase))
+            return;
+
+        string key = $"{snapshot.BeatmapId}|{snapshot.DifficultyName}";
+        if (string.Equals(key, ingameInfoKey, StringComparison.Ordinal))
+            return;
+        ingameInfoKey = key;
+
+        RecommendationItem? item = await buildItemFromTosuAsync(snapshot);
+        if (item is not null)
+            showMapInfoFor(item);
+    }
+
+    /// <summary>把 tosu 的当前谱面拼成一个和推荐卡片同构的条目，信息窗不用区分数据来源。</summary>
+    private async Task<RecommendationItem?> buildItemFromTosuAsync(TosuSnapshot snapshot)
+    {
+        string? osuText = await tosuFiles.TryGetBeatmapFileAsync(snapshot.BeatmapId, CancellationToken.None);
+        if (osuText is null)
+        {
+            AppLog.Info($"信息栏：拿不到谱面 {snapshot.BeatmapId} 的 .osu");
+            return null;
+        }
+
+        BeatmapDetail? detail = BeatmapDetailReader.Parse(osuText);
+        ManiaPattern? pattern = settings.Mode == "mania" ? ManiaPatternAnalyzer.Analyze(osuText) : null;
+
+        RecommendationItem item = new()
+        {
+            BeatmapId = snapshot.BeatmapId,
+            BeatmapsetId = snapshot.BeatmapsetId,
+            Artist = snapshot.Artist,
+            Title = snapshot.Title,
+            DifficultyName = snapshot.DifficultyName,
+            Mapper = snapshot.Mapper,
+            Stars = snapshot.Stars,
+            Bpm = detail?.Bpm ?? 0,
+            LengthSeconds = (int)Math.Round(snapshot.LengthSeconds),
+            RankedYear = 0,
+            Score = 0,
+            KeyCount = detail?.KeyCount ?? 0
+        };
+        item.ApplyDetail(detail);
+        item.ApplyPattern(pattern);
+        return item;
     }
 
     private async void MapInfoCheck_Click(object sender, RoutedEventArgs e)

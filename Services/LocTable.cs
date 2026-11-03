@@ -91,6 +91,9 @@ public static class LocTable
         ["check.autoimport"] = "自动导入",
         ["check.embeddedfont"] = "使用内置字体（Outfit）",
         ["check.mapinfo"] = "导入后显示谱面信息窗",
+        ["label.infosource"] = "信息栏显示",
+        ["infosource.import"] = "导入的谱面",
+        ["infosource.ingame"] = "游戏内选中的谱面",
         ["check.autotosu"] = "自动启动 tosu",
         ["check.stoptosu"] = "关闭 Roam 时结束 tosu",
 
@@ -329,6 +332,9 @@ public static class LocTable
         ["check.autoimport"] = "Auto-import",
         ["check.embeddedfont"] = "Use the bundled font (Outfit)",
         ["check.mapinfo"] = "Show the beatmap info window after import",
+        ["label.infosource"] = "Info panel shows",
+        ["infosource.import"] = "The imported beatmap",
+        ["infosource.ingame"] = "Whatever is selected in game",
         ["check.autotosu"] = "Launch tosu automatically",
         ["check.stoptosu"] = "Stop tosu when Roam exits",
 

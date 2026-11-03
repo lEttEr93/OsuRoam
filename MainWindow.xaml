@@ -536,6 +536,15 @@
                                 <CheckBox x:Name="MapInfoCheck" Content="{DynamicResource L.check.mapinfo}" Click="MapInfoCheck_Click"
                                           ToolTip="{DynamicResource L.tip.mapinfo}" />
                             </WrapPanel>
+                            <StackPanel Margin="0,0,0,9">
+                                <TextBlock Text="{DynamicResource L.label.infosource}" Foreground="{StaticResource MutedTextBrush}" FontSize="11" />
+                                <ComboBox x:Name="MapInfoSourceBox" SelectedIndex="0"
+                                          SelectionChanged="MapInfoSourceBox_SelectionChanged"
+                                          DropDownOpened="ComboBox_DropDownOpened" DropDownClosed="ComboBox_DropDownClosed">
+                                    <ComboBoxItem Content="{DynamicResource L.infosource.import}" Tag="import" />
+                                    <ComboBoxItem Content="{DynamicResource L.infosource.ingame}" Tag="ingame" />
+                                </ComboBox>
+                            </StackPanel>
                             <TextBlock Text="{DynamicResource L.label.client}" Foreground="{StaticResource MutedTextBrush}" FontSize="11" />
                             <ComboBox x:Name="OsuClientBox" SelectedIndex="0"
                                       DropDownOpened="ComboBox_DropDownOpened" DropDownClosed="ComboBox_DropDownClosed">

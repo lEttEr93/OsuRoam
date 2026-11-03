@@ -49,6 +49,7 @@ testFlavorDownloadDefaults();
 testInstalledLibraryParsesMetadata();
 testSimpleFiltersUseApiGenreAndLanguageIds();
 testTosuStringStateWorksInMultiplayerPayload();
+testTosuSnapshotCarriesBeatmapMetadata();
 testTosuDashboardConfigIsDisabled();
 testTosuExecutableResolution();
 testOsuExecutableCandidatesSupportStable();
@@ -1288,6 +1289,41 @@ static void assertNear(double expected, double actual, string message)
 {
     if (Math.Abs(expected - actual) > 0.0001)
         throw new InvalidOperationException($"{message}：expected={expected}, actual={actual}");
+}
+
+/// <summary>
+/// 「信息栏显示游戏内选中的谱面」全靠 v2 payload 的 beatmap 段。
+/// 这段 JSON 的嵌套比别处深（stats.stars.total、time.lastObject），解析错一位整块就是空的。
+/// </summary>
+static void testTosuSnapshotCarriesBeatmapMetadata()
+{
+    const string payload = """
+    {"state":{"name":"selectPlay"},
+     "beatmap":{"id":5397245,"set":2322139,"mode":"mania","artist":"Frums","title":"24eeev0-$",
+                "mapper":"Asymetrical","version":"progression",
+                "stats":{"stars":{"live":0,"hitWindow":43.5,"total":5.49},"cs":{"original":4,"converted":4}},
+                "time":{"live":14982,"firstObject":2380,"lastObject":143811,"mp3Length":146235}},
+     "profile":{"name":"tester"},"game":{"paused":false},"play":{"failed":false},
+     "resultsScreen":{"rank":"","score":0}}
+    """;
+
+    TosuSnapshot? captured = null;
+    TosuClient client = new();
+    client.SnapshotReceived += value => captured = value;
+    client.ProcessSnapshotJson(payload);
+
+    if (captured is null)
+        throw new InvalidOperationException("payload 没解析出快照");
+    assertText("selectPlay", captured.StateName, "state");
+    assertEqual(5397245, captured.BeatmapId, "beatmap id");
+    assertEqual(2322139, captured.BeatmapsetId, "beatmapset id");
+    assertText("Frums", captured.Artist, "artist");
+    assertText("24eeev0-$", captured.Title, "title");
+    assertText("progression", captured.DifficultyName, "version");
+    assertText("Asymetrical", captured.Mapper, "mapper");
+    assertNear(5.49, captured.Stars, "stats.stars.total");
+    // 143811-2380 = 141431 ms
+    assertNear(141.431, captured.LengthSeconds, "time.lastObject - firstObject");
 }
 
 static void assertText(string expected, string actual, string message)

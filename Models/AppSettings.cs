@@ -2,6 +2,12 @@ using OsuRoam.Services;
 
 namespace OsuRoam.Models;
 
+public static class MapInfoSources
+{
+    public const string Imported = "import";
+    public const string InGame = "ingame";
+}
+
 public sealed class AppSettings
 {
     public const int MaximumRecommendationHistory = 500;
@@ -78,6 +84,8 @@ public sealed class AppSettings
     public string Language { get; set; } = Flavor.DefaultLanguage;
     /// <summary>导入谱面后自动弹出谱面信息窗。</summary>
     public bool ShowMapInfo { get; set; } = true;
+    /// <summary>信息栏显示哪张谱面：import = 本次导入的（默认），ingame = osu! 里当前选中的。</summary>
+    public string MapInfoSource { get; set; } = MapInfoSources.Imported;
     public bool ExcludeRecentlyPlayed { get; set; } = true;
     /// <summary>扫描 osu! 谱面目录，已经装在机器上的难度不再推荐（同曲其他难度仍可推荐）。</summary>
     public bool ExcludeInstalledBeatmaps { get; set; } = true;

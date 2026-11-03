@@ -13,7 +13,14 @@ public sealed record TosuSnapshot(
     bool IsPaused,
     bool Failed,
     string ResultRank,
-    long ResultScore);
+    long ResultScore,
+    // 下面这些是给「信息栏显示游戏内选中的谱面」用的元数据，缺了不影响别的逻辑。
+    string Artist = "",
+    string Title = "",
+    string DifficultyName = "",
+    string Mapper = "",
+    double Stars = 0,
+    double LengthSeconds = 0);
 
 public sealed class TosuClient : IAsyncDisposable
 {
@@ -123,7 +130,13 @@ public sealed class TosuClient : IAsyncDisposable
             bool failed = readBool(root, "play", "failed");
             string resultRank = readString(root, "resultsScreen", "rank");
             long resultScore = readLong(root, "resultsScreen", "score");
-            TosuSnapshot snapshot = new(state, beatmapId, beatmapsetId, profile, paused, failed, resultRank, resultScore);
+            TosuSnapshot snapshot = new(state, beatmapId, beatmapsetId, profile, paused, failed, resultRank, resultScore,
+                readString(root, "beatmap", "artist"),
+                readString(root, "beatmap", "title"),
+                readString(root, "beatmap", "version"),
+                readString(root, "beatmap", "mapper"),
+                readNumber(root, "beatmap", "stats", "stars", "total"),
+                lengthSecondsOf(root));
             SnapshotReceived?.Invoke(snapshot);
 
             if (state == "play" && beatmapId > 0)
@@ -193,6 +206,29 @@ public sealed class TosuClient : IAsyncDisposable
     }
 
     private static string resultsSignature(string rank, long score) => $"{rank}|{score}";
+
+    /// <summary>按路径取数值，比如 beatmap → stats → stars → total。</summary>
+    private static double readNumber(JsonElement root, params string[] path)
+    {
+        JsonElement current = root;
+        foreach (string name in path)
+        {
+            if (current.ValueKind != JsonValueKind.Object || !current.TryGetProperty(name, out current))
+                return 0;
+        }
+
+        if (current.ValueKind == JsonValueKind.Number && current.TryGetDouble(out double value))
+            return value;
+        return double.TryParse(current.ToString(), out value) ? value : 0;
+    }
+
+    /// <summary>时长取首尾物件的时间差；tosu 给的是毫秒。</summary>
+    private static double lengthSecondsOf(JsonElement root)
+    {
+        double first = readNumber(root, "beatmap", "time", "firstObject");
+        double last = readNumber(root, "beatmap", "time", "lastObject");
+        return last > first ? (last - first) / 1000.0 : 0;
+    }
 
     private static string readString(JsonElement root, string objectName, string propertyName)
     {
