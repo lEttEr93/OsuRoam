@@ -1433,6 +1433,12 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
     /// 游玩中把 Roam 整个收起来（主窗口、迷你播放器、信息栏、历史面板），
     /// 结算 / 中途退出 / 暂停等任何「不在游玩」的状态再恢复。暂停也算恢复，
     /// 因为这时候玩家可能要看一眼推荐。
+    ///
+    /// 两个坑：
+    /// 1. 光调 Hide()/Show() 不记状态，回来时窗口会沿用上一次的呈现尺寸，
+    ///    于是「进入游戏前是展开的，回来后变成迷你播放器」。这里显式记住并恢复布局。
+    /// 2. 直接 Hide() 会残留一帧（迷你播放器「逗留、闪现一下」）。先把内容淡掉再收窗口，
+    ///    和信息窗退场的做法一致。
     /// </summary>
     private void updatePlayVisibility(TosuSnapshot snapshot)
     {
@@ -1443,14 +1449,104 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
         hiddenForPlay = inPlay;
         if (inPlay)
         {
+            rememberLayout();
             restoreHistoryAfterPlay = historyWindow?.IsVisible == true;
             dismissMapInfo();
             historyWindow?.Hide();
+            fadeOutThenHide();
+            return;
+        }
+
+        showRestoringLayout();
+    }
+
+    private bool layoutWasCollapsed;
+    private double layoutWidth;
+    private double layoutHeight;
+    private double layoutLeft;
+    private double layoutTop;
+    private int playVisibilityToken;
+
+    /// <summary>收起前把当前布局记下来：展开/迷你、尺寸、位置。</summary>
+    private void rememberLayout()
+    {
+        layoutWasCollapsed = isCollapsed;
+        layoutWidth = Width;
+        layoutHeight = Height;
+        layoutLeft = Left;
+        layoutTop = Top;
+    }
+
+    private void fadeOutThenHide()
+    {
+        int token = ++playVisibilityToken;
+        if (!SystemParameters.ClientAreaAnimation)
+        {
+            RootCard.Opacity = 1;
             Hide();
             return;
         }
 
+        try
+        {
+            DoubleAnimation fade = Controls.Motion.tween(1, 0, 120);
+            fade.FillBehavior = FillBehavior.HoldEnd;
+            fade.Completed += (_, _) =>
+            {
+                // 期间又被叫醒了就别藏了
+                if (token != playVisibilityToken)
+                    return;
+                RootCard.BeginAnimation(UIElement.OpacityProperty, null);
+                RootCard.Opacity = 1;
+                Hide();
+            };
+            RootCard.BeginAnimation(UIElement.OpacityProperty, fade);
+        }
+        catch (Exception exception)
+        {
+            AppLog.Error("游玩时隐藏窗口失败", exception);
+            RootCard.BeginAnimation(UIElement.OpacityProperty, null);
+            RootCard.Opacity = 1;
+            Hide();
+        }
+    }
+
+    private void showRestoringLayout()
+    {
+        int token = ++playVisibilityToken;
+        RootCard.BeginAnimation(UIElement.OpacityProperty, null);
+        RootCard.Opacity = SystemParameters.ClientAreaAnimation ? 0 : 1;
         Show();
+
+        // 布局按「进游戏之前」的样子恢复，而不是沿用窗口上一次的呈现状态
+        if (isCollapsed != layoutWasCollapsed)
+            CollapseButton_Click(this, new RoutedEventArgs());
+        if (!double.IsNaN(layoutLeft)) Left = layoutLeft;
+        if (!double.IsNaN(layoutTop)) Top = layoutTop;
+        if (layoutWidth > 0) Width = Math.Max(MinWidth, layoutWidth);
+        if (layoutHeight > 0 && !isCollapsed) Height = layoutHeight;
+
+        if (!SystemParameters.ClientAreaAnimation || token != playVisibilityToken)
+            return;
+
+        try
+        {
+            DoubleAnimation fade = Controls.Motion.tween(0, 1, 140);
+            fade.FillBehavior = FillBehavior.HoldEnd;
+            fade.Completed += (_, _) =>
+            {
+                RootCard.BeginAnimation(UIElement.OpacityProperty, null);
+                RootCard.Opacity = 1;
+            };
+            RootCard.BeginAnimation(UIElement.OpacityProperty, fade);
+        }
+        catch (Exception exception)
+        {
+            AppLog.Error("游玩回来恢复窗口失败", exception);
+            RootCard.BeginAnimation(UIElement.OpacityProperty, null);
+            RootCard.Opacity = 1;
+        }
+
         if (restoreHistoryAfterPlay && historyWindow is not null)
             historyWindow.Show();
         restoreHistoryAfterPlay = false;

@@ -6,7 +6,7 @@
         FontFamily="{DynamicResource UiFont}"
         WindowStyle="None" AllowsTransparency="True" Background="Transparent"
         Topmost="True" ResizeMode="CanResizeWithGrip" ShowInTaskbar="True" Icon="/OsuRoam;component/Assets/OsuRoam.ico">
-    <Border Margin="8" Background="{StaticResource BackgroundBrush}" BorderBrush="{StaticResource BorderBrush}"
+    <Border x:Name="RootCard" Margin="8" Background="{StaticResource BackgroundBrush}" BorderBrush="{StaticResource BorderBrush}"
             BorderThickness="1" CornerRadius="7">
         <Grid>
             <Grid.RowDefinitions>
