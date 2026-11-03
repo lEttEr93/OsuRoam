@@ -99,6 +99,26 @@ public sealed class ManiaPattern
         .Select(name => CoreShares.TryGetValue(name, out double share) ? share : 0)
         .ToArray();
 
+    /// <summary>是不是面谱（长条占比过 <see cref="LnChartThreshold"/>）。</summary>
+    public bool IsLnChart => LnRatio >= LnChartThreshold;
+
+    /// <summary>勾选的键型在这张谱里占的份额（0–1）；按实际出现的核心型归一。</summary>
+    public double SelectedShare(IReadOnlyList<string> selected)
+    {
+        if (selected.Count == 0)
+            return 0;
+
+        double total = 0;
+        double hit = 0;
+        foreach ((string name, double share) in CoreShares)
+        {
+            total += share;
+            if (selected.Contains(name, StringComparer.OrdinalIgnoreCase))
+                hit += share;
+        }
+        return total <= 0 ? 0 : Math.Max(0, Math.Min(1, hit / total));
+    }
+
     /// <summary>两个键型指纹的相似度，0–1；模式标签不同会先打折。</summary>
     public double SimilarityTo(ManiaPattern other)
     {

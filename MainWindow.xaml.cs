@@ -33,6 +33,7 @@ public partial class MainWindow : Window
     private readonly HashSet<int> sessionImportedBeatmapsetIds = [];
     private readonly BeatmapDownloadService downloader;
     private readonly PatternLibrary patternLibrary = new();
+    private readonly OsuFileFetcher osuFileFetcher = new();
 
     /// <summary>键型分析串行化：它已移到线程池执行，避免多个下载并发写同一份键型库。</summary>
     private readonly SemaphoreSlim patternGate = new(1, 1);
@@ -678,10 +679,46 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
         patternLookup = id => cache.TryGetValue(id, out ManiaPattern? pattern) ? pattern : null;
     }
 
+    /// <summary>
+    /// 键型预取：补一批真实键型，让「勾选键型 / 只要面谱」不必依赖 tag 推断。
+    /// 命中够了就停，预算烧完也停；剩下的候选留给下一轮。
+    /// </summary>
+    private async Task prefetchPatternsAsync()
+    {
+        try
+        {
+            System.Diagnostics.Stopwatch clock = System.Diagnostics.Stopwatch.StartNew();
+            Progress<(int Done, int Total)> progress = new(value => setStatus("status.prefetch", value.Done, value.Total));
+            PrefetchResult result = await PatternPrefetcher.RunAsync(
+                candidates, settings, patternLibrary,
+                (beatmapId, token) => osuFileFetcher.TryFetchAsync(beatmapId, token),
+                PatternPrefetcher.DefaultBudget, progress, sessionCancellation.Token);
+
+            if (result.Parsed > 0)
+                await patternLibrary.SaveAsync();
+
+            clock.Stop();
+            AppLog.Info($"键型预取：候选 {result.Considered}，抓 {result.Attempted}，解析 {result.Parsed}，命中 {result.Hits}" +
+                        $"（{clock.ElapsedMilliseconds} ms）" +
+                        (result.BudgetExhausted ? "，预算用完，下一轮继续" : string.Empty));
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception exception)
+        {
+            AppLog.Error("键型预取失败", exception);
+        }
+    }
+
     private async Task refillPoolAsync()
     {
         if (profile is null)
             return;
+
+        // 勾了键型 / 只要面谱：先补一批真实键型，否则这两项只能靠 tag 推断。
+        if (settings.Mode == "mania" && (settings.SelectedPatterns.Count > 0 || settings.PreferLn))
+            await prefetchPatternsAsync();
 
         refreshPatternCache();
 

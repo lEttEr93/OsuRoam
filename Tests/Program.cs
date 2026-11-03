@@ -37,6 +37,7 @@ testPatternPreferenceShapesRanking();
 testBpmDoesNotAffectRanking();
 testPatternSelectionNormalizes();
 testSelectedPatternShapesRanking();
+testPatternPrefetchFillsLibrary();
 testCacheCleanerSkipsPoolItems();
 testDirtyTagsAreFiltered();
 testTagPoolComesFromWhitelist();
@@ -1654,6 +1655,47 @@ static string note(int keys, int column, int time, int? endTime = null)
     return endTime is int end
         ? $"{x},192,{time},128,0,{end}:0:0:0:0:"
         : $"{x},192,{time},1,0,0:0:0:0:";
+}
+
+static void testPatternPrefetchFillsLibrary()
+{
+    // 预取：把没有真实键型的候选抓一遍、解析、入库，命中够了就停。
+    AppSettings settings = recommendationSettings();
+    settings.PoolSize = 1;
+    settings.PreferLn = true;
+    List<OsuBeatmapset> sets = [maniaSet(900, 9001, 4), maniaSet(901, 9002, 4), maniaSet(902, 9003, 4)];
+    PatternLibrary library = new();
+
+    List<string> riceNotes = [];
+    for (int index = 0; index < 20; index++)
+        riceNotes.Add(note(4, index % 4, 1000 + index * 100));
+
+    List<string> lnNotes = [];
+    for (int index = 0; index < 12; index++)
+        lnNotes.Add(note(4, index % 4, 1000 + index * 180, 1000 + index * 180 + 140));
+
+    int fetched = 0;
+    Task<string?> fetch(int beatmapId, CancellationToken _)
+    {
+        fetched += 1;
+        return Task.FromResult<string?>(beatmapId == 9001 ? osuFile(4, riceNotes) : osuFile(4, lnNotes));
+    }
+
+    PrefetchResult result = PatternPrefetcher.RunAsync(
+        sets, settings, library, fetch, PatternPrefetcher.DefaultBudget, null, CancellationToken.None)
+        .GetAwaiter().GetResult();
+
+    assertEqual(3, result.Attempted, "三张谱都该被抓一次");
+    assertEqual(3, result.Parsed, "三张谱都该解析成功");
+    assertEqual(2, result.Hits, "两张长条谱应算命中（只要面谱）");
+    assertTrue(library.TryGet(9001) is { IsInferred: false }, "预取结果应以真实键型入库");
+    assertEqual(3, fetched, "不该重复抓同一张谱");
+
+    // 预算会限制单轮抓取量
+    PatternLibrary second = new();
+    PrefetchResult limited = PatternPrefetcher.RunAsync(
+        sets, settings, second, fetch, 1, null, CancellationToken.None).GetAwaiter().GetResult();
+    assertEqual(1, limited.Attempted, "预算为 1 时只抓一张");
 }
 
 static void testPatternAnalyzerDetectsStream()

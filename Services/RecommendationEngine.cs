@@ -107,7 +107,7 @@ public sealed class RecommendationEngine
                 if (usesSelection)
                 {
                     if (pattern is not null)
-                        patternFit = selectedShare(pattern, settings.SelectedPatterns);
+                        patternFit = pattern.SelectedShare(settings.SelectedPatterns);
                     effectivePatternWeight = SelectedPatternWeight;
                 }
                 else if (pattern is not null && patternPreference is not null && patternWeight > 0)
@@ -156,20 +156,6 @@ public sealed class RecommendationEngine
     /// 这里取 0.6 让「选了什么」能和星级掰手腕，但不至于完全盖过它。
     /// </summary>
     private const double SelectedPatternWeight = 0.60;
-
-    /// <summary>勾选的键型在谱面里占的份额（0–1）；份额之和按实际出现的核心型归一。</summary>
-    private static double selectedShare(ManiaPattern pattern, IReadOnlyList<string> selected)
-    {
-        double total = 0;
-        double hit = 0;
-        foreach ((string name, double share) in pattern.CoreShares)
-        {
-            total += share;
-            if (selected.Contains(name, StringComparer.OrdinalIgnoreCase))
-                hit += share;
-        }
-        return total <= 0 ? 0 : clamp01(hit / total);
-    }
 
     private static double proximity(double value, double target, double tolerance) => clamp01(1 - Math.Abs(value - target) / Math.Max(1, tolerance));
     private static double clamp01(double value) => Math.Max(0, Math.Min(1, value));
