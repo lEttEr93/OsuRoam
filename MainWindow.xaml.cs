@@ -155,6 +155,9 @@ public partial class MainWindow : Window
         }
 
         refreshTagList();
+        // tag 池：先用内置/缓存的，后台再拉一次公开仓库的（失败不影响任何功能）。
+        TagCatalog.Changed += onTagCatalogChanged;
+        _ = refreshTagCatalogAsync();
         applySettingsToControls();
         if (!double.IsNaN(settings.WindowLeft) && !double.IsNaN(settings.WindowTop))
         {
@@ -2237,6 +2240,23 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
         // 历史面板里的同名 tag 也要一起跟着变亮/变暗，否则取消一个已选 tag 后
         // 推荐池的高亮消失了、历史面板还亮着。
         historyWindow?.RefreshEntries(archiveStore.Entries);
+    }
+
+    /// <summary>tag 池远程更新成功：重建池子（含白名单顺序）并刷新界面。</summary>
+    private void onTagCatalogChanged() => Dispatcher.BeginInvoke(() =>
+    {
+        if (settings is null)
+            return;
+        settings.NormalizeTags();
+        refreshTagList();
+        AppLog.Info($"tag 池已更新：{TagCatalog.Pool.Count} 条（来源 {TagCatalog.Source}）");
+    });
+
+    private static async Task refreshTagCatalogAsync()
+    {
+        bool updated = await TagCatalog.RefreshAsync();
+        if (!updated)
+            AppLog.Info($"tag 池沿用本地：{TagCatalog.Pool.Count} 条（来源 {TagCatalog.Source}）");
     }
     private void updateDifficultyControls()
     {

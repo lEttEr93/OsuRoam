@@ -40,6 +40,7 @@ testTagPoolComesFromWhitelist();
 testTagAliasesCollapse();
 testLegacyTagPoolMigratesToSeen();
 testSeenTagsRejectJunk();
+testTagPoolPayloadValidation();
 testCompoundTagsRemainTogether();
 testCommonCompoundTagsUseLongestMatches();
 testSimpleFiltersOnlyStrictAreAbsolute();
@@ -902,6 +903,16 @@ static void testSeenTagsRejectJunk()
     assertTrue(!settings.SeenTags.Contains("s"), "单字符不应进 SeenTags");
     assertTrue(!settings.SeenTags.Contains("12"), "纯数字不应进 SeenTags");
     assertTrue(settings.SeenTags.Contains("长条"), "中文 tag 应可用");
+}
+
+static void testTagPoolPayloadValidation()
+{
+    // 远程/缓存里的池子必须先过校验，坏内容不能把池子清空。
+    assertTrue(!TagCatalog.TryParse("not json"), "非 JSON 应判为无效");
+    assertTrue(!TagCatalog.TryParse("""{"version":2,"groups":[]}"""), "空分组应判为无效");
+    assertTrue(!TagCatalog.TryParse("""{"version":2,"groups":[{"id":"genre","tags":[]}]}"""), "空 tag 列表应判为无效");
+    assertTrue(TagCatalog.TryParse("""{"version":2,"groups":[{"id":"genre","label":"曲风","tags":["electronic"]}]}"""),
+        "正常内容应判为有效");
 }
 
 static void testCompoundTagsRemainTogether()

@@ -191,7 +191,7 @@ def main() -> int:
         sys.stderr.write(__doc__)
         return 2
     counts = json.load(open(sys.argv[1], encoding="utf-8"))
-    out_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "Resources", "tag-pool.json")
+    out_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "data", "tag-pool.json")
     for index, argument in enumerate(sys.argv):
         if argument == "--out" and index + 1 < len(sys.argv):
             out_path = sys.argv[index + 1]

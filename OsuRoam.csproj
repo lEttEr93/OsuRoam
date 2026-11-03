@@ -39,7 +39,9 @@
   <ItemGroup>
     <EmbeddedResource Include="Resources\minacalc.wasm" />
     <EmbeddedResource Include="Resources\minacalc-75.wasm" />
-    <!-- 审核过的 tag 白名单（Tools/build-tag-pool.py 生成），运行时按资源名 OsuRoam.Resources.tag-pool.json 读。 -->
-    <EmbeddedResource Include="Resources\tag-pool.json" />
+    <!-- 审核过的 tag 白名单（Tools/build-tag-pool.py 生成）。发布时也会把 data/tag-pool.json 传到
+         公开仓库的同一路径，app 启动时按 https://raw.githubusercontent.com/lEttEr93/OsuRoam/main/data/tag-pool.json 拉取；
+         内嵌的这份是拿不到网络时的兜底，所以逻辑资源名保持不变。 -->
+    <EmbeddedResource Include="data\tag-pool.json" LogicalName="OsuRoam.Resources.tag-pool.json" />
   </ItemGroup>
 </Project>
