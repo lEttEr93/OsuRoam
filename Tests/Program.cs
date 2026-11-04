@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
 using OsuRoam.Services;
@@ -10,6 +11,12 @@ if (args.Length > 0 && args[0] == "--probe")
     return await probeAsync(args);
 if (args.Length > 0 && args[0] == "--diag")
     return await diagAsync(args);
+if (args.Length > 0 && args[0] == "--ab")
+    return await abTestAsync(args);
+if (args.Length > 1 && args[0] == "--sets")
+    return await setsAsync(args);
+if (args.Length > 2 && args[0] == "--hint")
+    return await hintAsync(args);
 
 testSuccessfulCompletion();
 testAbortDoesNotComplete();
@@ -56,6 +63,8 @@ testCandidateDiagnosisExplainsEmptyPool();
 testFallbackFillsWhenTagFilterTooNarrow();
 testFallbackAllowsPlayedButKeepsExcludedTags();
 testFallbackCardsGetReplacedByStrictOnes();
+testKeywordCandidatesAreJudgedByVerifiedPattern();
+testKeywordCandidatesEnterVerificationQueue();
 testPatternSearchHints();
 testCacheCleanerSkipsPoolItems();
 testDirtyTagsAreFiltered();
@@ -1761,13 +1770,16 @@ static void testPatternSearchHints()
     assertEqual(0, PatternSearchHints.For(settings).Count, "没勾键型时不该带关键字");
 
     settings.SelectedPatterns = ["Jacks"];
-    assertSequenceStrings(["jack"], PatternSearchHints.For(settings), "Jacks 应翻译成 jack");
+    assertSequenceStrings(["jack", "chordjack", "minijack"], PatternSearchHints.For(settings), "Jacks 应展开到同义词，按优先级排序");
 
     settings.SelectedPatterns = ["Coordination", "Density"];
-    assertSequenceStrings(["ln"], PatternSearchHints.For(settings), "协调/密度都是 ln，应去重成一个");
+    assertSequenceStrings(["ln", "handstream"], PatternSearchHints.For(settings), "协调/密度都归到 ln，再补 handstream");
 
     settings.SelectedPatterns = ["Stream", "Jacks"];
-    assertSequenceStrings(["stream", "jack"], PatternSearchHints.For(settings), "两个关键字都保留");
+    assertSequenceStrings(["stream", "jack", "chordjack"], PatternSearchHints.For(settings), "多个键型共享最多 3 个关键字");
+
+    settings.SelectedPatterns = ["Stream", "Jacks", "Chordstream", "Wildcard"];
+    assertTrue(PatternSearchHints.For(settings).Count <= PatternSearchHints.MaximumHints, "关键字数量要有上限，别把请求数堆爆");
 
     settings.SelectedPatterns = [];
     settings.PreferLn = true;
@@ -2081,7 +2093,7 @@ static async Task<int> probeAsync(string[] args)
     Console.WriteLine($"过滤：{filterMode}（tag {settings.IncludedTags.Count} 条，严格状态 {settings.StrictStatuses.Count} 条，排除已玩 {settings.ExcludeRecentlyPlayed}）");
 
     List<OsuBeatmapset> candidates = [];
-    await api.SearchCandidatesInBatchesAsync(settings, minStars, maxStars, batch =>
+    await api.SearchCandidatesInBatchesAsync(settings, minStars, maxStars, (batch, _) =>
     {
         candidates.AddRange(batch);
         return Task.CompletedTask;
@@ -2213,7 +2225,7 @@ static async Task<int> diagAsync(string[] args)
     }
     List<OsuBeatmapset> candidates = [];
     System.Diagnostics.Stopwatch searchClock = System.Diagnostics.Stopwatch.StartNew();
-    await api.SearchCandidatesInBatchesAsync(settings, settings.MinimumStars, settings.MaximumStars, batch =>
+    await api.SearchCandidatesInBatchesAsync(settings, settings.MinimumStars, settings.MaximumStars, (batch, _) =>
     {
         candidates.AddRange(batch);
         return Task.CompletedTask;
@@ -2410,4 +2422,333 @@ static void testFallbackCardsGetReplacedByStrictOnes()
     RecommendationItem strict = poolCard(2002);
     List<RecommendationItem> next = PoolReconciler.Build([filler], [strict], new HashSet<int>(), 5);
     assertTrue(next.Select(item => item.BeatmapsetId).SequenceEqual(new[] { 2002 }), "够格的候选应替换补位卡片");
+}
+
+/// <summary>
+/// A/B 实验：同一批真实候选，只在「有没有键型数据」上不同，比较 top5 的键型质量。
+/// 用来回答「推出来的 jack 是算法还是运气」——如果带键型的 top5 明显更 jack，且覆盖率不低，就是算法。
+/// 用法：--ab [轮数]
+/// </summary>
+static async Task<int> abTestAsync(string[] args)
+{
+    int rounds = args.Length > 1 ? int.Parse(args[1], CultureInfo.InvariantCulture) : 3;
+    SettingsStore store = new();
+    AppSettings settings = await store.LoadAsync();
+    Console.WriteLine($"设置：{store.SettingsPathForDisplay} 用户={settings.Username}");
+    Console.WriteLine($"  星级 {settings.MinimumStars}–{settings.MaximumStars}，tag 白名单 {settings.IncludedTags.Count} 条，排除已装 {settings.ExcludeInstalledBeatmaps}，排除已玩 {settings.ExcludeRecentlyPlayed}");
+
+    string secret = SecretProtector.Unprotect(settings.ProtectedClientSecret);
+    OsuApiClient api = new();
+    api.Configure(settings.ClientId, secret);
+    using CancellationTokenSource cancellation = new(TimeSpan.FromMinutes(30));
+    PlayerProfile profile = await api.BuildProfileAsync(settings.Username, settings.Mode, settings.ManiaKeys, cancellation.Token);
+
+    // --ab N noinstalled：临时关掉「排除已安装谱面」，用来对比「有供给」时算法的效果。
+    if (args.Skip(1).Contains("noinstalled"))
+    {
+        settings.ExcludeInstalledBeatmaps = false;
+        Console.WriteLine("已临时关闭「排除已安装谱面」");
+    }
+
+    PatternLibrary library = new();
+    await library.LoadAsync();
+    Console.WriteLine($"键型库：{library.Count} 条（真实解析 {library.ParsedCount}）");
+    if (settings.ExcludeInstalledBeatmaps)
+    {
+        await LocalBeatmapLibrary.RefreshAsync(store.CacheDirectory, cancellation.Token);
+        Console.WriteLine($"已安装库：{LocalBeatmapLibrary.InstalledBeatmapIds.Count} 个难度");
+    }
+
+    OsuFileFetcher fetcher = new();
+    int startRotation = settings.SearchRotation;
+    int withPatternHits = 0;
+    int withoutPatternHits = 0;
+    int sampled = 0;
+    for (int round = 0; round < rounds; round += 1)
+    {
+        settings.SearchRotation = startRotation + round;
+        List<OsuBeatmapset> candidates = [];
+        await api.SearchCandidatesInBatchesAsync(settings, settings.MinimumStars, settings.MaximumStars, (batch, _) =>
+        {
+            candidates.AddRange(batch);
+            return Task.CompletedTask;
+        }, cancellation.Token);
+        candidates = [.. candidates.GroupBy(set => set.Id).Select(group => group.First())];
+        List<int> lowerPriority = [.. settings.RecommendationHistory];
+        if (settings.ExcludeRecentlyPlayed)
+            lowerPriority.AddRange(profile.PlayedBeatmapsetIds());
+        IReadOnlySet<int>? installed = settings.ExcludeInstalledBeatmaps && LocalBeatmapLibrary.HasData
+            ? LocalBeatmapLibrary.InstalledBeatmapIds
+            : null;
+
+        IReadOnlyList<RecommendationItem> withPattern = new RecommendationEngine().RankAvoidingHistory(
+            candidates, profile, settings, settings.MinimumStars, settings.MaximumStars,
+            new HashSet<int>(), lowerPriority, Math.Max(1, settings.PoolSize),
+            id => library.TryGetVerified(id), null, settings.PatternWeight, installed, new Random(round + 1));
+        IReadOnlyList<RecommendationItem> withoutPattern = new RecommendationEngine().RankAvoidingHistory(
+            candidates, profile, settings, settings.MinimumStars, settings.MaximumStars,
+            new HashSet<int>(), lowerPriority, Math.Max(1, settings.PoolSize),
+            null, null, settings.PatternWeight, installed, new Random(round + 1));
+
+        Dictionary<int, double> shares = [];
+        foreach (RecommendationItem item in withPattern.Concat(withoutPattern))
+        {
+            if (shares.ContainsKey(item.BeatmapId))
+                continue;
+            ManiaPattern? known = library.TryGetVerified(item.BeatmapId);
+            if (known is null)
+            {
+                string? text = await fetcher.TryFetchAsync(item.BeatmapId, cancellation.Token);
+                if (text is not null && library.Ingest(text, item.BeatmapId, item.BeatmapsetId))
+                    known = library.TryGetVerified(item.BeatmapId);
+            }
+            shares[item.BeatmapId] = known is not null && known.CoreShares.TryGetValue("Jacks", out double jack) ? jack : -1;
+        }
+
+        string Describe(IReadOnlyList<RecommendationItem> items)
+        {
+            IEnumerable<string> cells = items.Select(item =>
+            {
+                double share = shares.GetValueOrDefault(item.BeatmapId, -1);
+                return $"{item.Title[..Math.Min(item.Title.Length, 22)]}={share:0.00}";
+            });
+            return string.Join(" | ", cells);
+        }
+        int Hits(IReadOnlyList<RecommendationItem> items) => items.Count(item => shares.GetValueOrDefault(item.BeatmapId, -1) >= 0.25);
+        int VerifiedCoverage(IReadOnlyList<RecommendationItem> items) => items.Count(item => library.TryGetVerified(item.BeatmapId) is not null);
+
+        // 库里叠键占比高的谱，为什么没进候选？逐条给原因。
+        if (round == 0)
+        {
+            HashSet<int> candidateSets = [.. candidates.Select(set => set.Id)];
+            HashSet<int> installedSets = settings.ExcludeInstalledBeatmaps && LocalBeatmapLibrary.HasData
+                ? [.. LocalBeatmapLibrary.InstalledBeatmapsetIds]
+                : [];
+            HashSet<int> historySets = [.. lowerPriority];
+            Console.WriteLine("库里叠键 ≥50% 的谱，为什么没进候选：");
+            foreach (var pair in library.PatternsWhereJackAtLeast(0.5).Take(6))
+            {
+                ManiaPattern pattern = pair.Value;
+                bool inCandidates = candidateSets.Contains(pattern.BeatmapsetId);
+                bool isInstalledSet = installedSets.Contains(pattern.BeatmapsetId);
+                bool inHistory = historySets.Contains(pattern.BeatmapsetId);
+                Console.WriteLine($"  set={pattern.BeatmapsetId} 叠键 {pair.Key:0.00} 星级≈? 候选={inCandidates} 已安装={isInstalledSet} 已推荐/已玩={inHistory}");
+            }
+        }
+
+        Console.WriteLine();
+        Console.WriteLine($"轮次 {round + 1}（rotation={settings.SearchRotation}）：候选 {candidates.Count} 个谱面集，池子 {settings.PoolSize}");
+        Console.WriteLine($"  带键型 top{withPattern.Count}（其中已验证 {VerifiedCoverage(withPattern)} 首）：{Describe(withPattern)}");
+        Console.WriteLine($"  无键型 top{withoutPattern.Count}：{Describe(withoutPattern)}");
+        Console.WriteLine($"  叠键 ≥25%：带键型 {Hits(withPattern)}/{withPattern.Count}，无键型 {Hits(withoutPattern)}/{withoutPattern.Count}");
+        withPatternHits += Hits(withPattern);
+        withoutPatternHits += Hits(withoutPattern);
+        sampled += withPattern.Count;
+    }
+
+    Console.WriteLine();
+    Console.WriteLine($"合计：带键型 {withPatternHits}/{sampled}，无键型 {withoutPatternHits}/{sampled} 首叠键 ≥25%");
+    return 0;
+}
+
+/// <summary>
+/// 按 id 查谱面集元数据（星级/状态/时长/年份/tag），用来判断「为什么这张谱进不了候选」：
+/// 是星级窗口外、还是被 tag 白名单挡掉、还是根本没被搜索翻到。
+/// 用法：--sets 2007310 1751372 ...
+/// </summary>
+static async Task<int> setsAsync(string[] args)
+{
+    SettingsStore store = new();
+    AppSettings settings = await store.LoadAsync();
+    string secret = SecretProtector.Unprotect(settings.ProtectedClientSecret);
+    using HttpClient http = new();
+    using HttpResponseMessage tokenResponse = await http.PostAsJsonAsync(
+        "https://osu.ppy.sh/oauth/token",
+        new { client_id = settings.ClientId, client_secret = secret, grant_type = "client_credentials", scope = "public" });
+    tokenResponse.EnsureSuccessStatusCode();
+    string token = (await tokenResponse.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("access_token").GetString() ?? "";
+    http.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
+    http.DefaultRequestHeaders.UserAgent.ParseAdd("osu-roam-investigation");
+
+    Console.WriteLine($"查询星级窗口 {settings.MinimumStars}–{settings.MaximumStars}，tag 白名单 {settings.IncludedTags.Count} 条");
+    foreach (string raw in args.Skip(1))
+    {
+        if (!int.TryParse(raw, out int setId))
+            continue;
+        using HttpResponseMessage response = await http.GetAsync($"https://osu.ppy.sh/api/v2/beatmapsets/{setId}");
+        if (!response.IsSuccessStatusCode)
+        {
+            Console.WriteLine($"  {setId}: HTTP {(int)response.StatusCode}");
+            continue;
+        }
+        JsonElement root = await response.Content.ReadFromJsonAsync<JsonElement>();
+        string status = root.GetProperty("status").GetString() ?? "";
+        string artist = root.TryGetProperty("artist", out JsonElement a) ? a.GetString() ?? "" : "";
+        string title = root.TryGetProperty("title", out JsonElement t) ? t.GetString() ?? "" : "";
+        int year = 0;
+        foreach (string field in new[] { "ranked_date", "submitted_date" })
+        {
+            if (root.TryGetProperty(field, out JsonElement date) && date.ValueKind == JsonValueKind.String &&
+                DateTimeOffset.TryParse(date.GetString(), out DateTimeOffset parsedDate))
+            {
+                year = parsedDate.Year;
+                break;
+            }
+        }
+        string[] tags = (root.TryGetProperty("tags", out JsonElement tagElement) ? tagElement.GetString() ?? "" : "")
+            .Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        IReadOnlyList<string> setTags = AppSettings.ParseTags(string.Join(' ', tags));
+        bool tagOk = settings.IncludedTags.Count == 0 ||
+                     settings.IncludedTags.Any(tag => setTags.Contains(tag, StringComparer.OrdinalIgnoreCase));
+        Console.WriteLine();
+        Console.WriteLine($"{setId} {artist} - {title}  状态={status} 年份={year} tag命中={tagOk}");
+        foreach (JsonElement beatmap in root.GetProperty("beatmaps").EnumerateArray())
+        {
+            string mode = beatmap.GetProperty("mode").GetString() ?? "";
+            if (mode != "mania")
+                continue;
+            double cs = beatmap.GetProperty("cs").GetDouble();
+            double star = beatmap.GetProperty("difficulty_rating").GetDouble();
+            int length = beatmap.TryGetProperty("total_length", out JsonElement len) ? len.GetInt32() : 0;
+            bool inRange = star >= settings.MinimumStars && star <= settings.MaximumStars;
+            Console.WriteLine($"   {beatmap.GetProperty("id").GetInt32()} {cs:0}K {star:0.00}★ {length}s 版本={beatmap.GetProperty("version").GetString()}" +
+                              $" 星级内={inRange} 键数对={(int)Math.Round(cs) == settings.ManiaKeys}");
+        }
+    }
+    return 0;
+}
+
+/// <summary>
+/// 关键字搜索能翻多深：q=jack 这类查询按页取，看看能捞出多少候选、能不能覆盖到已知的 jack 谱。
+/// 用法：--hint jack 6 [要检查的 set id...]
+/// </summary>
+static async Task<int> hintAsync(string[] args)
+{
+    SettingsStore store = new();
+    AppSettings settings = await store.LoadAsync();
+    string secret = SecretProtector.Unprotect(settings.ProtectedClientSecret);
+    string keyword = args[1];
+    int pages = int.Parse(args[2], CultureInfo.InvariantCulture);
+    HashSet<int> wanted = [.. args.Skip(3).Select(int.Parse)];
+    using HttpClient http = new();
+    using HttpResponseMessage tokenResponse = await http.PostAsJsonAsync("https://osu.ppy.sh/oauth/token",
+        new { client_id = settings.ClientId, client_secret = secret, grant_type = "client_credentials", scope = "public" });
+    tokenResponse.EnsureSuccessStatusCode();
+    string token = (await tokenResponse.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("access_token").GetString() ?? "";
+    http.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
+    http.DefaultRequestHeaders.UserAgent.ParseAdd("osu-roam-investigation");
+
+    string query = FormattableString.Invariant(
+        $"stars>={settings.MinimumStars:0.0} stars<={settings.MaximumStars:0.0} length>={settings.MinimumLengthSeconds} length<={settings.MaximumLengthSeconds} keys={settings.ManiaKeys} {keyword}");
+    string? cursor = null;
+    int seen = 0;
+    int total = 0;
+    HashSet<int> found = [];
+    for (int page = 0; page < pages; page += 1)
+    {
+        string path = $"https://osu.ppy.sh/api/v2/beatmapsets/search?m=3&s=any&sort=relevance&q={Uri.EscapeDataString(query)}";
+        if (!string.IsNullOrEmpty(cursor))
+            path += $"&cursor_string={Uri.EscapeDataString(cursor)}";
+        using HttpResponseMessage response = await http.GetAsync(path);
+        if (!response.IsSuccessStatusCode)
+        {
+            Console.WriteLine($"  第 {page + 1} 页 HTTP {(int)response.StatusCode}");
+            break;
+        }
+        JsonElement root = await response.Content.ReadFromJsonAsync<JsonElement>();
+        if (root.TryGetProperty("total", out JsonElement totalElement) && totalElement.ValueKind == JsonValueKind.Number)
+            total = Math.Max(total, totalElement.GetInt32());
+        JsonElement sets = root.GetProperty("beatmapsets");
+        int count = sets.GetArrayLength();
+        int matchedSets = 0;
+        foreach (JsonElement set in sets.EnumerateArray())
+        {
+            int id = set.GetProperty("id").GetInt32();
+            if (wanted.Contains(id))
+                found.Add(id);
+            IReadOnlyList<string> tags = AppSettings.ParseTags(set.GetProperty("tags").GetString() ?? "");
+            if (settings.IncludedTags.Any(tag => tags.Contains(tag, StringComparer.OrdinalIgnoreCase)))
+                matchedSets += 1;
+        }
+        seen += count;
+        Console.WriteLine($"  第 {page + 1} 页：{count} 个谱面集（其中通过 tag 白名单 {matchedSets}），累计 {seen}");
+        cursor = root.TryGetProperty("cursor_string", out JsonElement cursorElement) && cursorElement.ValueKind == JsonValueKind.String
+            ? cursorElement.GetString()
+            : null;
+        if (string.IsNullOrEmpty(cursor))
+            break;
+    }
+    Console.WriteLine($"q={keyword} 翻 {pages} 页：累计 {seen} 个谱面集，服务端命中约 {total}");
+    if (wanted.Count > 0)
+        Console.WriteLine($"  目标 set 命中：{string.Join(",", found)}（缺 {string.Join(",", wanted.Except(found))}）");
+    return 0;
+}
+
+static void testKeywordCandidatesAreJudgedByVerifiedPattern()
+{
+    // 关键字召回但 tag 白名单没命中：不靠 tag 判断，靠真实解析出的键型裁定。
+    AppSettings settings = recommendationSettings();
+    settings.IncludedTags = ["artcore"];
+    settings.SelectedPatterns = ["Jacks"];
+    settings.MinimumStars = 1;
+    settings.MaximumStars = 10;
+    PlayerProfile profile = emptyProfile();
+    OsuBeatmapset untaggedJack = taggedManiaSet(2100, 21001, "electronic");
+    OsuBeatmapset untaggedStream = taggedManiaSet(2101, 21011, "electronic");
+
+    ManiaPattern Pattern(int beatmapId, int beatmapsetId, string core, double share) => new()
+    {
+        BeatmapId = beatmapId,
+        BeatmapsetId = beatmapsetId,
+        Source = PatternSource.Osu,
+        AnalyzerVersion = ManiaPatternAnalyzer.Version,
+        CoreShares = new() { [core] = share }
+    };
+    ManiaPattern jack = Pattern(21001, 2100, "Jacks", 0.8);
+    ManiaPattern stream = Pattern(21011, 2101, "Stream", 0.9);
+    Func<int, ManiaPattern?> lookup = id => id == 21001 ? jack : id == 21011 ? stream : null;
+
+    RecommendationEngine engine = new();
+    IReadOnlyList<RecommendationItem> withoutKeywordFlag = engine.RankAvoidingHistory(
+        [untaggedJack, untaggedStream], profile, settings, 1, 10, new HashSet<int>(), [], 2,
+        lookup, null, 0, null, new Random(1));
+    assertEqual(0, withoutKeywordFlag.Count, "tag 不符且不是关键字召回的谱面不该进池");
+
+    HashSet<int> keywordSets = [2100, 2101];
+    IReadOnlyList<RecommendationItem> withKeywordFlag = engine.RankAvoidingHistory(
+        [untaggedJack, untaggedStream], profile, settings, 1, 10, new HashSet<int>(), [], 2,
+        lookup, null, 0, null, new Random(1), false, false, keywordSets);
+    assertEqual(1, withKeywordFlag.Count, "关键字召回里只有真实键型符合的那张能进池");
+    assertEqual(2100, withKeywordFlag[0].BeatmapsetId, "进池的应该是叠键占比 0.8 的谱");
+}
+
+static void testKeywordCandidatesEnterVerificationQueue()
+{
+    // 关键字召回的谱面即使不符合 tag 白名单，也要能进入验证队列（否则永远拿不到真实键型）。
+    AppSettings settings = recommendationSettings();
+    settings.IncludedTags = ["artcore"];
+    settings.SelectedPatterns = ["Jacks"];
+    settings.MinimumStars = 1;
+    settings.MaximumStars = 10;
+    OsuBeatmapset set = taggedManiaSet(2200, 22001, "electronic");
+    int[] alternation = [0, 1, 2, 3];
+    List<string> notes = [];
+    for (int index = 0; index < 20; index += 1)
+        notes.Add(note(4, alternation[index % alternation.Length], 1000 + index * 100));
+    string text = osuFile(4, notes);
+
+    List<int> fetched = [];
+    PatternPrefetcher.RunAsync([set], settings, new PatternLibrary(), (beatmapId, _) =>
+    {
+        fetched.Add(beatmapId);
+        return Task.FromResult<string?>(text);
+    }, 1, PatternPrefetcher.DefaultDeadline, null, CancellationToken.None).GetAwaiter().GetResult();
+    assertEqual(0, fetched.Count, "tag 不符的普通候选不该占用预取预算");
+
+    PatternPrefetcher.RunAsync([set], settings, new PatternLibrary(), (beatmapId, _) =>
+    {
+        fetched.Add(beatmapId);
+        return Task.FromResult<string?>(text);
+    }, 1, PatternPrefetcher.DefaultDeadline, null, CancellationToken.None, new HashSet<int> { 2200 }).GetAwaiter().GetResult();
+    assertEqual(1, fetched.Count, "关键字召回的谱面应进入验证队列");
 }

@@ -9,9 +9,9 @@ namespace OsuRoam.Services;
 /// </summary>
 public static class CandidateFilter
 {
-    public static bool Eligible(OsuBeatmapset set, OsuBeatmap beatmap, AppSettings settings)
+    public static bool Eligible(OsuBeatmapset set, OsuBeatmap beatmap, AppSettings settings, bool ignoreTagWhitelist = false)
     {
-        if (!EligibleIgnoringInstalled(set, beatmap, settings))
+        if (!EligibleIgnoringInstalled(set, beatmap, settings, ignoreTagWhitelist))
             return false;
         return !isInstalled(beatmap, settings);
     }
@@ -21,8 +21,12 @@ public static class CandidateFilter
         settings.ExcludeInstalledBeatmaps && LocalBeatmapLibrary.HasData &&
         LocalBeatmapLibrary.InstalledBeatmapIds.Contains(beatmap.Id);
 
-    /// <summary>除「排除已安装」之外的全部条件。</summary>
-    public static bool EligibleIgnoringInstalled(OsuBeatmapset set, OsuBeatmap beatmap, AppSettings settings)
+    /// <summary>
+    /// 除「排除已安装」之外的全部条件。
+    /// <paramref name="ignoreTagWhitelist"/> 给「关键字搜索」召回的谱面用：
+    /// 它们可能只是曲名/作者碰巧含关键字，tag 不能当判据，改由真实键型决定（见 RecommendationEngine）。
+    /// </summary>
+    public static bool EligibleIgnoringInstalled(OsuBeatmapset set, OsuBeatmap beatmap, AppSettings settings, bool ignoreTagWhitelist = false)
     {
         if (set is null || beatmap is null)
             return false;
@@ -47,7 +51,8 @@ public static class CandidateFilter
         IReadOnlyList<string> tags = AppSettings.ParseTags(set.Tags);
         if (settings.ExcludedTags.Any(tag => tags.Contains(tag, StringComparer.OrdinalIgnoreCase)))
             return false;
-        if (settings.IncludedTags.Count > 0 && !settings.IncludedTags.Any(tag => tags.Contains(tag, StringComparer.OrdinalIgnoreCase)))
+        if (!ignoreTagWhitelist && settings.IncludedTags.Count > 0 &&
+            !settings.IncludedTags.Any(tag => tags.Contains(tag, StringComparer.OrdinalIgnoreCase)))
             return false;
 
         return true;

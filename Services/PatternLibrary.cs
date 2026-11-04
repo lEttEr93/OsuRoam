@@ -111,6 +111,21 @@ public sealed class PatternLibrary
         return pattern;
     }
 
+    /// <summary>诊断用：列出某个核心键型占比不低于阈值的真实解析条目（按占比降序）。</summary>
+    public IReadOnlyList<KeyValuePair<double, ManiaPattern>> PatternsWhereJackAtLeast(double threshold)
+    {
+        lock (gate)
+        {
+            return patterns.Values
+                .Where(pattern => !pattern.IsInferred && pattern.AnalyzerVersion == ManiaPatternAnalyzer.Version)
+                .Select(pattern => new KeyValuePair<double, ManiaPattern>(
+                    pattern.CoreShares.TryGetValue("Jacks", out double jack) ? jack : 0, pattern))
+                .Where(pair => pair.Key >= threshold)
+                .OrderByDescending(pair => pair.Key)
+                .ToList();
+        }
+    }
+
     /// <summary>同谱面若已有真实键型，则不被 tag 推断覆盖。</summary>
     public void Put(ManiaPattern pattern)
     {

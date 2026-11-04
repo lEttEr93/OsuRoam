@@ -86,7 +86,7 @@ public sealed class OsuApiClient : IDisposable
         AppSettings settings, double minimumStars, double maximumStars, CancellationToken cancellationToken)
     {
         List<OsuBeatmapset> results = [];
-        await SearchCandidatesInBatchesAsync(settings, minimumStars, maximumStars, batch =>
+        await SearchCandidatesInBatchesAsync(settings, minimumStars, maximumStars, (batch, _) =>
         {
             results.AddRange(batch);
             return Task.CompletedTask;
@@ -123,14 +123,23 @@ public sealed class OsuApiClient : IDisposable
     /// <summary>池子填不满时最多翻到这么多页，别把一次漫游拖成几分钟。</summary>
     public const int ExtendedPageBudget = 24;
 
+    /// <summary>每个关键字翻几页（50 条/页）。关键字查询的命中率远高于默认排序。</summary>
+    public const int HintPageBudget = 4;
+
+    /// <summary>
+    /// 分批返回候选。回调的第二个参数表示这一批是不是「关键字搜索」来的：
+    /// 这些批次的谱面可能只是曲名/作者碰巧含有关键字，由调用方用真实键型判断是否采纳。
+    /// </summary>
     public async Task SearchCandidatesInBatchesAsync(
         AppSettings settings,
         double minimumStars,
         double maximumStars,
-        Func<IReadOnlyList<OsuBeatmapset>, Task> onBatch,
+        Func<IReadOnlyList<OsuBeatmapset>, bool, Task> onBatch,
         CancellationToken cancellationToken,
         Func<bool>? wantsMore = null,
-        int maximumPages = SearchPageBudget)
+        int maximumPages = SearchPageBudget,
+        int hintPages = HintPageBudget,
+        Func<bool>? enoughStrictCandidates = null)
     {
         await authorizeAsync(cancellationToken);
         int resultCount = 0;
@@ -150,30 +159,48 @@ public sealed class OsuApiClient : IDisposable
         string? activeSort = null;
 
         // 勾了键型/面谱时，先用关键字搜一轮（q 会匹配 mapper tags，见 PatternSearchHints）。
-        // 这一轮是为了「快速启动」：拿到大概率符合的候选，再让默认轮换取更广的池子。
+        // 每个关键字翻几页：单页 50 条远不够 —— 实测 q=jack 翻到第 6 页才捞到第一张已知的叠键谱，
+        // 而默认排序翻 1200 条一张都捞不到。这批结果交给调用方按「真实键型」甄别。
         foreach (string hint in PatternSearchHints.For(settings))
         {
             string hinted = $"{query} {hint}";
-            string path = $"api/v2/beatmapsets/search?m={mode}&s={status}&sort=relevance&q={Uri.EscapeDataString(hinted)}";
-            try
+            string? hintCursor = null;
+            int hintSeen = 0;
+            for (int page = 0; page < Math.Max(1, hintPages); page += 1)
             {
-                OsuBeatmapsetSearch response = await getAsync<OsuBeatmapsetSearch>(path, cancellationToken);
-                if (response.Beatmapsets.Count > 0)
+                // 池子已经被够格的候选填满，就没必要再翻关键字了（第一个请求总是要发的）。
+                if (hintSeen > 0 && enoughStrictCandidates?.Invoke() == true)
+                    break;
+                string path = $"api/v2/beatmapsets/search?m={mode}&s={status}&sort=relevance&q={Uri.EscapeDataString(hinted)}";
+                if (!string.IsNullOrEmpty(hintCursor))
+                    path += $"&cursor_string={Uri.EscapeDataString(hintCursor)}";
+                string? nextCursor;
+                try
                 {
+                    OsuBeatmapsetSearch response = await getAsync<OsuBeatmapsetSearch>(path, cancellationToken);
+                    if (response.Beatmapsets.Count == 0)
+                        break;
                     resultCount += response.Beatmapsets.Count;
-                    await onBatch(response.Beatmapsets);
-                    AppLog.Info($"键型关键字搜索「{hint}」：{response.Beatmapsets.Count} 个谱面集");
+                    hintSeen += response.Beatmapsets.Count;
+                    await onBatch(response.Beatmapsets, true);
+                    nextCursor = response.CursorString;
                 }
+                catch (OperationCanceledException)
+                {
+                    // 用户取消不是「这条关键字没搜到」，不能吞掉。
+                    throw;
+                }
+                catch (Exception exception)
+                {
+                    AppLog.Info($"键型关键字搜索「{hint}」跳过：{exception.GetType().Name} {exception.Message}");
+                    break;
+                }
+                hintCursor = nextCursor;
+                if (string.IsNullOrEmpty(hintCursor))
+                    break;
             }
-            catch (OperationCanceledException)
-            {
-                // 用户取消不是「这条关键字没搜到」，不能吞掉。
-                throw;
-            }
-            catch (Exception exception)
-            {
-                AppLog.Info($"键型关键字搜索「{hint}」跳过：{exception.GetType().Name} {exception.Message}");
-            }
+            if (hintSeen > 0)
+                AppLog.Info($"键型关键字搜索「{hint}」：{hintSeen} 个谱面集（按真实键型甄别，不看 tag）");
         }
 
         for (int page = 0; page < pageBudget && resultCount < pageBudget * 50; page++)
@@ -200,7 +227,7 @@ public sealed class OsuApiClient : IDisposable
             if (response.Beatmapsets.Count > 0)
             {
                 resultCount += response.Beatmapsets.Count;
-                await onBatch(response.Beatmapsets);
+                await onBatch(response.Beatmapsets, false);
             }
             cursor = response.CursorString;
             if (string.IsNullOrEmpty(cursor))

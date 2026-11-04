@@ -42,10 +42,11 @@ public static class PatternPrefetcher
         int budget,
         TimeSpan deadline,
         IProgress<(int Verified, int Hits)>? progress,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        IReadOnlySet<int>? keywordBeatmapsetIds = null)
     {
         DateTimeOffset started = DateTimeOffset.UtcNow;
-        List<Candidate> pending = collect(candidates, settings, library);
+        List<Candidate> pending = collect(candidates, settings, library, keywordBeatmapsetIds);
         int considered = pending.Count;
         if (pending.Count == 0)
             return new PrefetchResult(0, 0, 0, 0, 0, false, false);
@@ -164,7 +165,8 @@ public static class PatternPrefetcher
     private static List<Candidate> collect(
         IEnumerable<OsuBeatmapset> candidates,
         AppSettings settings,
-        PatternLibrary library)
+        PatternLibrary library,
+        IReadOnlySet<int>? keywordBeatmapsetIds)
     {
         List<Candidate> pending = [];
         HashSet<int> seen = [];
@@ -172,14 +174,16 @@ public static class PatternPrefetcher
         {
             foreach (OsuBeatmap beatmap in set.Beatmaps)
             {
-                if (!CandidateFilter.Eligible(set, beatmap, settings))
+                // 关键字召回：tag 白名单不作门槛（可能只是曲名/作者撞词），交给解析结果判断。
+                bool keyword = keywordBeatmapsetIds?.Contains(set.Id) == true;
+                if (!CandidateFilter.Eligible(set, beatmap, settings, ignoreTagWhitelist: keyword))
                     continue;
                 if (!seen.Add(beatmap.Id))
                     continue;
                 // 只认「真实解析 + 当前分析器版本」；tag 推断和旧版本缓存都还要重抓。
                 if (library.TryGetVerified(beatmap.Id) is not null)
                     continue;
-                pending.Add(new Candidate(set, beatmap));
+                pending.Add(new Candidate(set, beatmap) { Keyword = keyword });
             }
         }
         return pending;
@@ -194,6 +198,8 @@ public static class PatternPrefetcher
             BeatmapId = beatmap.Id;
             BeatmapsetId = set.Id;
         }
+
+        public bool Keyword { get; init; }
 
         public OsuBeatmapset Set { get; }
         public OsuBeatmap Beatmap { get; }
@@ -217,6 +223,9 @@ public static class PatternPrefetcher
             HintStrength = hintStrength(hints);
             // mu 是 SelectedShare 的乐观估计，0.20 是探索余量（不是置信度）。
             Optimistic = BaseScore + 0.70 * Math.Min(1, HintStrength + 0.20);
+            // 关键字召回的候选优先验证：它们是「对症」的那一小撮，默认排序翻多少页都捞不到。
+            if (Keyword)
+                Optimistic += 1.0;
         }
 
         private double hintStrength(IReadOnlyList<string> hints)

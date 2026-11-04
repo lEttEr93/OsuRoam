@@ -69,7 +69,7 @@ public static class RecommendationExperiment
             try
             {
                 await api.SearchCandidatesInBatchesAsync(settings, scenario.MinStars, scenario.MaxStars,
-                    batch => { candidates.AddRange(batch); return Task.CompletedTask; }, cancellationToken);
+                    (batch, _) => { candidates.AddRange(batch); return Task.CompletedTask; }, cancellationToken);
             }
             catch (Exception exception)
             {
@@ -215,7 +215,7 @@ public static class RecommendationExperiment
 
         List<OsuBeatmapset> candidates = [];
         await api.SearchCandidatesInBatchesAsync(settings, minStars, maxStars,
-            batch => { candidates.AddRange(batch); return Task.CompletedTask; }, cancellationToken);
+            (batch, _) => { candidates.AddRange(batch); return Task.CompletedTask; }, cancellationToken);
 
         // 每个谱面集取最接近区间中位数的难度，避免「总是取最难」带来的偏差
         double center = (minStars + maxStars) / 2;

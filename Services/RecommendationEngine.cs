@@ -19,13 +19,14 @@ public sealed class RecommendationEngine
         IReadOnlySet<int>? excludedBeatmapIds = null,
         Random? random = null,
         bool relaxTagFilter = false,
-        bool isFallback = false)
+        bool isFallback = false,
+        IReadOnlySet<int>? keywordBeatmapsetIds = null)
     {
         if (count <= 0) return [];
         List<OsuBeatmapset> source = beatmapsets.ToList();
         HashSet<int> historyIds = recommendationHistory.Where(id => id > 0).ToHashSet();
         HashSet<int> excludedFresh = [.. excludedBeatmapsetIds, .. historyIds];
-        List<RecommendationItem> result = Rank(source, profile, settings, minimumStars, maximumStars, excludedFresh, count, false, patternLookup, patternPreference, patternWeight, excludedBeatmapIds, random, relaxTagFilter, isFallback).ToList();
+        List<RecommendationItem> result = Rank(source, profile, settings, minimumStars, maximumStars, excludedFresh, count, false, patternLookup, patternPreference, patternWeight, excludedBeatmapIds, random, relaxTagFilter, isFallback, keywordBeatmapsetIds).ToList();
         HashSet<int> selectedIds = [.. excludedBeatmapsetIds, .. result.Select(item => item.BeatmapsetId)];
         if (result.Count >= count) return result;
 
@@ -33,7 +34,7 @@ public sealed class RecommendationEngine
         foreach (int beatmapsetId in recommendationHistory)
         {
             if (beatmapsetId <= 0 || !checkedHistoryIds.Add(beatmapsetId) || selectedIds.Contains(beatmapsetId)) continue;
-            RecommendationItem? reusable = Rank(source.Where(set => set.Id == beatmapsetId), profile, settings, minimumStars, maximumStars, selectedIds, 1, isRecycled: true, patternLookup, patternPreference, patternWeight, excludedBeatmapIds, random, relaxTagFilter, isFallback).FirstOrDefault();
+            RecommendationItem? reusable = Rank(source.Where(set => set.Id == beatmapsetId), profile, settings, minimumStars, maximumStars, selectedIds, 1, isRecycled: true, patternLookup, patternPreference, patternWeight, excludedBeatmapIds, random, relaxTagFilter, isFallback, keywordBeatmapsetIds).FirstOrDefault();
             if (reusable is null) continue;
             result.Add(reusable);
             selectedIds.Add(reusable.BeatmapsetId);
@@ -57,7 +58,8 @@ public sealed class RecommendationEngine
         IReadOnlySet<int>? excludedBeatmapIds = null,
         Random? random = null,
         bool relaxTagFilter = false,
-        bool isFallback = false)
+        bool isFallback = false,
+        IReadOnlySet<int>? keywordBeatmapsetIds = null)
     {
         double starCenter = (minimumStars + maximumStars) / 2;
         double starRadius = Math.Max(0.2, (maximumStars - minimumStars) / 2);
@@ -78,10 +80,14 @@ public sealed class RecommendationEngine
             IReadOnlyList<string> setTags = AppSettings.ParseTags(set.Tags);
             // 「排除 tag」永远是硬条件（用户明确说过不喜欢）。
             if (settings.ExcludedTags.Any(tag => setTags.Contains(tag, StringComparer.OrdinalIgnoreCase))) continue;
+            bool tagMatched = settings.IncludedTags.Count == 0 ||
+                              settings.IncludedTags.Any(tag => setTags.Contains(tag, StringComparer.OrdinalIgnoreCase));
+            // 关键字搜索召回的谱面：曲名/作者可能碰巧含关键字，tag 不作判据，
+            // 后面改用「真实解析出来的键型」裁定（见 keywordSourced 分支）。
+            bool keywordSourced = keywordBeatmapsetIds?.Contains(set.Id) == true;
             // 「白名单 tag」是口味而非硬性要求：候选不够时降级成加权（tagFit 仍然加分），
             // 这样凑数的谱面不会一边被算作「符合口味」一边其实一个 tag 都不沾。
-            if (!relaxTagFilter && settings.IncludedTags.Count > 0 &&
-                !settings.IncludedTags.Any(tag => setTags.Contains(tag, StringComparer.OrdinalIgnoreCase))) continue;
+            if (!relaxTagFilter && !tagMatched && !keywordSourced) continue;
 
             int year = (set.RankedDate ?? set.SubmittedDate)?.Year ?? 0;
             if (year < settings.MinimumYear || year > settings.MaximumYear) continue;
@@ -116,6 +122,17 @@ public sealed class RecommendationEngine
                 // 「只要面谱」：拿得到键型才判，没数据的候选先放过（预取落地后会变严格）。
                 if (settings.PreferLn && pattern is not null && pattern.LnRatio < ManiaPattern.LnChartThreshold)
                     continue;
+
+                // 关键字召回但 tag 不符：只有「解析出来的键型确实符合勾选」才算候选。
+                // 这样曲名/作者里带 jack 的普通谱会被自然滤掉，而真叠键谱即使没打 tag 也能进池。
+                if (!tagMatched && keywordSourced)
+                {
+                    bool patternMatched = usesSelection
+                        ? pattern is not null && pattern.SelectedShare(settings.SelectedPatterns) >= KeywordShareFloor
+                        : pattern is not null && pattern.IsLnChart;
+                    if (!patternMatched)
+                        continue;
+                }
 
                 if (usesSelection)
                 {
@@ -177,6 +194,12 @@ public sealed class RecommendationEngine
     /// 这里取 0.6 让「选了什么」能和星级掰手腕，但不至于完全盖过它。
     /// </summary>
     private const double SelectedPatternWeight = 0.60;
+
+    /// <summary>
+    /// 关键字召回、但 tag 白名单没命中的谱面，要求真实键型占比达到这个门槛才进池。
+    /// 0.25 与预取的「命中」口径一致，也正好是池子里能看出差异的下限。
+    /// </summary>
+    public const double KeywordShareFloor = 0.25;
 
     /// <summary>所选键型的显示名，多选时用 + 连起来（已按当前语言本地化）。</summary>
     private static string selectionLabel(IReadOnlyList<string> patterns) =>

@@ -70,6 +70,11 @@ public partial class MainWindow : Window
     private int verificationGeneration = -1;
     /// <summary>上一轮验证开始时的候选数量：候选翻倍才值得再补一轮。</summary>
     private int verifiedCandidateCount;
+    /// <summary>
+    /// 关键字搜索召回、但 tag 白名单没命中的谱面集。它们的 tag 不可信（可能只是曲名/作者撞词），
+    /// 决断权交给解析出来的真实键型。
+    /// </summary>
+    private readonly HashSet<int> keywordBeatmapsetIds = [];
     /// <summary>当前这一轮的键型验证任务，首曲预下载要等它一会儿。</summary>
     private Task? patternVerification;
     /// <summary>本轮排序的随机种子：同一轮内重排结果可复现，不同轮之间才有变化。</summary>
@@ -600,6 +605,7 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
             // 新的池子：之前那一轮的验证任务作废，排序换一个种子。
             poolGeneration += 1;
             recommendationSeed = Random.Shared.Next();
+            keywordBeatmapsetIds.Clear();
             refreshTagList();
 
             HashSet<int> candidateIds = [];
@@ -609,12 +615,14 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
                 settings,
                 settings.MinimumStars,
                 settings.MaximumStars,
-                async batch =>
+                async (batch, fromKeyword) =>
                 {
                     List<OsuBeatmapset> newSets = batch.Where(set => candidateIds.Add(set.Id)).ToList();
                     if (newSets.Count == 0)
                         return;
 
+                    if (fromKeyword)
+                        keywordBeatmapsetIds.UnionWith(newSets.Select(set => set.Id));
                     candidates = candidates.Concat(newSets).ToList();
                     settings.RecordTags(newSets.SelectMany(set => AppSettings.ParseTags(set.Tags)));
                     refreshTagList();
@@ -646,7 +654,10 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
                 // 只要还有「补位」卡片就一直往后翻页：补位是兜底，不是答案。
                 // 常规 8 页 400 条经常不够（tag 白名单 + 排除已安装），翻到上限为止。
                 wantsMore: () => recommendations.Count(item => !item.IsFallback) < Math.Max(1, settings.PoolSize),
-                maximumPages: OsuApiClient.ExtendedPageBudget);
+                maximumPages: OsuApiClient.ExtendedPageBudget,
+                // 够格的候选已经够填满池子，就不用再翻关键字了。
+                enoughStrictCandidates: () =>
+                    recommendations.Count(item => !item.IsFallback) >= Math.Max(1, settings.PoolSize));
 
             // 每次漫游推进排序轮换，让下一次的候选集合与这次不同。
             settings.SearchRotation++;
@@ -726,7 +737,8 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
             Task<PrefetchResult> run = PatternPrefetcher.RunAsync(
                 candidates, settings, patternLibrary,
                 (beatmapId, token) => osuFileFetcher.TryFetchAsync(beatmapId, token),
-                PatternPrefetcher.DefaultBudget, PatternPrefetcher.DefaultDeadline, progress, sessionCancellation.Token);
+                PatternPrefetcher.DefaultBudget, PatternPrefetcher.DefaultDeadline, progress, sessionCancellation.Token,
+                keywordBeatmapsetIds);
 
             while (!run.IsCompleted)
             {
@@ -921,7 +933,8 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
                 : null,
             new Random(recommendationSeed),
             relaxTagFilter: relaxed,
-            isFallback: relaxed);
+            isFallback: relaxed,
+            keywordBeatmapsetIds: keywordBeatmapsetIds);
     }
 
     /// <summary>
