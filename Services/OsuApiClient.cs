@@ -117,15 +117,24 @@ public sealed class OsuApiClient : IDisposable
         return plan;
     }
 
+    /// <summary>一次漫游的常规页数预算（50 条/页）。</summary>
+    public const int SearchPageBudget = 8;
+
+    /// <summary>池子填不满时最多翻到这么多页，别把一次漫游拖成几分钟。</summary>
+    public const int ExtendedPageBudget = 24;
+
     public async Task SearchCandidatesInBatchesAsync(
         AppSettings settings,
         double minimumStars,
         double maximumStars,
         Func<IReadOnlyList<OsuBeatmapset>, Task> onBatch,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Func<bool>? wantsMore = null,
+        int maximumPages = SearchPageBudget)
     {
         await authorizeAsync(cancellationToken);
         int resultCount = 0;
+        int total = 0;
         string? cursor = null;
         int mode = settings.Mode switch { "taiko" => 1, "fruits" => 2, "mania" => 3, _ => 0 };
         // Status, genre, and language are hard filters applied after the API
@@ -136,7 +145,7 @@ public sealed class OsuApiClient : IDisposable
         if (settings.Mode == "mania")
             query += $" keys={settings.ManiaKeys}";
 
-        const int pageBudget = 8;
+        int pageBudget = Math.Max(SearchPageBudget, maximumPages);
         string[] sortPlan = BuildSortPlan(settings.SearchRotation, pageBudget);
         string? activeSort = null;
 
@@ -167,8 +176,13 @@ public sealed class OsuApiClient : IDisposable
             }
         }
 
-        for (int page = 0; page < pageBudget && resultCount < 400; page++)
+        for (int page = 0; page < pageBudget && resultCount < pageBudget * 50; page++)
         {
+            // 常规预算用完之后，只有当调用方说「池子还没填满」才继续翻：
+            // 筛选条件很窄的时候（tag 白名单 + 排除已安装），400 条候选经常一个都不剩。
+            if (page >= SearchPageBudget && wantsMore?.Invoke() != true)
+                break;
+
             string sort = sortPlan[page];
             if (!string.Equals(sort, activeSort, StringComparison.Ordinal))
             {
@@ -182,6 +196,7 @@ public sealed class OsuApiClient : IDisposable
                 path += $"&cursor_string={Uri.EscapeDataString(cursor)}";
 
             OsuBeatmapsetSearch response = await getAsync<OsuBeatmapsetSearch>(path, cancellationToken);
+            total = Math.Max(total, response.Total);
             if (response.Beatmapsets.Count > 0)
             {
                 resultCount += response.Beatmapsets.Count;
@@ -191,6 +206,9 @@ public sealed class OsuApiClient : IDisposable
             if (string.IsNullOrEmpty(cursor))
                 break;
         }
+
+        if (resultCount > 0 && total > resultCount)
+            AppLog.Info($"候选检索：本轮到 {resultCount} 个谱面集（该查询服务端命中约 {total} 个，页面上限 {pageBudget * 50}）");
     }
 
     private async Task authorizeAsync(CancellationToken cancellationToken)

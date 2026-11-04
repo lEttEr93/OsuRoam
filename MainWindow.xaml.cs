@@ -642,7 +642,11 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
                         setStatus("status.updated", recommendations.Count);
                     }
                 },
-                sessionCancellation.Token);
+                sessionCancellation.Token,
+                // 池子还没填满就一直往后翻页：筛选条件窄的时候（tag 白名单 + 排除已安装）
+                // 常规 8 页 400 条经常一个候选都留不下，不能就这么空手结束。
+                wantsMore: () => recommendations.Count < Math.Max(1, settings.PoolSize),
+                maximumPages: OsuApiClient.ExtendedPageBudget);
 
             // 每次漫游推进排序轮换，让下一次的候选集合与这次不同。
             settings.SearchRotation++;
@@ -826,14 +830,15 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
         if (settings.ExcludeRecentlyPlayed)
             lowerPriority.AddRange(profile.PlayedBeatmapsetIds().Where(id => !inPool.Contains(id)));
 
-        IReadOnlyList<RecommendationItem> desired = recommendationEngine.RankAvoidingHistory(
-            candidates, profile, settings, settings.MinimumStars, settings.MaximumStars,
-            new HashSet<int>(), lowerPriority, Math.Max(1, settings.PoolSize),
-            patternLookup, patternPreference, settings.PatternWeight,
-            settings.ExcludeInstalledBeatmaps && LocalBeatmapLibrary.HasData
-                ? LocalBeatmapLibrary.InstalledBeatmapIds
-                : null,
-            new Random(recommendationSeed));
+        IReadOnlyList<RecommendationItem> desired = rankPool(lowerPriority, relaxInstalledExclusion: false);
+        bool relaxedInstalled = false;
+        // 一个都不剩、而「排除已安装谱面」正开着：这一步大概率是元凶。
+        // 与其给个空池子，不如放开这一条并明说 —— 已安装只是「下过」，不是「不喜欢」。
+        if (desired.Count == 0 && settings.ExcludeInstalledBeatmaps && LocalBeatmapLibrary.HasData)
+        {
+            desired = rankPool(lowerPriority, relaxInstalledExclusion: true);
+            relaxedInstalled = desired.Count > 0;
+        }
 
         bool historyChanged = reconcilePool(desired);
         updatePoolVisibility();
@@ -845,6 +850,12 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
             AppLog.Info($"候选漏斗：{diagnosis.Sets} 个谱面集 → 可推荐难度 {diagnosis.EligibleDiffs} 个" +
                         $"（已装排除 {diagnosis.InstalledDiffs}，状态不符 {diagnosis.StatusMissedSets} 个集，tag 不符 {diagnosis.TagMissedSets} 个集）");
             setStatus("status.filtered", diagnosis.Sets, diagnosis.EligibleDiffs, diagnosis.InstalledDiffs);
+        }
+        else if (relaxedInstalled)
+        {
+            // 明确告诉用户：这一池里有已安装的谱面，是因为严格条件下一个都不剩。
+            AppLog.Info($"已临时忽略「排除已安装谱面」：严格条件下池子为空，放开后 {desired.Count} 首");
+            setStatus("status.relaxedinstalled", desired.Count);
         }
         else if (recommendations.Count > 0 && recommendations.All(item => item.IsRecycled))
         {
@@ -866,9 +877,24 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
     }
 
     /// <summary>
+    /// 按当前设置排一次池子。<paramref name="relaxInstalledExclusion"/> 用于「严格条件下一个都不剩」时的
+    /// 降级尝试：临时忽略「排除已安装谱面」，而不是直接把空池子甩给用户。
+    /// </summary>
+    private IReadOnlyList<RecommendationItem> rankPool(List<int> lowerPriority, bool relaxInstalledExclusion) =>
+        recommendationEngine.RankAvoidingHistory(
+            candidates, profile!, settings, settings.MinimumStars, settings.MaximumStars,
+            new HashSet<int>(), lowerPriority, Math.Max(1, settings.PoolSize),
+            patternLookup, patternPreference, settings.PatternWeight,
+            settings.ExcludeInstalledBeatmaps && !relaxInstalledExclusion && LocalBeatmapLibrary.HasData
+                ? LocalBeatmapLibrary.InstalledBeatmapIds
+                : null,
+            new Random(recommendationSeed));
+
+    /// <summary>
     /// 把池子对齐到新的排序。返回是否有卡片新进池（需要记历史 / 存设置）。
     /// 已经加载过封面、展开过详情的同 id 卡片直接复用，避免重排时闪烁。
     /// </summary>
+
     private bool reconcilePool(IReadOnlyList<RecommendationItem> desired)
     {
         HashSet<int> pinned = pinnedBeatmapsetIds();

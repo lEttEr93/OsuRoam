@@ -34,6 +34,10 @@ public sealed class OsuBeatmapsetSearch
 
     [JsonPropertyName("cursor_string")]
     public string? CursorString { get; set; }
+
+    /// <summary>该查询在服务端命中的总数（osu! 会截到一个上限，仅供参考）。</summary>
+    [JsonPropertyName("total")]
+    public int Total { get; set; }
 }
 
 public sealed class OsuBeatmapset

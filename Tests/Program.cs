@@ -2201,13 +2201,22 @@ static async Task<int> diagAsync(string[] args)
     PlayerProfile profile = await api.BuildProfileAsync(settings.Username, settings.Mode, settings.ManiaKeys, cancellation.Token);
     Console.WriteLine($"档案：样本 {profile.DifficultySampleCount} 张，已玩谱面集 {profile.PlayedBeatmapsetIds().Count} 个");
 
+    // --diag pages:N [installed]：多翻几页，看服务端到底还有多少可拿。
+    int pages = OsuApiClient.SearchPageBudget;
+    foreach (string extra in args.Skip(1))
+    {
+        if (extra.StartsWith("pages:", StringComparison.Ordinal) && int.TryParse(extra[6..], out int parsed))
+            pages = parsed;
+    }
     List<OsuBeatmapset> candidates = [];
+    System.Diagnostics.Stopwatch searchClock = System.Diagnostics.Stopwatch.StartNew();
     await api.SearchCandidatesInBatchesAsync(settings, settings.MinimumStars, settings.MaximumStars, batch =>
     {
         candidates.AddRange(batch);
         return Task.CompletedTask;
-    }, cancellation.Token);
-    Console.WriteLine($"搜索返回：{candidates.Count} 个谱面集（去重后 {candidates.Select(set => set.Id).Distinct().Count()}）");
+    }, cancellation.Token, wantsMore: () => true, maximumPages: pages);
+    searchClock.Stop();
+    Console.WriteLine($"搜索返回：{candidates.Count} 个谱面集（去重后 {candidates.Select(set => set.Id).Distinct().Count()}，页数上限 {pages}，{searchClock.ElapsedMilliseconds} ms）");
     if (candidates.Count == 0)
         return 0;
 
@@ -2251,7 +2260,7 @@ static async Task<int> diagAsync(string[] args)
     foreach ((string reason, int count) in rejected.OrderByDescending(pair => pair.Value))
         Console.WriteLine($"  被拒 {reason}: {count}");
     // --diag installed：连「排除已安装谱面」一起复现（App 里这个开关打开时最容易把池子筛空）。
-    if (args.Length > 1 && args[1] == "installed")
+    if (args.Skip(1).Contains("installed"))
     {
         await LocalBeatmapLibrary.RefreshAsync(store.CacheDirectory, cancellation.Token);
         settings.ExcludeInstalledBeatmaps = true;
