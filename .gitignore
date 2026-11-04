@@ -25,3 +25,6 @@ settings.json
 # ---- 运行时密钥（不进仓库）----
 data/tag-submit-token.txt
 data/*.token
+
+# WPF 生成的中转工程文件
+*_wpftmp.csproj
