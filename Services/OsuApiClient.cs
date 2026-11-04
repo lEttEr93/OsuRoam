@@ -248,9 +248,29 @@ public sealed class OsuApiClient : IDisposable
         if (!string.IsNullOrEmpty(accessToken) && tokenExpiresAt > DateTimeOffset.UtcNow.AddMinutes(1)) return;
         if (string.IsNullOrWhiteSpace(clientId) || string.IsNullOrWhiteSpace(clientSecret))
             throw new InvalidOperationException("请先填写 osu! OAuth Client ID 和 Client Secret。");
-        using HttpResponseMessage response = await http.PostAsJsonAsync("oauth/token", new { client_id = clientId, client_secret = clientSecret, grant_type = "client_credentials", scope = "public" }, cancellationToken);
-        await ensureSuccessAsync(response, cancellationToken);
-        TokenResponse token = (await response.Content.ReadFromJsonAsync<TokenResponse>(cancellationToken: cancellationToken)) ?? throw new InvalidOperationException("osu! OAuth 返回了空响应。");
+
+        // 取 token 这一步同样会撞上代理的 TLS 抖动；不重试的话整次漫游直接失败
+        // （现场日志里的「生成推荐池失败 + SSL connection could not be established」就是这条）。
+        TokenResponse token = default!;
+        for (int attempt = 0; ; attempt += 1)
+        {
+            try
+            {
+                using HttpResponseMessage response = await http.PostAsJsonAsync(
+                    "oauth/token",
+                    new { client_id = clientId, client_secret = clientSecret, grant_type = "client_credentials", scope = "public" },
+                    cancellationToken);
+                await ensureSuccessAsync(response, cancellationToken);
+                token = (await response.Content.ReadFromJsonAsync<TokenResponse>(cancellationToken: cancellationToken))
+                        ?? throw new InvalidOperationException("osu! OAuth 返回了空响应。");
+                break;
+            }
+            catch (Exception exception) when (attempt < 2 && isTransient(exception))
+            {
+                AppLog.Info($"osu! 取 token 失败，重试：{exception.GetType().Name} {exception.Message}");
+                await Task.Delay(TimeSpan.FromSeconds(1.5 * (attempt + 1)), cancellationToken);
+            }
+        }
         accessToken = token.AccessToken;
         tokenExpiresAt = DateTimeOffset.UtcNow.AddSeconds(token.ExpiresIn);
         http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);

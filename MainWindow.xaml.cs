@@ -1056,16 +1056,16 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
         }
 
         List<RecommendationItem> desired = poolDownloadOrder();
-        HashSet<int> desiredIds = [.. desired.Select(item => item.BeatmapsetId)];
-        // 已出池 / 已经不需要的：连同半截文件一起取消（DownloadAsync 里会删 .part）。
+        // 判据用「卡片还在不在池子里、还需不需要下」，**不能**用待下载清单：
+        // 下载一启动状态就不是 Waiting 了，用清单判会把刚启动的下载立刻取消并无限重启。
         foreach ((int beatmapsetId, PoolDownload running) in poolDownloads.ToList())
         {
-            if (desiredIds.Contains(beatmapsetId))
+            if (!PoolDownloadPlanner.ShouldCancel(beatmapsetId, recommendations))
                 continue;
             if (!poolDownloads.Remove(beatmapsetId))
                 continue;
             running.Cancellation.Cancel();
-            AppLog.Info($"预下载取消：set={beatmapsetId}（已不在池子里）");
+            AppLog.Info($"预下载取消：set={beatmapsetId}（已出池或已下完）");
         }
 
         // 够格的候选在等空位，而占着空位的是「凑数」卡片：直接让它让位。
@@ -1079,6 +1079,8 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
                 if (runningItem is not { IsFallback: true })
                     continue;
                 poolDownloads.Remove(beatmapsetId);
+                // 让位过的补位卡不再自动排队，避免「让位→重排→又让位」的抖动。
+                poolDownloadRetried.Add(beatmapsetId);
                 running.Cancellation.Cancel();
                 AppLog.Info($"预下载让位：set={beatmapsetId}（补位卡片，给够格候选腾通道）");
                 break;

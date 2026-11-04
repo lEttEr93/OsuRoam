@@ -68,6 +68,7 @@ testFallbackCardsGetReplacedByStrictOnes();
 testKeywordCandidatesAreJudgedByVerifiedPattern();
 testKeywordCandidatesEnterVerificationQueue();
 testPoolDownloadOrderingPutsQualifyingFirst();
+testDownloadCancelRuleUsesMembershipNotQueue();
 testPatternSearchHints();
 testCacheCleanerSkipsPoolItems();
 testDirtyTagsAreFiltered();
@@ -2935,4 +2936,23 @@ static void testPoolDownloadOrderingPutsQualifyingFirst()
     List<int> retried = [3005];
     List<RecommendationItem> again = PoolDownloadPlanner.Order([failed], null, null, new HashSet<int>(retried));
     assertEqual(0, again.Count, "失败过一次的谱面集不再自动重试");
+}
+
+static void testDownloadCancelRuleUsesMembershipNotQueue()
+{
+    // 线上事故：用「待下载清单」判断要不要取消，会把刚启动的下载立刻取消 → 无限重启。
+    RecommendationItem waiting = poolCard(3101);
+    RecommendationItem downloading = poolCard(3102);
+    downloading.DownloadState = DownloadState.Downloading;
+    RecommendationItem queued = poolCard(3103);
+    queued.DownloadState = DownloadState.Queued;
+    RecommendationItem done = poolCard(3104);
+    done.DownloadState = DownloadState.Downloaded;
+    List<RecommendationItem> pool = [waiting, downloading, queued, done];
+
+    assertTrue(!PoolDownloadPlanner.ShouldCancel(3101, pool), "还在排队、需要下载的不能取消");
+    assertTrue(!PoolDownloadPlanner.ShouldCancel(3102, pool), "正在下载的不能取消（这正是事故点）");
+    assertTrue(!PoolDownloadPlanner.ShouldCancel(3103, pool), "已排队的不能取消");
+    assertTrue(PoolDownloadPlanner.ShouldCancel(3104, pool), "已经下完的不再需要下载，可以释放通道");
+    assertTrue(PoolDownloadPlanner.ShouldCancel(3199, pool), "已经不在池子里的必须取消");
 }

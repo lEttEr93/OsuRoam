@@ -23,7 +23,9 @@ public static class PoolDownloadPlanner
         {
             if (item.DownloadState is not (DownloadState.Waiting or DownloadState.Failed))
                 continue;
-            if (item.DownloadState == DownloadState.Failed && alreadyRetried.Contains(item.BeatmapsetId))
+            // 失败过、或者为了给够格候选让位而被取消的，都不再自动重下：
+            // 否则「让位 → 状态回到 Waiting → 又被排上 → 再让位」会来回抖。
+            if (alreadyRetried.Contains(item.BeatmapsetId))
                 continue;
             ordered.Add(item);
         }
@@ -31,6 +33,23 @@ public static class PoolDownloadPlanner
         [
             .. ordered.OrderBy(item => priority(item, playing, preparedNext))
         ];
+    }
+
+    /// <summary>
+    /// 在途下载该不该取消。判据必须是「卡片是否还在池子里 / 是否已经不需要下载」，
+    /// **不能**用「待下载清单」—— 那张卡一旦开始下载状态就不再是 Waiting，
+    /// 用它当判据会把刚启动的下载立刻取消，取消又把状态打回 Waiting，于是无限重启
+    /// （线上出现过每秒 2800 次取消的循环，所有下载都下不完）。
+    /// </summary>
+    public static bool ShouldCancel(int beatmapsetId, IEnumerable<RecommendationItem> pool)
+    {
+        foreach (RecommendationItem item in pool)
+        {
+            if (item.BeatmapsetId != beatmapsetId)
+                continue;
+            return item.DownloadState is DownloadState.Downloaded or DownloadState.Imported or DownloadState.Importing;
+        }
+        return true;
     }
 
     private static int priority(RecommendationItem item, RecommendationItem? playing, RecommendationItem? preparedNext)
