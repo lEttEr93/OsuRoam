@@ -42,6 +42,9 @@ public sealed class ManiaPattern
 
     public PatternSource Source { get; set; } = PatternSource.Osu;
 
+    /// <summary>键型分析器的版本号；升级分析算法时递增，旧缓存按「过期」处理。</summary>
+    public int AnalyzerVersion { get; set; }
+
     public DateTimeOffset AnalyzedAtUtc { get; set; } = DateTimeOffset.UtcNow;
 
     [JsonIgnore]

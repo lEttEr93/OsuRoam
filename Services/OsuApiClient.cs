@@ -156,6 +156,11 @@ public sealed class OsuApiClient : IDisposable
                     AppLog.Info($"键型关键字搜索「{hint}」：{response.Beatmapsets.Count} 个谱面集");
                 }
             }
+            catch (OperationCanceledException)
+            {
+                // 用户取消不是「这条关键字没搜到」，不能吞掉。
+                throw;
+            }
             catch (Exception exception)
             {
                 AppLog.Info($"键型关键字搜索「{hint}」跳过：{exception.GetType().Name} {exception.Message}");

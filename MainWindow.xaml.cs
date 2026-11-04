@@ -688,19 +688,19 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
         try
         {
             System.Diagnostics.Stopwatch clock = System.Diagnostics.Stopwatch.StartNew();
-            Progress<(int Done, int Total)> progress = new(value => setStatus("status.prefetch", value.Done, value.Total));
+            Progress<(int Verified, int Hits)> progress = new(value => setStatus("status.prefetch", value.Verified, value.Hits));
             PrefetchResult result = await PatternPrefetcher.RunAsync(
                 candidates, settings, patternLibrary,
                 (beatmapId, token) => osuFileFetcher.TryFetchAsync(beatmapId, token),
-                PatternPrefetcher.DefaultBudget, progress, sessionCancellation.Token);
+                PatternPrefetcher.DefaultBudget, PatternPrefetcher.DefaultDeadline, progress, sessionCancellation.Token);
 
             if (result.Parsed > 0)
                 await patternLibrary.SaveAsync();
 
             clock.Stop();
-            AppLog.Info($"键型预取：候选 {result.Considered}，抓 {result.Attempted}，解析 {result.Parsed}，命中 {result.Hits}" +
+            AppLog.Info($"键型预取：候选 {result.Considered}，尝试 {result.Attempted}，取回 {result.Completed}，解析 {result.Parsed}，命中 {result.Hits}" +
                         $"（{clock.ElapsedMilliseconds} ms）" +
-                        (result.BudgetExhausted ? "，预算用完，下一轮继续" : string.Empty));
+                        (result.DeadlineReached ? "，到达截止时间" : result.BudgetExhausted ? "，预算用完" : string.Empty));
         }
         catch (OperationCanceledException)
         {

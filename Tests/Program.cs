@@ -38,6 +38,7 @@ testBpmDoesNotAffectRanking();
 testPatternSelectionNormalizes();
 testSelectedPatternShapesRanking();
 testPatternPrefetchFillsLibrary();
+testPatternLibraryRejectsStaleCache();
 testPatternSearchHints();
 testCacheCleanerSkipsPoolItems();
 testDirtyTagsAreFiltered();
@@ -1660,10 +1661,12 @@ static string note(int keys, int column, int time, int? endTime = null)
 
 static void testPatternPrefetchFillsLibrary()
 {
-    // 预取：把没有真实键型的候选抓一遍、解析、入库，命中够了就停。
+    // 预取：把没有真实键型的候选抓一遍、解析、入库。
     AppSettings settings = recommendationSettings();
-    settings.PoolSize = 1;
+    settings.PoolSize = 10; // 目标数高于候选数，避免提前停导致次数不稳定
     settings.PreferLn = true;
+    settings.MinimumStars = 1;
+    settings.MaximumStars = 10;
     List<OsuBeatmapset> sets = [maniaSet(900, 9001, 4), maniaSet(901, 9002, 4), maniaSet(902, 9003, 4)];
     PatternLibrary library = new();
 
@@ -1683,39 +1686,55 @@ static void testPatternPrefetchFillsLibrary()
     }
 
     PrefetchResult result = PatternPrefetcher.RunAsync(
-        sets, settings, library, fetch, PatternPrefetcher.DefaultBudget, null, CancellationToken.None)
-        .GetAwaiter().GetResult();
+        sets, settings, library, fetch, PatternPrefetcher.DefaultBudget, PatternPrefetcher.DefaultDeadline,
+        null, CancellationToken.None).GetAwaiter().GetResult();
 
-    assertEqual(3, result.Attempted, "三张谱都该被抓一次");
+    assertEqual(3, result.Attempted, "三张谱都该被尝试一次");
     assertEqual(3, result.Parsed, "三张谱都该解析成功");
     assertEqual(2, result.Hits, "两张长条谱应算命中（只要面谱）");
-    assertTrue(library.TryGet(9001) is { IsInferred: false }, "预取结果应以真实键型入库");
+    assertTrue(library.TryGetVerified(9001) is { IsInferred: false } verified &&
+               verified.AnalyzerVersion == ManiaPatternAnalyzer.Version, "预取结果应是「当前分析器版本」的可信键型");
     assertEqual(3, fetched, "不该重复抓同一张谱");
 
     // 预算会限制单轮抓取量
     PatternLibrary second = new();
     PrefetchResult limited = PatternPrefetcher.RunAsync(
-        sets, settings, second, fetch, 1, null, CancellationToken.None).GetAwaiter().GetResult();
+        sets, settings, second, fetch, 1, PatternPrefetcher.DefaultDeadline, null, CancellationToken.None)
+        .GetAwaiter().GetResult();
     assertEqual(1, limited.Attempted, "预算为 1 时只抓一张");
 
-    // tag 里点名了所选键型的候选要优先抓，哪怕它离目标星级更远
+    // 排序按「乐观分」：星级中心的谱优先于 tag 命中但星级偏远的谱
     AppSettings hinted = recommendationSettings();
-    hinted.PoolSize = 1;
+    hinted.PoolSize = 10;
     hinted.SelectedPatterns = ["Jacks"];
     hinted.MinimumStars = 4;
     hinted.MaximumStars = 5;
-    OsuBeatmapset tagged = maniaSet(910, 9101, 4);
-    tagged.Tags = "jack chordjack";
-    tagged.Beatmaps[0].DifficultyRating = 9;
-    OsuBeatmapset plain = maniaSet(911, 9102, 4);
-    plain.Beatmaps[0].DifficultyRating = 4.5;
+    OsuBeatmapset farTagged = maniaSet(910, 9101, 4);
+    farTagged.Tags = "jack chordjack";
+    farTagged.Beatmaps[0].DifficultyRating = 4.0;
+    OsuBeatmapset centerPlain = maniaSet(911, 9102, 4);
+    centerPlain.Beatmaps[0].DifficultyRating = 4.5;
     List<int> order = [];
-    PatternPrefetcher.RunAsync([plain, tagged], hinted, new PatternLibrary(), (beatmapId, _) =>
+    PatternPrefetcher.RunAsync([farTagged, centerPlain], hinted, new PatternLibrary(), (beatmapId, _) =>
     {
         order.Add(beatmapId);
         return Task.FromResult<string?>(osuFile(4, lnNotes));
-    }, 1, null, CancellationToken.None).GetAwaiter().GetResult();
-    assertEqual(9101, order[0], "tag 命中所选键型的候选应优先预取");
+    }, 1, PatternPrefetcher.DefaultDeadline, null, CancellationToken.None).GetAwaiter().GetResult();
+    assertEqual(9102, order[0], "星级中心的谱应优先验证，tag 命中不能越级抢占预算");
+
+    // 星级相同时，tag 命中作为次级排序胜出
+    OsuBeatmapset sameStarTagged = maniaSet(920, 9201, 4);
+    sameStarTagged.Tags = "jack";
+    sameStarTagged.Beatmaps[0].DifficultyRating = 4.5;
+    OsuBeatmapset sameStarPlain = maniaSet(921, 9202, 4);
+    sameStarPlain.Beatmaps[0].DifficultyRating = 4.5;
+    order.Clear();
+    PatternPrefetcher.RunAsync([sameStarPlain, sameStarTagged], hinted, new PatternLibrary(), (beatmapId, _) =>
+    {
+        order.Add(beatmapId);
+        return Task.FromResult<string?>(osuFile(4, lnNotes));
+    }, 1, PatternPrefetcher.DefaultDeadline, null, CancellationToken.None).GetAwaiter().GetResult();
+    assertEqual(9201, order[0], "星级相同时 tag 命中应排在前面");
 }
 
 static void testPatternSearchHints()
@@ -1739,6 +1758,28 @@ static void testPatternSearchHints()
     settings.Mode = "osu";
     settings.SelectedPatterns = ["Jacks"];
     assertEqual(0, PatternSearchHints.For(settings).Count, "非 mania 不带键型关键字");
+}
+
+static void testPatternLibraryRejectsStaleCache()
+{
+    PatternLibrary library = new();
+    library.Put(new ManiaPattern
+    {
+        BeatmapId = 1, Source = PatternSource.Osu, AnalyzerVersion = ManiaPatternAnalyzer.Version
+    });
+    assertTrue(library.TryGetVerified(1) is not null, "当前分析器版本的真实解析应可信");
+
+    library.Put(new ManiaPattern
+    {
+        BeatmapId = 2, Source = PatternSource.Osu, AnalyzerVersion = ManiaPatternAnalyzer.Version - 1
+    });
+    assertTrue(library.TryGetVerified(2) is null, "旧分析器版本的缓存不可信，应重新解析");
+
+    library.Put(new ManiaPattern
+    {
+        BeatmapId = 3, Source = PatternSource.Tags, AnalyzerVersion = ManiaPatternAnalyzer.Version
+    });
+    assertTrue(library.TryGetVerified(3) is null, "tag 推断不可信，只能当调度线索");
 }
 
 static void testPatternAnalyzerDetectsStream()

@@ -3,26 +3,36 @@ using OsuRoam.Models;
 namespace OsuRoam.Services;
 
 /// <summary>一次预取的结果。</summary>
-public sealed record PrefetchResult(int Considered, int Attempted, int Parsed, int Hits, bool BudgetExhausted);
+public sealed record PrefetchResult(
+    int Considered,
+    int Attempted,
+    int Completed,
+    int Parsed,
+    int Hits,
+    bool BudgetExhausted,
+    bool DeadlineReached);
 
 /// <summary>
-/// 键型预取：把候选池里「还没有真实键型」的谱面按值得抓的顺序排一遍，
-/// 抓 <c>.osu</c>、解析、入库，直到**命中够用**或预算烧完。
+/// 键型预取：把候选里「还没有可信键型」的难度按**期望收益/耗时**排队，
+/// 抓 <c>.osu</c>、解析、入库，直到当前池子够用、预算烧完或到达截止时间。
 ///
-/// 按设计笔记第 5 条：目标是「池子填满」，不是「抓够 N 张」。
-/// 所以先按星级接近程度排序（离目标星级越近越值得抓），命中够了立刻停，
-/// 剩下的候选留给下一轮（第 6 条：未露面的候选是缓冲）。
+/// 排序用「估计能进前 N 的分」（乐观分），不是单纯的星级距离或 tag 优先：
+/// 星级项跨度 0.73 大于 tag 提示能带来的 0.595，所以靠近星级中心的谱会排在
+/// 「tag 命中但星级偏得远」的谱前面 —— 后者压根赢不了，不该占用预算。
 /// </summary>
 public static class PatternPrefetcher
 {
-    /// <summary>
-    /// 一轮最多抓这么多张。实测单张 2 秒左右（87 KB / 39 KB 两张分别是 2.4 s / 1.9 s），
-    /// 4 路并发下 20 张约 10 秒；命中够了会提前停，抓过的下次直接从库里读。
-    /// </summary>
-    public const int DefaultBudget = 20;
+    /// <summary>整个操作最多发起这么多次 HTTP 尝试（不是每页）。</summary>
+    public const int DefaultBudget = 16;
+
+    /// <summary>从开始预取算起的总截止时间。</summary>
+    public static readonly TimeSpan DefaultDeadline = TimeSpan.FromSeconds(10);
+
+    /// <summary>单张预估耗时，用来算「每秒收益」；实测约 2 秒。</summary>
+    private const double EstimatedSecondsPerFetch = 2.0;
 
     /// <summary>命中判定：勾选的键型占这张谱 ≥ 这个比例。</summary>
-    private const double HitShareThreshold = 0.5;
+    public const double HitShareThreshold = 0.5;
 
     public static async Task<PrefetchResult> RunAsync(
         IEnumerable<OsuBeatmapset> candidates,
@@ -30,84 +40,114 @@ public static class PatternPrefetcher
         PatternLibrary library,
         Func<int, CancellationToken, Task<string?>> fetch,
         int budget,
-        IProgress<(int Done, int Total)>? progress,
+        TimeSpan deadline,
+        IProgress<(int Verified, int Hits)>? progress,
         CancellationToken cancellationToken)
     {
-        List<(int BeatmapId, int BeatmapsetId, double Stars, bool TagHint)> pending =
-            collect(candidates, settings, library);
+        DateTimeOffset started = DateTimeOffset.UtcNow;
+        List<Candidate> pending = collect(candidates, settings, library);
         int considered = pending.Count;
         if (pending.Count == 0)
-            return new PrefetchResult(0, 0, 0, 0, false);
+            return new PrefetchResult(0, 0, 0, 0, 0, false, false);
 
-        // 排两档：tag 里已经点名的先抓（关键字命中率高得离谱），再按离目标星级的距离。
-        double center = (settings.MinimumStars + settings.MaximumStars) / 2;
+        IReadOnlyList<string> hints = PatternSearchHints.For(settings);
+        foreach (Candidate candidate in pending)
+            candidate.Score(hints, settings);
         pending.Sort((left, right) =>
         {
-            int byHint = right.TagHint.CompareTo(left.TagHint);
-            return byHint != 0
-                ? byHint
-                : Math.Abs(left.Stars - center).CompareTo(Math.Abs(right.Stars - center));
+            int byPriority = right.Optimistic.CompareTo(left.Optimistic);
+            return byPriority != 0 ? byPriority : left.BeatmapId.CompareTo(right.BeatmapId);
         });
 
-        int target = Math.Max(4, settings.PoolSize * 2);
-        List<(int BeatmapId, int BeatmapsetId, double Stars, bool TagHint)> batch =
-            pending.Take(Math.Max(1, budget)).ToList();
+        int target = Math.Max(1, settings.PoolSize);
+        List<Candidate> queue = pending.Take(Math.Max(1, budget)).ToList();
 
+        object gate = new();
         int attempted = 0;
+        int completed = 0;
         int parsed = 0;
         int hits = 0;
-        int next = -1;
-        object gate = new();
+        int explored = 0;
+        bool deadlineReached = false;
+        bool budgetExhausted = false;
 
-        using CancellationTokenSource stop = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         async Task worker()
         {
             while (true)
             {
-                int index;
+                Candidate? candidate;
                 lock (gate)
                 {
-                    if (stop.IsCancellationRequested || hits >= target)
+                    if (hits >= target || cancellationToken.IsCancellationRequested)
                         return;
-                    index = Interlocked.Increment(ref next);
-                    if (index >= batch.Count)
+                    if (attempted >= budget)
+                    {
+                        budgetExhausted = true;
                         return;
+                    }
+                    if (DateTimeOffset.UtcNow - started >= deadline)
+                    {
+                        deadlineReached = true;
+                        return;
+                    }
+
+                    candidate = takeNext(queue, ref explored, hints);
+                    if (candidate is null)
+                        return;
+                    attempted += 1;
                 }
 
-                (int beatmapId, int beatmapsetId, _, _) = batch[index];
-                string? text = await fetch(beatmapId, cancellationToken).ConfigureAwait(false);
-                bool ingested = false;
-                if (text is not null)
+                string? text = await fetch(candidate.BeatmapId, cancellationToken).ConfigureAwait(false);
+                if (text is null)
+                    continue;
+
+                bool ingested = library.Ingest(text, candidate.BeatmapId, candidate.BeatmapsetId);
+                lock (gate)
                 {
-                    lock (gate)
-                    {
-                        attempted += 1;
-                    }
-                    ingested = library.Ingest(text, beatmapId, beatmapsetId);
+                    completed += 1;
                     if (ingested)
                     {
-                        lock (gate)
-                        {
-                            parsed += 1;
-                            if (isHit(library.TryGet(beatmapId), settings))
-                                hits += 1;
-                        }
+                        parsed += 1;
+                        if (isHit(library.TryGetVerified(candidate.BeatmapId), settings))
+                            hits += 1;
                     }
                 }
-
-                int done;
-                lock (gate)
-                {
-                    done = attempted;
-                }
-                progress?.Report((done, Math.Min(batch.Count, target * 2)));
+                progress?.Report((parsed, hits));
             }
         }
 
-        int workers = Math.Min(4, batch.Count);
+        int workers = Math.Min(4, queue.Count);
         await Task.WhenAll(Enumerable.Range(0, workers).Select(_ => worker())).ConfigureAwait(false);
-        bool exhausted = attempted >= batch.Count && hits < target;
-        return new PrefetchResult(considered, attempted, parsed, hits, exhausted);
+        if (DateTimeOffset.UtcNow - started >= deadline)
+            deadlineReached = true;
+        return new PrefetchResult(considered, attempted, completed, parsed, hits, budgetExhausted, deadlineReached);
+    }
+
+    /// <summary>
+    /// 每 4 个名额留 1 个给「基础分最高但没命中 tag」的候选：
+    /// 否则预取永远只验证已经贴了标签的谱，没标签的那部分永远学不到。
+    /// </summary>
+    private static Candidate? takeNext(List<Candidate> queue, ref int explored, IReadOnlyList<string> hints)
+    {
+        if (hints.Count > 0 && (queue.Count + explored) % 4 == 3)
+        {
+            Candidate? best = queue
+                .Where(candidate => candidate.HintStrength <= 0.15)
+                .OrderByDescending(candidate => candidate.BaseScore)
+                .FirstOrDefault();
+            if (best is not null)
+            {
+                queue.Remove(best);
+                explored += 1;
+                return best;
+            }
+        }
+
+        if (queue.Count == 0)
+            return null;
+        Candidate next = queue[0];
+        queue.RemoveAt(0);
+        return next;
     }
 
     private static bool isHit(ManiaPattern? pattern, AppSettings settings)
@@ -121,33 +161,93 @@ public static class PatternPrefetcher
         return true;
     }
 
-    private static List<(int BeatmapId, int BeatmapsetId, double Stars, bool TagHint)> collect(
+    private static List<Candidate> collect(
         IEnumerable<OsuBeatmapset> candidates,
         AppSettings settings,
         PatternLibrary library)
     {
-        IReadOnlyList<string> hints = PatternSearchHints.For(settings);
-        List<(int, int, double, bool)> pending = [];
+        List<Candidate> pending = [];
         HashSet<int> seen = [];
         foreach (OsuBeatmapset set in candidates)
         {
-            // tag 里已经点名了所选键型 → 值得先抓，命中率远高于盲抽。
-            bool tagHint = hints.Count > 0 && hints.Any(hint =>
-                (set.Tags ?? string.Empty).Contains(hint, StringComparison.OrdinalIgnoreCase));
             foreach (OsuBeatmap beatmap in set.Beatmaps)
             {
-                if (!string.Equals(beatmap.Mode, settings.Mode, StringComparison.OrdinalIgnoreCase))
+                if (!CandidateFilter.Eligible(set, beatmap, settings))
                     continue;
-                if (settings.Mode == "mania" && (int)Math.Round(beatmap.CircleSize) != settings.ManiaKeys)
+                if (!seen.Add(beatmap.Id))
                     continue;
-                if (beatmap.Id <= 0 || !seen.Add(beatmap.Id))
+                // 只认「真实解析 + 当前分析器版本」；tag 推断和旧版本缓存都还要重抓。
+                if (library.TryGetVerified(beatmap.Id) is not null)
                     continue;
-                // tag 推断出来的不算「有真实键型」——那是预取要替换掉的东西。
-                if (library.TryGet(beatmap.Id) is { IsInferred: false })
-                    continue;
-                pending.Add((beatmap.Id, set.Id, beatmap.DifficultyRating, tagHint));
+                pending.Add(new Candidate(set, beatmap));
             }
         }
         return pending;
+    }
+
+    private sealed class Candidate
+    {
+        public Candidate(OsuBeatmapset set, OsuBeatmap beatmap)
+        {
+            Set = set;
+            Beatmap = beatmap;
+            BeatmapId = beatmap.Id;
+            BeatmapsetId = set.Id;
+        }
+
+        public OsuBeatmapset Set { get; }
+        public OsuBeatmap Beatmap { get; }
+        public int BeatmapId { get; }
+        public int BeatmapsetId { get; }
+        public double BaseScore { get; private set; }
+        public double HintStrength { get; private set; }
+        public double Optimistic { get; private set; }
+
+        /// <summary>
+        /// 基础分 = 星级项 + 时长项（和正式评分同构，但没有玩家画像，mapper 项置 0）。
+        /// </summary>
+        public void Score(IReadOnlyList<string> hints, AppSettings settings)
+        {
+            double center = (settings.MinimumStars + settings.MaximumStars) / 2;
+            double radius = Math.Max(0.2, (settings.MaximumStars - settings.MinimumStars) / 2);
+            double starFit = Math.Clamp(1 - Math.Abs(Beatmap.DifficultyRating - center) / radius, 0, 1);
+            double lengthFit = Math.Clamp(1 - Math.Abs(Beatmap.TotalLength - 150) / 180.0, 0, 1);
+            BaseScore = starFit * 0.73 + lengthFit * 0.12;
+
+            HintStrength = hintStrength(hints);
+            // mu 是 SelectedShare 的乐观估计，0.20 是探索余量（不是置信度）。
+            Optimistic = BaseScore + 0.70 * Math.Min(1, HintStrength + 0.20);
+        }
+
+        private double hintStrength(IReadOnlyList<string> hints)
+        {
+            if (hints.Count == 0)
+                return 0.15;
+
+            IReadOnlyList<string> tags = AppSettings.ParseTags(Set.Tags);
+            if (hints.Any(hint => tags.Any(tag => containsWord(tag, hint))))
+                return 0.60;
+
+            string name = $"{Set.Title} {Set.Artist} {Beatmap.Version}";
+            return hints.Any(hint => containsWord(name, hint)) ? 0.35 : 0.15;
+        }
+
+        /// <summary>按整词判断，避免把作者名里的 jack（如 jackson）当成同等级证据。</summary>
+        private static bool containsWord(string text, string word)
+        {
+            if (string.IsNullOrEmpty(text))
+                return false;
+            int index = 0;
+            while ((index = text.IndexOf(word, index, StringComparison.OrdinalIgnoreCase)) >= 0)
+            {
+                bool leftOk = index == 0 || !char.IsLetterOrDigit(text[index - 1]);
+                int end = index + word.Length;
+                bool rightOk = end >= text.Length || !char.IsLetterOrDigit(text[end]);
+                if (leftOk && rightOk)
+                    return true;
+                index = end;
+            }
+            return false;
+        }
     }
 }

@@ -13,14 +13,31 @@ public sealed class PatternLibrary
 {
     private readonly string directory = StoragePaths.Root;
 
+    /// <summary>多个预取任务会并发 Ingest，字典本身不是线程安全的。</summary>
+    private readonly object gate = new();
     private Dictionary<int, ManiaPattern> patterns = [];
     private bool dirty;
+    private int revision;
 
     private string FilePath => Path.Combine(directory, "patterns.json");
 
-    public int Count => patterns.Count;
+    public int Count
+    {
+        get
+        {
+            lock (gate)
+                return patterns.Count;
+        }
+    }
 
-    public int ParsedCount => patterns.Values.Count(pattern => !pattern.IsInferred);
+    public int ParsedCount
+    {
+        get
+        {
+            lock (gate)
+                return patterns.Values.Count(pattern => !pattern.IsInferred);
+        }
+    }
 
     public async Task LoadAsync()
     {
@@ -29,25 +46,44 @@ public sealed class PatternLibrary
             if (!File.Exists(FilePath))
                 return;
             await using FileStream stream = File.OpenRead(FilePath);
-            patterns = await JsonSerializer.DeserializeAsync<Dictionary<int, ManiaPattern>>(stream) ?? [];
+            Dictionary<int, ManiaPattern> loaded =
+                await JsonSerializer.DeserializeAsync<Dictionary<int, ManiaPattern>>(stream) ?? [];
+            lock (gate)
+                patterns = loaded;
         }
         catch (Exception exception)
         {
             AppLog.Error("读取键型库失败", exception);
-            patterns = [];
+            lock (gate)
+                patterns = [];
         }
     }
 
     public async Task SaveAsync()
     {
-        if (!dirty)
-            return;
+        Dictionary<int, ManiaPattern> snapshot;
+        int snapshotRevision;
+        lock (gate)
+        {
+            if (!dirty)
+                return;
+            snapshot = new Dictionary<int, ManiaPattern>(patterns);
+            snapshotRevision = revision;
+        }
+
         try
         {
             Directory.CreateDirectory(directory);
-            await using FileStream stream = File.Create(FilePath);
-            await JsonSerializer.SerializeAsync(stream, patterns, new JsonSerializerOptions { WriteIndented = false });
-            dirty = false;
+            // 先写临时文件再原子替换：保存期间新写入的结果不会写出半截文件，也不会被 dirty=false 吞掉。
+            string temp = FilePath + ".tmp";
+            await using (FileStream stream = File.Create(temp))
+                await JsonSerializer.SerializeAsync(stream, snapshot, new JsonSerializerOptions { WriteIndented = false });
+            File.Move(temp, FilePath, true);
+            lock (gate)
+            {
+                if (revision == snapshotRevision)
+                    dirty = false;
+            }
         }
         catch (Exception exception)
         {
@@ -55,18 +91,40 @@ public sealed class PatternLibrary
         }
     }
 
-    public ManiaPattern? TryGet(int beatmapId) =>
-        beatmapId > 0 && patterns.TryGetValue(beatmapId, out ManiaPattern? pattern) ? pattern : null;
+    public ManiaPattern? TryGet(int beatmapId)
+    {
+        if (beatmapId <= 0)
+            return null;
+        lock (gate)
+            return patterns.TryGetValue(beatmapId, out ManiaPattern? pattern) ? pattern : null;
+    }
+
+    /// <summary>
+    /// 「已可信」的键型：真实解析、且分析器版本与当前一致。
+    /// tag 推断和旧版本缓存都不算 —— 它们只配当调度线索，不能当推荐依据。
+    /// </summary>
+    public ManiaPattern? TryGetVerified(int beatmapId)
+    {
+        ManiaPattern? pattern = TryGet(beatmapId);
+        if (pattern is null || pattern.IsInferred || pattern.AnalyzerVersion != ManiaPatternAnalyzer.Version)
+            return null;
+        return pattern;
+    }
 
     /// <summary>同谱面若已有真实键型，则不被 tag 推断覆盖。</summary>
     public void Put(ManiaPattern pattern)
     {
         if (pattern.BeatmapId <= 0)
             return;
-        if (patterns.TryGetValue(pattern.BeatmapId, out ManiaPattern? existing) && !existing.IsInferred && pattern.IsInferred)
-            return;
-        patterns[pattern.BeatmapId] = pattern;
-        dirty = true;
+        lock (gate)
+        {
+            if (patterns.TryGetValue(pattern.BeatmapId, out ManiaPattern? existing) &&
+                !existing.IsInferred && pattern.IsInferred)
+                return;
+            patterns[pattern.BeatmapId] = pattern;
+            dirty = true;
+            revision += 1;
+        }
     }
 
     public void PutInferred(int beatmapId, int beatmapsetId, IReadOnlyList<string> tags, int keys)
@@ -210,7 +268,9 @@ public static class PatternPreference
             if (keys > 0 && (int)Math.Round(beatmap.CircleSize) != keys)
                 continue;
 
-            ManiaPattern? pattern = library.TryGet(beatmap.Id) ?? library.TryGet(beatmap.BeatmapsetId);
+            // 只按 beatmapId 查：密钥空间是 beatmapId，混用 beatmapsetId 会读到别的谱面。
+            // 查不到时用该谱面集的 tag 推断，比直接读错一条更安全。
+            ManiaPattern? pattern = library.TryGet(beatmap.Id);
             if (pattern is null && score.Beatmapset is { } set)
                 pattern = PatternTags.Infer(AppSettings.ParseTags(set.Tags).ToList(), keys);
             if (pattern is null)
