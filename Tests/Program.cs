@@ -2814,11 +2814,33 @@ static async Task<int> verifyAsync(string[] args)
         candidates = [.. candidates.GroupBy(set => set.Id).Select(group => group.First())];
         long searchMs = clock.ElapsedMilliseconds;
 
+        // 准入：按「先判键型再进候选」跑 —— 够格攒到 PoolSize×2 就停，最多 3 轮 × 12 张。
         clock.Restart();
-        PrefetchResult prefetch = await PatternPrefetcher.RunAsync(
-            candidates, settings, library, (beatmapId, token) => fetcher.TryFetchAsync(beatmapId, token),
-            PatternPrefetcher.DefaultBudget, PatternPrefetcher.DefaultDeadline, null, cancellation.Token, keywordSets);
+        HashSet<int> admitted = [];
+        HashSet<int> mismatch = [];
+        int wanted = poolSize * 2;
+        PrefetchResult prefetch = new(0, 0, 0, 0, 0, false, false);
+        for (int admitRound = 0; admitRound < 3; admitRound += 1)
+        {
+            int before = admitted.Count;
+            prefetch = await PatternPrefetcher.RunAsync(
+                candidates, settings, library, (beatmapId, token) => fetcher.TryFetchAsync(beatmapId, token),
+                12, TimeSpan.FromSeconds(8), null, cancellation.Token, keywordSets,
+                onIngested: (beatmapId, beatmapsetId) =>
+                {
+                    if (CandidateAdmission.IsStrict(library.TryGetVerified(beatmapId), settings))
+                        admitted.Add(beatmapsetId);
+                    else
+                        mismatch.Add(beatmapsetId);
+                },
+                targetOverride: wanted);
+            if (admitted.Count >= wanted || admitted.Count == before)
+                break;
+        }
         long verifyMs = clock.ElapsedMilliseconds;
+        List<OsuBeatmapset> admittedSets = [.. candidates.Where(set => admitted.Contains(set.Id))];
+        List<OsuBeatmapset> mismatchSets = [.. candidates.Where(set => mismatch.Contains(set.Id))];
+        Console.WriteLine($"  准入：达标 {admittedSets.Count} 个谱面集，备用 {mismatchSets.Count} 个（从 {candidates.Count} 个候选里判出）");
 
         List<int> lowerPriority = [.. settings.RecommendationHistory];
         if (settings.ExcludeRecentlyPlayed)
@@ -2830,13 +2852,13 @@ static async Task<int> verifyAsync(string[] args)
         Func<int, ManiaPattern?> lookup = id => library.TryGetVerified(id);
 
         IReadOnlyList<RecommendationItem> strict = new RecommendationEngine().RankAvoidingHistory(
-            candidates, profile, settings, settings.MinimumStars, settings.MaximumStars,
+            admittedSets, profile, settings, settings.MinimumStars, settings.MaximumStars,
             new HashSet<int>(), lowerPriority, poolSize, lookup, null, settings.PatternWeight, installed, seed,
             false, false, keywordSets);
         IReadOnlyList<RecommendationItem> filler = strict.Count >= poolSize
             ? []
             : new RecommendationEngine().RankAvoidingHistory(
-                candidates, profile, settings, settings.MinimumStars, settings.MaximumStars,
+                mismatchSets, profile, settings, settings.MinimumStars, settings.MaximumStars,
                 new HashSet<int>(strict.Select(item => item.BeatmapsetId)), [], poolSize - strict.Count,
                 lookup, null, settings.PatternWeight, installed, seed, true, true, keywordSets);
         List<RecommendationItem> pool = [.. strict, .. filler];
