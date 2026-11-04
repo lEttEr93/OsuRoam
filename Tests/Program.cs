@@ -53,6 +53,9 @@ testPoolReconcilerStreamsReplacements();
 testStreamingRerankIsReproducible();
 testStreamingVerificationReordersPool();
 testCandidateDiagnosisExplainsEmptyPool();
+testFallbackFillsWhenTagFilterTooNarrow();
+testFallbackAllowsPlayedButKeepsExcludedTags();
+testFallbackCardsGetReplacedByStrictOnes();
 testPatternSearchHints();
 testCacheCleanerSkipsPoolItems();
 testDirtyTagsAreFiltered();
@@ -2295,6 +2298,25 @@ static async Task<int> diagAsync(string[] args)
             : null,
         new Random(1));
     Console.WriteLine($"排序结果：{ranked.Count} 首（池子大小 {settings.PoolSize}）");
+
+    // 两段式：严格条件优先，不够再放宽补位（和 MainWindow.rankPool 一致）。
+    IReadOnlySet<int>? installed = settings.ExcludeInstalledBeatmaps && LocalBeatmapLibrary.HasData
+        ? LocalBeatmapLibrary.InstalledBeatmapIds
+        : null;
+    IReadOnlyList<RecommendationItem> strictPass = new RecommendationEngine().RankAvoidingHistory(
+        candidates, profile, settings, settings.MinimumStars, settings.MaximumStars,
+        new HashSet<int>(), lowerPriority, Math.Max(1, settings.PoolSize),
+        null, null, settings.PatternWeight, installed, new Random(1));
+    IReadOnlyList<RecommendationItem> fillPass = strictPass.Count >= Math.Max(1, settings.PoolSize)
+        ? []
+        : new RecommendationEngine().RankAvoidingHistory(
+            candidates, profile, settings, settings.MinimumStars, settings.MaximumStars,
+            new HashSet<int>(strictPass.Select(item => item.BeatmapsetId)), [], Math.Max(1, settings.PoolSize) - strictPass.Count,
+            null, null, settings.PatternWeight, installed, new Random(1),
+            relaxTagFilter: true, isFallback: true);
+    Console.WriteLine($"两段式：严格 {strictPass.Count} 首，补位 {fillPass.Count} 首");
+    foreach (RecommendationItem item in fillPass)
+        Console.WriteLine($"  [补位] {item.Stars:0.00}★ {item.Artist} - {item.Title}");
     foreach (RecommendationItem item in ranked)
         Console.WriteLine($"  {item.Stars:0.00}★ {(item.IsRecycled ? "[回收] " : "")}{item.Artist} - {item.Title}");
     if (samples.Count > 0)
@@ -2330,4 +2352,62 @@ static void testCandidateDiagnosisExplainsEmptyPool()
     settings.ExcludeInstalledBeatmaps = true;
     CandidateDiagnosis withInstalled = CandidateFilter.Diagnose([jack], settings);
     assertTrue(withInstalled.EligibleDiffs + withInstalled.InstalledDiffs > 0, "两种结局之和应等于之前可推荐的数量");
+}
+
+static void testFallbackFillsWhenTagFilterTooNarrow()
+{
+    // 白名单 tag 是硬筛时只有 1 个候选；补位（tag 降级为加权）应该把剩下的名额填上并标记。
+    AppSettings settings = recommendationSettings();
+    settings.IncludedTags = ["jack"];
+    settings.MinimumStars = 1;
+    settings.MaximumStars = 10;
+    PlayerProfile profile = emptyProfile();
+    List<OsuBeatmapset> sets = [taggedManiaSet(1900, 19001, "jack 叠键"), taggedManiaSet(1901, 19011, "stream 流")];
+    RecommendationEngine engine = new();
+
+    IReadOnlyList<RecommendationItem> strict = engine.RankAvoidingHistory(
+        sets, profile, settings, 1, 10, new HashSet<int>(), [], 2);
+    assertEqual(1, strict.Count, "严格条件下 tag 白名单是硬筛");
+    assertTrue(!strict[0].IsFallback, "严格条件排出来的不是补位条目");
+
+    IReadOnlyList<RecommendationItem> filler = engine.RankAvoidingHistory(
+        sets, profile, settings, 1, 10, new HashSet<int> { strict[0].BeatmapsetId }, [], 1,
+        null, null, 0, null, null, relaxTagFilter: true, isFallback: true);
+    assertEqual(1, filler.Count, "补位应把不足的名额填上");
+    assertEqual(1901, filler[0].BeatmapsetId, "补位拿的是 tag 不符合但其他条件合格的那张");
+    assertTrue(filler[0].IsFallback, "补位条目必须标记出来，后面好替换");
+}
+
+static void testFallbackAllowsPlayedButKeepsExcludedTags()
+{
+    AppSettings settings = recommendationSettings();
+    settings.IncludedTags = ["jack"];
+    settings.ExcludedTags = ["gay"];
+    settings.MinimumStars = 1;
+    settings.MaximumStars = 10;
+    PlayerProfile profile = emptyProfile();
+    List<OsuBeatmapset> sets = [taggedManiaSet(1910, 19101, "jack"), taggedManiaSet(1911, 19111, "stream")];
+    RecommendationEngine engine = new();
+
+    // 严格条件：已推荐/已玩过的谱面被排除。
+    IReadOnlyList<RecommendationItem> strict = engine.Rank(
+        sets, profile, settings, 1, 10, new HashSet<int> { 1910 }, 2);
+    assertEqual(0, strict.Count, "严格条件下被排除的谱面不该出现");
+
+    // 补位：历史不再当排除项（MainWindow 会传空表），但排除 tag 依然硬。
+    settings.ExcludedTags = ["gay", "jack"];
+    IReadOnlyList<RecommendationItem> filler = engine.Rank(
+        sets, profile, settings, 1, 10, new HashSet<int>(), 2, false, null, null, 0, null, null,
+        relaxTagFilter: true, isFallback: true);
+    assertTrue(filler.All(item => item.BeatmapsetId != 1910), "补位时「排除 tag」仍然生效");
+    assertEqual(1, filler.Count, "补位允许 tag 不符合的谱面上来");
+}
+
+static void testFallbackCardsGetReplacedByStrictOnes()
+{
+    // 补位卡片只是占位：一旦够格的候选进来，重排就要把它换掉。
+    RecommendationItem filler = poolCard(2001);
+    RecommendationItem strict = poolCard(2002);
+    List<RecommendationItem> next = PoolReconciler.Build([filler], [strict], new HashSet<int>(), 5);
+    assertTrue(next.Select(item => item.BeatmapsetId).SequenceEqual(new[] { 2002 }), "够格的候选应替换补位卡片");
 }

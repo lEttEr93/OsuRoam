@@ -142,6 +142,7 @@ public static class LocTable
         ["reason.mapper"] = "谱师匹配 · 星级匹配 {0}",
         ["reason.rhythm"] = "节奏匹配 · 星级匹配 {0}",
         ["reason.explore"] = "探索新曲 · 星级匹配 {0}",
+        ["reason.fallback"] = "放宽补位",
 
         // 键型：6 个核心型（直方图用全长，雷达图用缩写）
         ["pattern.stream"] = "流",
@@ -180,6 +181,7 @@ public static class LocTable
         ["status.loaded"] = "已载入首批推荐，共 {0} 首，继续补充中",
         ["status.updated"] = "推荐池已更新，共 {0} 首",
         ["status.empty"] = "当前范围内没有候选谱面",
+        ["status.shortcandidates"] = "符合口味的候选不够：{0} 首是按放宽条件补的（tag 降级为加权 / 允许已玩过），{1} 首够格；正在继续翻页，够格的一出现就替换",
         ["status.relaxedinstalled"] = "严格条件下一个都不剩，已临时忽略「排除已安装谱面」：本轮 {0} 首里有你下过的",
         ["status.filtered"] = "候选全被筛掉了：{0} 个谱面集里只剩 {1} 个可推荐（已安装排除 {2} 个难度）；放宽 tag 白名单或关掉「排除已安装谱面」再试",
         ["status.built"] = "推荐池已生成，共 {0} 首",
@@ -391,6 +393,7 @@ public static class LocTable
         ["reason.mapper"] = "Mapper match · Star fit {0}",
         ["reason.rhythm"] = "Rhythm match · Star fit {0}",
         ["reason.explore"] = "Exploring · Star fit {0}",
+        ["reason.fallback"] = "relaxed fill",
 
         // 键型：雷达图要短，直方图可以用全长
         ["pattern.stream"] = "Stream",
@@ -429,6 +432,7 @@ public static class LocTable
         ["status.loaded"] = "Loaded the first {0} picks, still filling the pool…",
         ["status.updated"] = "Pool updated — {0} picks",
         ["status.empty"] = "No candidates in the current range",
+        ["status.shortcandidates"] = "Not enough on-profile candidates: {0} pick(s) are relaxed fills (tags weighted instead of filtered, already-played allowed), {1} on-profile; still paging, fills get replaced as soon as better ones show up",
         ["status.relaxedinstalled"] = "Nothing survived the strict filters — \"exclude installed beatmaps\" was ignored for this round ({0} picks are already installed)",
         ["status.filtered"] = "Everything was filtered out: {0} sets left only {1} playable pick(s) ({2} difficulties excluded as installed); loosen the tag whitelist or turn off \"exclude installed beatmaps\"",
         ["status.built"] = "Pool ready — {0} picks",

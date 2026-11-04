@@ -643,9 +643,9 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
                     }
                 },
                 sessionCancellation.Token,
-                // 池子还没填满就一直往后翻页：筛选条件窄的时候（tag 白名单 + 排除已安装）
-                // 常规 8 页 400 条经常一个候选都留不下，不能就这么空手结束。
-                wantsMore: () => recommendations.Count < Math.Max(1, settings.PoolSize),
+                // 只要还有「补位」卡片就一直往后翻页：补位是兜底，不是答案。
+                // 常规 8 页 400 条经常不够（tag 白名单 + 排除已安装），翻到上限为止。
+                wantsMore: () => recommendations.Count(item => !item.IsFallback) < Math.Max(1, settings.PoolSize),
                 maximumPages: OsuApiClient.ExtendedPageBudget);
 
             // 每次漫游推进排序轮换，让下一次的候选集合与这次不同。
@@ -830,18 +830,27 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
         if (settings.ExcludeRecentlyPlayed)
             lowerPriority.AddRange(profile.PlayedBeatmapsetIds().Where(id => !inPool.Contains(id)));
 
-        IReadOnlyList<RecommendationItem> desired = rankPool(lowerPriority, relaxInstalledExclusion: false);
+        // 严格条件先排；不够再用「放宽」补位（够格的谱面永远排在补位的前面，
+        // 后续翻页/验证找到够格的就自然把它们替换掉）。
+        IReadOnlyList<RecommendationItem> desired = rankPool(lowerPriority, relaxed: false);
         bool relaxedInstalled = false;
-        // 一个都不剩、而「排除已安装谱面」正开着：这一步大概率是元凶。
+        if (desired.Count < Math.Max(1, settings.PoolSize))
+        {
+            IReadOnlyList<RecommendationItem> filler = rankPool(lowerPriority, relaxed: true, alreadyPicked: desired);
+            if (filler.Count > 0)
+                desired = [.. desired, .. filler];
+        }
+        // 一个都不剩、而「排除已安装谱面」正开着：这一步大概是元凶。
         // 与其给个空池子，不如放开这一条并明说 —— 已安装只是「下过」，不是「不喜欢」。
         if (desired.Count == 0 && settings.ExcludeInstalledBeatmaps && LocalBeatmapLibrary.HasData)
         {
-            desired = rankPool(lowerPriority, relaxInstalledExclusion: true);
+            desired = rankPool(lowerPriority, relaxed: true, relaxInstalledExclusion: true);
             relaxedInstalled = desired.Count > 0;
         }
 
         bool historyChanged = reconcilePool(desired);
         updatePoolVisibility();
+        int fallbackCount = recommendations.Count(item => item.IsFallback);
         // 池子空着但候选不为空：说明候选全被筛选条件挡掉了（最常见是「排除已安装谱面」）。
         // 这时候只说「没有候选谱面」等于把用户堵死，得把漏斗数字说出来。
         if (desired.Count == 0 && recommendations.Count == 0)
@@ -856,6 +865,12 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
             // 明确告诉用户：这一池里有已安装的谱面，是因为严格条件下一个都不剩。
             AppLog.Info($"已临时忽略「排除已安装谱面」：严格条件下池子为空，放开后 {desired.Count} 首");
             setStatus("status.relaxedinstalled", desired.Count);
+        }
+        else if (fallbackCount > 0)
+        {
+            // 有补位卡片：告诉玩家候选不足，后台还在继续翻页/验证，够格的会替换掉这些。
+            AppLog.Info($"候选不足：{fallbackCount} 首是按放宽条件补的（tag 降级为加权 / 允许已玩过），继续翻页寻找");
+            setStatus("status.shortcandidates", fallbackCount, recommendations.Count - fallbackCount);
         }
         else if (recommendations.Count > 0 && recommendations.All(item => item.IsRecycled))
         {
@@ -877,18 +892,37 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
     }
 
     /// <summary>
-    /// 按当前设置排一次池子。<paramref name="relaxInstalledExclusion"/> 用于「严格条件下一个都不剩」时的
-    /// 降级尝试：临时忽略「排除已安装谱面」，而不是直接把空池子甩给用户。
+    /// 按当前设置排一次池子。
+    ///
+    /// <paramref name="relaxed"/> = false 时是严格条件：白名单 tag 是硬筛、已推荐/已玩过的降权（通常直接排除）。
+    /// = true 时是「补位」条件：白名单 tag 降级成加权（tagFit 仍然加分）、允许已玩过的谱面上来，
+    /// 用来把凑不满的名额补上，并标记 <see cref="RecommendationItem.IsFallback"/> 以便后面替换。
+    /// <paramref name="relaxInstalledExclusion"/> 进一步放开「排除已安装谱面」（只在严格条件一个都不剩时用）。
     /// </summary>
-    private IReadOnlyList<RecommendationItem> rankPool(List<int> lowerPriority, bool relaxInstalledExclusion) =>
-        recommendationEngine.RankAvoidingHistory(
+    private IReadOnlyList<RecommendationItem> rankPool(
+        List<int> lowerPriority,
+        bool relaxed,
+        IReadOnlyList<RecommendationItem>? alreadyPicked = null,
+        bool relaxInstalledExclusion = false)
+    {
+        int wanted = Math.Max(1, settings.PoolSize) - (alreadyPicked?.Count ?? 0);
+        if (wanted <= 0)
+            return [];
+        HashSet<int> excluded = [.. alreadyPicked?.Select(item => item.BeatmapsetId) ?? []];
+        return recommendationEngine.RankAvoidingHistory(
             candidates, profile!, settings, settings.MinimumStars, settings.MaximumStars,
-            new HashSet<int>(), lowerPriority, Math.Max(1, settings.PoolSize),
+            excluded,
+            // 补位时不再把「已推荐/已玩」当成排除项，否则候选不足时永远补不满。
+            relaxed ? [] : lowerPriority,
+            wanted,
             patternLookup, patternPreference, settings.PatternWeight,
             settings.ExcludeInstalledBeatmaps && !relaxInstalledExclusion && LocalBeatmapLibrary.HasData
                 ? LocalBeatmapLibrary.InstalledBeatmapIds
                 : null,
-            new Random(recommendationSeed));
+            new Random(recommendationSeed),
+            relaxTagFilter: relaxed,
+            isFallback: relaxed);
+    }
 
     /// <summary>
     /// 把池子对齐到新的排序。返回是否有卡片新进池（需要记历史 / 存设置）。

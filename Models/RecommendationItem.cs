@@ -38,7 +38,9 @@ public sealed class RecommendationItem : INotifyPropertyChanged
                 ReasonKind.Rhythm => Services.Loc.F("reason.rhythm", ReasonStarFit.ToString("P0")),
                 _ => Services.Loc.F("reason.explore", ReasonStarFit.ToString("P0"))
             };
-            return ReasonCategory.Length == 0 ? reason : $"{reason} · {ReasonCategory}";
+            string text = ReasonCategory.Length == 0 ? reason : $"{reason} · {ReasonCategory}";
+            // 补位卡片要自己说明身分，否则玩家分不清哪首是「凑数」的。
+            return IsFallback ? $"{text} · {Services.Loc.T("reason.fallback")}" : text;
         }
     }
     public IReadOnlyList<string> Tags { get; init; } = [];
@@ -47,6 +49,12 @@ public sealed class RecommendationItem : INotifyPropertyChanged
 
     /// <summary>该条目来自推荐历史回收，而不是本次新抓到的候选。</summary>
     public bool IsRecycled { get; init; }
+
+    /// <summary>
+    /// 候选不足时补进来的「凑数」条目：放宽了 tag 白名单或允许已玩过的谱面。
+    /// 后台继续翻页/验证后，一旦够格的候选出现，这些卡片会被替换掉。
+    /// </summary>
+    public bool IsFallback { get; init; }
     public string CoverUrl => $"https://assets.ppy.sh/beatmaps/{BeatmapsetId}/covers/cover.jpg";
 
     private System.Windows.Media.ImageSource? cover;

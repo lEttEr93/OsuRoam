@@ -17,13 +17,15 @@ public sealed class RecommendationEngine
         double[]? patternPreference = null,
         double patternWeight = 0,
         IReadOnlySet<int>? excludedBeatmapIds = null,
-        Random? random = null)
+        Random? random = null,
+        bool relaxTagFilter = false,
+        bool isFallback = false)
     {
         if (count <= 0) return [];
         List<OsuBeatmapset> source = beatmapsets.ToList();
         HashSet<int> historyIds = recommendationHistory.Where(id => id > 0).ToHashSet();
         HashSet<int> excludedFresh = [.. excludedBeatmapsetIds, .. historyIds];
-        List<RecommendationItem> result = Rank(source, profile, settings, minimumStars, maximumStars, excludedFresh, count, false, patternLookup, patternPreference, patternWeight, excludedBeatmapIds, random).ToList();
+        List<RecommendationItem> result = Rank(source, profile, settings, minimumStars, maximumStars, excludedFresh, count, false, patternLookup, patternPreference, patternWeight, excludedBeatmapIds, random, relaxTagFilter, isFallback).ToList();
         HashSet<int> selectedIds = [.. excludedBeatmapsetIds, .. result.Select(item => item.BeatmapsetId)];
         if (result.Count >= count) return result;
 
@@ -31,7 +33,7 @@ public sealed class RecommendationEngine
         foreach (int beatmapsetId in recommendationHistory)
         {
             if (beatmapsetId <= 0 || !checkedHistoryIds.Add(beatmapsetId) || selectedIds.Contains(beatmapsetId)) continue;
-            RecommendationItem? reusable = Rank(source.Where(set => set.Id == beatmapsetId), profile, settings, minimumStars, maximumStars, selectedIds, 1, isRecycled: true, patternLookup, patternPreference, patternWeight, excludedBeatmapIds, random).FirstOrDefault();
+            RecommendationItem? reusable = Rank(source.Where(set => set.Id == beatmapsetId), profile, settings, minimumStars, maximumStars, selectedIds, 1, isRecycled: true, patternLookup, patternPreference, patternWeight, excludedBeatmapIds, random, relaxTagFilter, isFallback).FirstOrDefault();
             if (reusable is null) continue;
             result.Add(reusable);
             selectedIds.Add(reusable.BeatmapsetId);
@@ -53,7 +55,9 @@ public sealed class RecommendationEngine
         double[]? patternPreference = null,
         double patternWeight = 0,
         IReadOnlySet<int>? excludedBeatmapIds = null,
-        Random? random = null)
+        Random? random = null,
+        bool relaxTagFilter = false,
+        bool isFallback = false)
     {
         double starCenter = (minimumStars + maximumStars) / 2;
         double starRadius = Math.Max(0.2, (maximumStars - minimumStars) / 2);
@@ -72,8 +76,12 @@ public sealed class RecommendationEngine
             if (!settings.MatchesSimpleFilters(set)) continue;
 
             IReadOnlyList<string> setTags = AppSettings.ParseTags(set.Tags);
+            // 「排除 tag」永远是硬条件（用户明确说过不喜欢）。
             if (settings.ExcludedTags.Any(tag => setTags.Contains(tag, StringComparer.OrdinalIgnoreCase))) continue;
-            if (settings.IncludedTags.Count > 0 && !settings.IncludedTags.Any(tag => setTags.Contains(tag, StringComparer.OrdinalIgnoreCase))) continue;
+            // 「白名单 tag」是口味而非硬性要求：候选不够时降级成加权（tagFit 仍然加分），
+            // 这样凑数的谱面不会一边被算作「符合口味」一边其实一个 tag 都不沾。
+            if (!relaxTagFilter && settings.IncludedTags.Count > 0 &&
+                !settings.IncludedTags.Any(tag => setTags.Contains(tag, StringComparer.OrdinalIgnoreCase))) continue;
 
             int year = (set.RankedDate ?? set.SubmittedDate)?.Year ?? 0;
             if (year < settings.MinimumYear || year > settings.MaximumYear) continue;
@@ -149,7 +157,8 @@ public sealed class RecommendationEngine
                     Bpm = beatmap.Bpm, LengthSeconds = beatmap.TotalLength, RankedYear = year, Score = score,
                     ReasonKind = reasonKind, ReasonTagFit = tagFit, ReasonStarFit = starFit, ReasonCategory = reasonCategory,
                     Tags = setTags, TagItems = setTags.Select(tag => new RecommendationTag(tag, settings.IncludedTags.Contains(tag, StringComparer.OrdinalIgnoreCase))).ToList(), KeyCount = settings.Mode == "mania" ? (int)Math.Round(beatmap.CircleSize) : 0,
-                    IsRecycled = isRecycled
+                    IsRecycled = isRecycled,
+                    IsFallback = isFallback
                 };
                 if (bestDifficulty is null || item.Score > bestDifficulty.Score) bestDifficulty = item;
             }
