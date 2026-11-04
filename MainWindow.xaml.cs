@@ -41,7 +41,6 @@ public partial class MainWindow : Window
     private MapInfoWindow? mapInfoWindow;
     private HistoryWindow? historyWindow;
     private bool historyWasVisible;
-    private bool prefetching;
     private AppSettings settings = new();
     private PlayerProfile? profile;
     private double[]? patternPreference;
@@ -75,6 +74,17 @@ public partial class MainWindow : Window
     /// 决断权交给解析出来的真实键型。
     /// </summary>
     private readonly HashSet<int> keywordBeatmapsetIds = [];
+
+    /// <summary>
+    /// 进行中的「池内预下载」，按谱面集 id 索引。池子每次重排都会重新调度：
+    /// 出池的取消、新进池的插队，同一个谱面集不会下两次。
+    /// </summary>
+    private readonly Dictionary<int, PoolDownload> poolDownloads = [];
+
+    /// <summary>一张正在进行的池内下载：取消源 + 任务本体（其它路径可以 await 它）。</summary>
+    private sealed record PoolDownload(CancellationTokenSource Cancellation, Task Task);
+    /// <summary>已经失败过一次的谱面集，避免失败即重试的死循环（每张只补一次）。</summary>
+    private readonly HashSet<int> poolDownloadRetried = [];
     /// <summary>当前这一轮的键型验证任务，首曲预下载要等它一会儿。</summary>
     private Task? patternVerification;
     /// <summary>本轮排序的随机种子：同一轮内重排结果可复现，不同轮之间才有变化。</summary>
@@ -812,8 +822,13 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
         if (patternVerification is { IsCompleted: false } verification)
             await Task.WhenAny(verification, Task.Delay(FirstDownloadSettleTime));
 
-        if (recommendations.FirstOrDefault() is { } first)
-            await downloadItemAsync(first, importAfterDownload: settings.AutoImport, "status.preparing");
+        if (recommendations.FirstOrDefault() is not { } first)
+            return;
+
+        // 先把调度器跑一遍：够格的候选会顶掉占用通道的补位下载，
+        // 然后这里要么等同一张卡的在途任务，要么自己开始下。
+        schedulePoolDownloads();
+        await downloadItemAsync(first, importAfterDownload: settings.AutoImport, "status.preparing");
     }
 
     /// <summary>
@@ -900,7 +915,7 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
                 AppLog.Error("Failed to save recommendation history", exception);
             }
         }
-        _ = prefetchPoolAsync();
+        schedulePoolDownloads();
     }
 
     /// <summary>
@@ -1003,6 +1018,8 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
             if (item.DownloadState is DownloadState.Queued or DownloadState.Downloading or DownloadState.Importing)
                 pinned.Add(item.BeatmapsetId);
         }
+        // 正在下的一律锁住：中途换掉只会白下（取消路径会删半截文件，但带宽已经花掉了）。
+        pinned.UnionWith(poolDownloads.Keys);
         return pinned;
     }
 
@@ -1024,42 +1041,113 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
     /// <summary>
     /// 预下载整个推荐池：键型分析需要完整 .osu，只有提前下好，
     /// 详情页的雷达和子型占比才对池内每一首都有数据。
+    ///
+    /// 这里不是「一次跑完的快照队列」，而是**可重排的调度**：池子每次重排都会调一次
+    /// <see cref="schedulePoolDownloads"/>，出池的下载被取消、新进池的插到队首。
+    /// 之前的实现是拍一个快照串行跑到底，验证结果一到池子换了，够格的卡片只能排在
+    /// 已经没用的凑数卡片后面，表现为「所有下载都卡住」。
     /// </summary>
-    private async Task prefetchPoolAsync()
+    private void schedulePoolDownloads()
     {
-        if (!settings.AutoDownload || prefetching)
+        if (!settings.AutoDownload || sessionCancellation.IsCancellationRequested)
+        {
+            cancelAllPoolDownloads();
             return;
+        }
 
-        RecommendationItem[] pending = recommendations
-            .Where(item => item.DownloadState is DownloadState.Waiting or DownloadState.Failed)
-            .ToArray();
-        if (pending.Length == 0)
-            return;
+        List<RecommendationItem> desired = poolDownloadOrder();
+        HashSet<int> desiredIds = [.. desired.Select(item => item.BeatmapsetId)];
+        // 已出池 / 已经不需要的：连同半截文件一起取消（DownloadAsync 里会删 .part）。
+        foreach ((int beatmapsetId, PoolDownload running) in poolDownloads.ToList())
+        {
+            if (desiredIds.Contains(beatmapsetId))
+                continue;
+            if (!poolDownloads.Remove(beatmapsetId))
+                continue;
+            running.Cancellation.Cancel();
+            AppLog.Info($"预下载取消：set={beatmapsetId}（已不在池子里）");
+        }
 
-        prefetching = true;
+        // 够格的候选在等空位，而占着空位的是「凑数」卡片：直接让它让位。
+        // 这是原来最刺眼的现象 —— 验证结果一到，池子换了，但下载通道还被冷启动那几张占着。
+        if (poolDownloads.Count >= BeatmapDownloadService.MaxConcurrentDownloads &&
+            desired.Any(item => !item.IsFallback))
+        {
+            foreach ((int beatmapsetId, PoolDownload running) in poolDownloads.ToList())
+            {
+                RecommendationItem? runningItem = recommendations.FirstOrDefault(item => item.BeatmapsetId == beatmapsetId);
+                if (runningItem is not { IsFallback: true })
+                    continue;
+                poolDownloads.Remove(beatmapsetId);
+                running.Cancellation.Cancel();
+                AppLog.Info($"预下载让位：set={beatmapsetId}（补位卡片，给够格候选腾通道）");
+                break;
+            }
+        }
+
+        // 还剩几个空位就给优先级最高的几张。
+        foreach (RecommendationItem item in desired)
+        {
+            if (poolDownloads.Count >= BeatmapDownloadService.MaxConcurrentDownloads)
+                break;
+            if (poolDownloads.ContainsKey(item.BeatmapsetId))
+                continue;
+            CancellationTokenSource cancellation = CancellationTokenSource.CreateLinkedTokenSource(sessionCancellation.Token);
+            Task task = runPoolDownloadAsync(item, cancellation);
+            poolDownloads[item.BeatmapsetId] = new PoolDownload(cancellation, task);
+        }
+        reportPoolDownloadProgress();
+    }
+
+    /// <summary>待下载顺序，规则见 <see cref="PoolDownloadPlanner"/>。</summary>
+    private List<RecommendationItem> poolDownloadOrder() =>
+        PoolDownloadPlanner.Order(recommendations, playingItem, preparedNextItem, poolDownloadRetried);
+
+    private async Task runPoolDownloadAsync(RecommendationItem item, CancellationTokenSource cancellation)
+    {
         try
         {
-            for (int index = 0; index < pending.Length; index++)
-            {
-                RecommendationItem item = pending[index];
-                if (!recommendations.Contains(item))
-                    continue;
-                setStatus("status.predownload", index + 1, pending.Length, item.DisplayTitle);
-                await downloadItemAsync(item, importAfterDownload: false, "预下载");
-            }
-            setStatus("status.predownloaded", pending.Length);
+            await downloadItemAsync(item, importAfterDownload: false, "预下载", cancellation.Token,
+                showStatus: false, ownedByScheduler: true);
+            if (item.DownloadState == DownloadState.Failed)
+                poolDownloadRetried.Add(item.BeatmapsetId);
         }
-        catch (OperationCanceledException) { }
+        catch (OperationCanceledException)
+        {
+            // 被取消是正常路径（卡片出池），不是错误。
+        }
         catch (Exception exception)
         {
-            AppLog.Error("预下载推荐池失败", exception);
-            setStatus("status.predownloadfail", conciseMessage(exception));
+            poolDownloadRetried.Add(item.BeatmapsetId);
+            AppLog.Error($"预下载失败：{item.DisplayTitle}", exception);
         }
         finally
         {
-            prefetching = false;
-            trimBeatmapCache();
+            if (poolDownloads.TryGetValue(item.BeatmapsetId, out PoolDownload? tracked) &&
+                ReferenceEquals(tracked.Cancellation, cancellation))
+                poolDownloads.Remove(item.BeatmapsetId);
+            cancellation.Dispose();
+            if (poolDownloads.Count == 0)
+                trimBeatmapCache();
+            reportPoolDownloadProgress();
+            // 腾出空位后接着下下一张（不递归：排到 UI 队列下一拍）。
+            _ = Dispatcher.InvokeAsync(schedulePoolDownloads);
         }
+    }
+
+    private void cancelAllPoolDownloads()
+    {
+        foreach (PoolDownload running in poolDownloads.Values)
+            running.Cancellation.Cancel();
+        poolDownloads.Clear();
+    }
+
+    private void reportPoolDownloadProgress()
+    {
+        int waiting = recommendations.Count(item => item.DownloadState is DownloadState.Waiting or DownloadState.Failed);
+        int done = recommendations.Count(item => item.DownloadState is DownloadState.Downloaded or DownloadState.Imported or DownloadState.Importing);
+        if (waiting == 0 && done > 0)
+            setStatus("status.predownloaded", done);
     }
 
     /// <summary>超出缓存上限时从旧到新删 .osz，推荐池里的谱面不删。</summary>
@@ -1116,8 +1204,36 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
     }
 
     /// <summary>下载（需要时）并按需导入，返回是否已经真正触发 osu! 导入。</summary>
-    private async Task<bool> downloadItemAsync(RecommendationItem item, bool importAfterDownload, string statusKey)
+    private async Task<bool> downloadItemAsync(
+        RecommendationItem item,
+        bool importAfterDownload,
+        string statusKey,
+        CancellationToken? cancellation = null,
+        bool showStatus = true,
+        bool ownedByScheduler = false)
     {
+        CancellationToken token = cancellation ?? sessionCancellation.Token;
+        // 这张卡正在被池内调度下载：等它下完，不要当成「已经就绪」——
+        // 那会让导入撞上还没写完的文件（现场日志里的「预下载的谱面文件不存在」就是这条）。
+        // ownedByScheduler 表示调用方就是那个调度任务本身，不能再等自己（会死锁）。
+        if (!ownedByScheduler &&
+            poolDownloads.TryGetValue(item.BeatmapsetId, out PoolDownload? inFlight))
+        {
+            if (showStatus)
+                setStatus("status.withtitle", Loc.T(statusKey), item.DisplayTitle);
+            try
+            {
+                await inFlight.Task;
+            }
+            catch (OperationCanceledException)
+            {
+                return false;
+            }
+            catch
+            {
+                // 失败原因由它自己的日志负责，这里继续按新状态走。
+            }
+        }
         if (item.DownloadState == DownloadState.Importing)
             return false;
         if (item.DownloadState == DownloadState.Imported)
@@ -1131,15 +1247,18 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
         }
         try
         {
-            setStatus("status.withtitle", Loc.T(statusKey), item.DisplayTitle);
+            if (showStatus)
+                setStatus("status.withtitle", Loc.T(statusKey), item.DisplayTitle);
             string oszPath = Path.Combine(settingsStore.CacheDirectory, $"{item.BeatmapsetId}.osz");
             bool wantPattern = settings.Mode == "mania";
 
-            // 已经下好的不再走下载（否则会排在预下载后面白等），只有真正没下过才下。
-            if (item.DownloadState is not (DownloadState.Downloaded or DownloadState.Downloading))
+            // 只有「真的下完」且文件还在才算就绪。Downloading 不能跳过：
+            // 那时文件还没写完，后面的导入会直接报「预下载的谱面文件不存在」。
+            if (item.DownloadState != DownloadState.Downloaded ||
+                !File.Exists(oszPath) || new FileInfo(oszPath).Length < 1024)
             {
                 item.DownloadState = DownloadState.Queued;
-                await downloader.DownloadAsync(item, settings, sessionCancellation.Token);
+                await downloader.DownloadAsync(item, settings, token);
             }
 
             bool fileReady = File.Exists(oszPath) && new FileInfo(oszPath).Length >= 1024;
@@ -1176,7 +1295,7 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
             }
             if (importAfterDownload)
             {
-                await downloader.ImportAsync(item, settings, sessionCancellation.Token);
+                await downloader.ImportAsync(item, settings, token);
                 recordSessionImport(item);
                 setCurrentRoamItem(item);
                 recordArchive(item);

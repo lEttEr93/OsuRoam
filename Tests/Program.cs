@@ -67,6 +67,7 @@ testFallbackAllowsPlayedButKeepsExcludedTags();
 testFallbackCardsGetReplacedByStrictOnes();
 testKeywordCandidatesAreJudgedByVerifiedPattern();
 testKeywordCandidatesEnterVerificationQueue();
+testPoolDownloadOrderingPutsQualifyingFirst();
 testPatternSearchHints();
 testCacheCleanerSkipsPoolItems();
 testDirtyTagsAreFiltered();
@@ -2904,4 +2905,34 @@ static async Task<int> verifyAsync(string[] args)
     else
         Console.WriteLine("结论：键型项显著有效（进池谱面的真实键型占比明显高于无键型基线）");
     return 0;
+}
+
+static void testPoolDownloadOrderingPutsQualifyingFirst()
+{
+    // 冷启动时先出现的补位卡不能占住下载通道：够格的候选要排在它们前面。
+    RecommendationItem playing = poolCard(3001);
+    RecommendationItem fallbackA = new()
+    {
+        BeatmapsetId = 3002, BeatmapId = 30021, Artist = "a", Title = "fallback-a", DifficultyName = "4K",
+        Mapper = "m", Stars = 3, Bpm = 180, LengthSeconds = 120, RankedYear = 2024, Score = 1, IsFallback = true
+    };
+    RecommendationItem strict = poolCard(3003);
+    RecommendationItem downloaded = poolCard(3004);
+    downloaded.DownloadState = DownloadState.Downloaded;
+    RecommendationItem failed = poolCard(3005);
+    failed.DownloadState = DownloadState.Failed;
+
+    List<RecommendationItem> order = PoolDownloadPlanner.Order(
+        [fallbackA, strict, downloaded, failed, playing], playing, null, new HashSet<int>());
+
+    assertTrue(order[0].BeatmapsetId == 3001, "正在玩的那首要排第一");
+    int strictIndex = order.FindIndex(item => item.BeatmapsetId == 3003);
+    int fallbackIndex = order.FindIndex(item => item.BeatmapsetId == 3002);
+    assertTrue(strictIndex >= 0 && fallbackIndex >= 0 && strictIndex < fallbackIndex, "够格候选要排在补位卡前面");
+    assertTrue(order.All(item => item.BeatmapsetId != 3004), "已经下完的不该再排队");
+
+    // 失败过一次的不再自动重试，避免死循环。
+    List<int> retried = [3005];
+    List<RecommendationItem> again = PoolDownloadPlanner.Order([failed], null, null, new HashSet<int>(retried));
+    assertEqual(0, again.Count, "失败过一次的谱面集不再自动重试");
 }

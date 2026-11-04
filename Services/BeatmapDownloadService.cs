@@ -18,7 +18,14 @@ public sealed class BeatmapDownloadService : IDisposable
         DefaultRequestVersion = new Version(1, 1),
         DefaultVersionPolicy = HttpVersionPolicy.RequestVersionExact
     };
-    private readonly SemaphoreSlim queue = new(1, 1);
+    /// <summary>
+    /// 下载并发数。单镜像实测 12–28 MB 要 37–87 秒，一路串行时池子里 5 首等于几分钟，
+    /// 期间界面上的「预下载」会看起来整体卡住；两路能在同带宽下把等待时间砍半，
+    /// 又不会把镜像限流踩爆（失败会走 fallback 镜像）。
+    /// </summary>
+    public const int MaxConcurrentDownloads = 2;
+
+    private readonly SemaphoreSlim queue = new(MaxConcurrentDownloads, MaxConcurrentDownloads);
     /// <summary>导入单独一把锁：只串行化「读缓存 + 启动 osu!」，不跟下载抢。</summary>
     private readonly SemaphoreSlim importGate = new(1, 1);
     private readonly string cacheDirectory;
@@ -66,6 +73,16 @@ public sealed class BeatmapDownloadService : IDisposable
         catch (OperationCanceledException)
         {
             item.DownloadState = DownloadState.Waiting;
+            // 取消（卡片被换掉 / 用户停手）时别把半截文件留在缓存里，否则下次会当成已下载。
+            try
+            {
+                if (File.Exists(path + ".part"))
+                    File.Delete(path + ".part");
+            }
+            catch
+            {
+                // 删不掉不影响主流程
+            }
             throw;
         }
         catch
