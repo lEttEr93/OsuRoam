@@ -1,4 +1,4 @@
-# osu! Roam v1.5.1+1
+# osu! Roam v1.5.2
 
 [English](#english) · [中文](#中文)
 
@@ -15,11 +15,25 @@ keep roaming without touching it.
 
 | Package | UI language | Default download source |
 |---|---|---|
-| `osu-roam-v1.5.1+1-portable.zip` | follows the system language | sayobot mirrors (China) |
-| `osu-roam-v1.5.1+1-en-portable.zip` | English | catboy / beatconnect (international) |
+| `osu-roam-1.5.2-portable.zip` | follows the system language | sayobot mirrors (China) |
+| `osu-roam-1.5.2-en-portable.zip` | English | catboy / beatconnect (international) |
 
 The .NET runtime and `tosu.exe` are already inside the archive — extract and run. Each build keeps its own `data`
-folder, so **do not install one over the other**.
+folder, so **do not install one over the other**.  A fresh folder inherits the analysed-pattern library from a
+neighbouring `osu-roam*` install, so pattern data does not start from zero.
+
+## What's new in 1.5.2
+
+- **Pattern-based recommendations (mania).** Tick the pattern types you want (stream / chordstream / jacks /
+  coordination / density / wildcard), or "LN charts only". Ranking uses the chart's analysed pattern share.
+- **Charts are analysed *before* they enter the candidate pool.** The app fetches the `.osu`, computes the 6-dim
+  pattern fingerprint, and only on-profile charts become candidates — tags can no longer fake a match.
+- **Keyword searches are paginated** (`q=jack`, `q=chordjack`, `q=ln`, …) so niche patterns are actually reachable.
+  Keyword hits are verified by analysis, not by title or tags.
+- **Streaming pool.** Cards appear as verification lands and better picks replace filler cards automatically.
+- **Pre-download is scheduled, not snapshotted.** A download whose card left the pool is cancelled and qualifying
+  picks jump the queue; up to two downloads run in parallel.
+- Tag whitelist (152 entries + aliases) with pending-tag auto submission. BPM no longer affects ranking.
 
 ## Quick start
 
@@ -97,8 +111,17 @@ osu! 谱面漫游推荐工具，Windows / WPF / .NET 8。读你的成绩样本�
 
 | 包 | 界面语言 | 默认下载源 |
 |---|---|---|
-| `osu-roam-v1.5.1+1-portable.zip` | 跟随系统 | sayobot 镜像（国内） |
-| `osu-roam-v1.5.1+1-en-portable.zip` | 英文 | catboy / beatconnect（国际） |
+| `osu-roam-1.5.2-portable.zip` | 跟随系统 | sayobot 镜像（国内） |
+| `osu-roam-1.5.2-en-portable.zip` | 英文 | catboy / beatconnect（国际） |
+
+## 1.5.2 新增
+
+- **键型推荐（mania）**：勾选想要的键型（流 / 和弦流 / 叠键 / 协调 / 密度 / 杂项）或「只要面谱」，排序用谱面**解析出来的**键型占比。
+- **先判键型，再进候选**：程序抓 `.osu` 算出 6 维键型指纹，只有符合勾选的谱面才进候选池 —— tag 再也冒充不了。
+- **关键字搜索会翻页**（`q=jack`、`q=chordjack`、`q=ln` 等），小众键型也能捞到；关键字命中的谱面按解析结果甄别，不看曲名/tag。
+- **推荐池流式更新**：验证出一张就排一次，更好的候选会自动替换凑数的卡片。
+- **预下载改成可重排调度**：卡片出池就取消下载、够格的候选插队，最多两路并发。
+- tag 白名单（152 条 + 别名）与待审 tag 自动提交；BPM 不再参与排序。
 
 .NET 运行时和 `tosu.exe` 都在包里，解压即用。两版各有自己的 `data` 目录，**不要覆盖安装**。
 

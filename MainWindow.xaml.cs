@@ -671,7 +671,7 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
                     if (usesPatternGate())
                         startAdmission();
                     else
-                        await refillPoolAsync();
+                        refillPool();
 
                     if (!roamStarted && recommendations.Count > 0)
                     {
@@ -1213,8 +1213,8 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
         reportPoolDownloadProgress();
     }
 
-    /// <summary>补池子：重排一次，需要的话启动准入。搜索结果每来一批都会调。</summary>
-    private async Task refillPoolAsync()
+    /// <summary>补池子：请求一次重排（会被合并），需要的话启动准入。搜索结果每来一批都会调。</summary>
+    private void refillPool()
     {
         if (profile is null)
             return;
@@ -1474,14 +1474,14 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
             await downloadItemAsync(item, settings.AutoImport, "status.preparingmanual");
     }
 
-    private async void SkipButton_Click(object sender, RoutedEventArgs e)
+    private void SkipButton_Click(object sender, RoutedEventArgs e)
     {
         if (sender is not Button { Tag: RecommendationItem item })
             return;
         if (ReferenceEquals(preparedNextItem, item))
             preparedNextItem = null;
         recommendations.Remove(item);
-        await refillPoolAsync();
+        refillPool();
         setStatus("status.skipped");
     }
 
@@ -1506,7 +1506,7 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
             RecommendationItem? next = findNextRecommendation();
             if (next is null)
             {
-                await refillPoolAsync();
+                refillPool();
                 next = findNextRecommendation();
             }
             if (next is null)
@@ -1524,7 +1524,7 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
                 recommendations.Remove(previous);
             if (ReferenceEquals(preparedNextItem, next))
                 preparedNextItem = null;
-            await refillPoolAsync();
+            refillPool();
             setStatus("status.nextimported", next.DisplayTitle);
         }
         catch (OperationCanceledException)
@@ -1947,7 +1947,7 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
                 setStatus("status.resultnone");
             }
 
-            await refillPoolAsync();
+            refillPool();
             playingItem = null;
             preparedNextItem = null;
         }
