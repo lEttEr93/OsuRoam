@@ -129,6 +129,17 @@ public static class Loc
         T("pattern.coordination"), T("pattern.density"), T("pattern.misc")
     ];
 
+    /// <summary>单个核心键型的短名（推荐理由里用），输入是 <see cref="Models.ManiaPattern.CorePatterns"/> 里的名字。</summary>
+    public static string CorePatternLabel(string name) => T(name switch
+    {
+        "Stream" => "pattern.stream.short",
+        "Chordstream" => "pattern.chordstream.short",
+        "Jacks" => "pattern.jacks.short",
+        "Coordination" => "pattern.coordination.short",
+        "Density" => "pattern.density.short",
+        _ => "pattern.misc.short"
+    });
+
     /// <summary>7 轴技能雷达的标签，要短到能塞进 132px 的图里。</summary>
     public static IReadOnlyList<string> SkillPatternLabels() =>
     [

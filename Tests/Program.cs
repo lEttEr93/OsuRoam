@@ -1,6 +1,13 @@
+using System.Globalization;
+using System.Text;
 using System.Text.Json;
 using OsuRoam.Services;
 using OsuRoam.Models;
+
+// 探针模式：arg0 == "--probe" 时不跑测试，而是用本机 settings.json 的凭据拉一批真实候选，
+// 抓 .osu 算键型，落一份 CSV 快照。用来离线评估「勾了 Jacks 到底排出来什么」。
+if (args.Length > 0 && args[0] == "--probe")
+    return await probeAsync(args);
 
 testSuccessfulCompletion();
 testAbortDoesNotComplete();
@@ -73,6 +80,7 @@ testTosuDashboardConfigIsDisabled();
 testTosuExecutableResolution();
 testOsuExecutableCandidatesSupportStable();
 Console.WriteLine("All state transition, recommendation, mode profile, and tosu integration tests passed.");
+return 0;
 
 static void testSuccessfulCompletion()
 {
@@ -2000,4 +2008,164 @@ static void testStreamingVerificationReordersPool()
         new[] { a, b, c }, [c, a, b], new HashSet<int>(), 3);
     assertTrue(next.Select(item => item.BeatmapsetId).SequenceEqual(verified), "池子应对齐到验证后的排序");
     assertTrue(ReferenceEquals(next[0], c), "挪位置的卡片应复用原实例");
+}
+
+/// <summary>
+/// 离线评估探针：用本机 settings.json 里的 OAuth 凭据按真实设置拉候选，
+/// 抓 .osu 解析键型，输出一份 CSV 快照 + 关键指标。
+///
+/// 用法：<c>dotnet run --project Tests -- --probe Jacks 4.1 4.9 D:\AI\scratch\snap 40</c>
+/// </summary>
+static async Task<int> probeAsync(string[] args)
+{
+    string label = args.Length > 1 ? args[1] : "Jacks";
+    double minStars = args.Length > 2 ? double.Parse(args[2], CultureInfo.InvariantCulture) : 4.0;
+    double maxStars = args.Length > 3 ? double.Parse(args[3], CultureInfo.InvariantCulture) : 5.0;
+    string outDir = args.Length > 4 ? args[4] : ".";
+    int maxFetch = args.Length > 5 ? int.Parse(args[5], CultureInfo.InvariantCulture) : 40;
+
+    SettingsStore store = new();
+    AppSettings settings = await store.LoadAsync();
+    Console.WriteLine($"设置：{store.SettingsPathForDisplay}");
+    if (!string.Equals(settings.Mode, "mania", StringComparison.OrdinalIgnoreCase))
+    {
+        Console.WriteLine($"当前模式是 {settings.Mode}，探针只测 mania");
+        return 2;
+    }
+
+    string secret = SecretProtector.Unprotect(settings.ProtectedClientSecret);
+    if (string.IsNullOrEmpty(settings.ClientId) || secret.Length == 0)
+    {
+        Console.WriteLine("拿不到 OAuth 凭据，退出");
+        return 2;
+    }
+
+    Console.WriteLine($"  用户={settings.Username} 键数={settings.ManiaKeys} 探索={settings.Exploration} 星级={minStars}–{maxStars}");
+    OsuApiClient api = new();
+    api.Configure(settings.ClientId, secret);
+    using CancellationTokenSource cancellation = new(TimeSpan.FromMinutes(20));
+    PlayerProfile profile = await api.BuildProfileAsync(settings.Username, settings.Mode, settings.ManiaKeys, cancellation.Token);
+    Console.WriteLine($"档案：成绩样本 {profile.DifficultySampleCount} 张，偏好时长 {profile.PreferredLength:0}s");
+
+    // wide = 把 tag / 状态 / 类型过滤全放开，只看搜索与排序本身；
+    // keep = 完全用本机配置（tag 白名单、严格状态、排除已玩…），复现真实推荐。
+    string filterMode = args.Length > 6 ? args[6] : "wide";
+    settings.SelectedPatterns = [label];
+    settings.PreferLn = false;
+    settings.MinimumStars = minStars;
+    settings.MaximumStars = maxStars;
+    if (filterMode == "wide")
+    {
+        settings.IncludedTags = [];
+        settings.ExcludedTags = [];
+        settings.MinimumYear = 2007;
+        settings.MaximumYear = 2030;
+        settings.MinimumLengthSeconds = 0;
+        settings.MaximumLengthSeconds = 3600;
+        settings.ExcludeRecentlyPlayed = false;
+        settings.ExcludeInstalledBeatmaps = false;
+        settings.IncludedStatuses = [.. AppSettings.StatusFilterValues];
+        settings.StrictStatuses = [];
+        settings.IncludedGenres = [.. AppSettings.GenreFilterValues];
+        settings.StrictGenres = [];
+        settings.IncludedLanguages = [.. AppSettings.LanguageFilterValues];
+        settings.StrictLanguages = [];
+        settings.RecommendationHistory = [];
+    }
+    Console.WriteLine($"过滤：{filterMode}（tag {settings.IncludedTags.Count} 条，严格状态 {settings.StrictStatuses.Count} 条，排除已玩 {settings.ExcludeRecentlyPlayed}）");
+
+    List<OsuBeatmapset> candidates = [];
+    await api.SearchCandidatesInBatchesAsync(settings, minStars, maxStars, batch =>
+    {
+        candidates.AddRange(batch);
+        return Task.CompletedTask;
+    }, cancellation.Token);
+    int eligible = 0;
+    foreach (OsuBeatmapset set in candidates)
+    {
+        foreach (OsuBeatmap beatmap in set.Beatmaps)
+        {
+            if (CandidateFilter.Eligible(set, beatmap, settings))
+                eligible += 1;
+        }
+    }
+    Console.WriteLine($"候选谱面集 {candidates.Count}，合格难度 {eligible}");
+
+    // 用「没键型数据」时的排序挑要抓哪些：和 App 里预取的选法一致，抓出来才有代表性。
+    IReadOnlyList<RecommendationItem> baseline = new RecommendationEngine().Rank(
+        candidates, profile, settings, minStars, maxStars, new HashSet<int>(), maxFetch, false,
+        null, null, 0, null, new Random(7));
+    Console.WriteLine($"准备抓取前 {baseline.Count} 张（按无键型排序）");
+
+    OsuFileFetcher fetcher = new();
+    PatternLibrary library = new();
+    int fetched = 0;
+    int failed = 0;
+    System.Diagnostics.Stopwatch clock = System.Diagnostics.Stopwatch.StartNew();
+    foreach (RecommendationItem item in baseline)
+    {
+        string? text = await fetcher.TryFetchAsync(item.BeatmapId, cancellation.Token);
+        if (text is null)
+        {
+            failed += 1;
+            continue;
+        }
+        if (library.Ingest(text, item.BeatmapId, item.BeatmapsetId))
+            fetched += 1;
+    }
+    clock.Stop();
+    Console.WriteLine($"抓取解析 {fetched} 张，失败 {failed} 张（{clock.ElapsedMilliseconds} ms）");
+    if (fetched == 0)
+        return 3;
+
+    // 同一批候选、同一个随机种子，只差「有没有键型数据」。
+    Func<int, ManiaPattern?> lookup = id => library.TryGetVerified(id);
+    IReadOnlyList<RecommendationItem> withoutPattern = new RecommendationEngine().Rank(
+        candidates, profile, settings, minStars, maxStars, new HashSet<int>(), 40, false,
+        null, null, 0, null, new Random(7));
+    IReadOnlyList<RecommendationItem> withPattern = new RecommendationEngine().Rank(
+        candidates, profile, settings, minStars, maxStars, new HashSet<int>(), 40, false,
+        lookup, null, 0, null, new Random(7));
+
+    Dictionary<int, double> noPatternScore = withoutPattern.ToDictionary(item => item.BeatmapsetId, item => item.Score);
+    Dictionary<int, double> withPatternScore = withPattern.ToDictionary(item => item.BeatmapsetId, item => item.Score);
+    Dictionary<int, string> withPatternReason = withPattern.ToDictionary(item => item.BeatmapsetId, item => item.Reason);
+
+    StringBuilder csv = new();
+    csv.AppendLine("beatmapsetId,beatmapId,artist,title,mapper,stars,length,year,lnRatio,jacks,chordstream,stream,coordination,density,wildcard,category,scoreNoPattern,scoreWithPattern");
+    foreach (RecommendationItem item in baseline)
+    {
+        ManiaPattern? pattern = library.TryGetVerified(item.BeatmapId);
+        if (pattern is null)
+            continue;
+        double share(string name) => pattern.CoreShares.TryGetValue(name, out double value) ? value : 0;
+        csv.AppendLine(string.Join(",",
+            item.BeatmapsetId,
+            item.BeatmapId,
+            quote(item.Artist),
+            quote(item.Title),
+            quote(item.Mapper),
+            item.Stars.ToString("0.00", CultureInfo.InvariantCulture),
+            item.LengthSeconds,
+            item.RankedYear,
+            pattern.LnRatio.ToString("0.000", CultureInfo.InvariantCulture),
+            share("Jacks").ToString("0.000", CultureInfo.InvariantCulture),
+            share("Chordstream").ToString("0.000", CultureInfo.InvariantCulture),
+            share("Stream").ToString("0.000", CultureInfo.InvariantCulture),
+            share("Coordination").ToString("0.000", CultureInfo.InvariantCulture),
+            share("Density").ToString("0.000", CultureInfo.InvariantCulture),
+            share("Wildcard").ToString("0.000", CultureInfo.InvariantCulture),
+            quote(pattern.Category),
+            noPatternScore.TryGetValue(item.BeatmapsetId, out double plain) ? plain.ToString("0.0000", CultureInfo.InvariantCulture) : "",
+            withPatternScore.TryGetValue(item.BeatmapsetId, out double patterned) ? patterned.ToString("0.0000", CultureInfo.InvariantCulture) : "",
+            quote(withPatternReason.TryGetValue(item.BeatmapsetId, out string? reason) ? reason : "")));
+    }
+
+    Directory.CreateDirectory(outDir);
+    string csvPath = Path.Combine(outDir, "snapshot.csv");
+    File.WriteAllText(csvPath, csv.ToString(), new UTF8Encoding(false));
+    Console.WriteLine($"快照：{csvPath}");
+
+    static string quote(string value) => "\"" + (value ?? string.Empty).Replace("\"", "'") + "\"";
+    return 0;
 }

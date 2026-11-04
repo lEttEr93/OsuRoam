@@ -123,7 +123,10 @@ public sealed class RecommendationEngine
                 // BPM 不参与排序：实测它和键型分布几乎无关（vs Stream −0.06、vs Chordstream +0.13、
                 // vs Jacks −0.09），而「喜欢的 BPM」只是已打谱面的中位数，噪声比信号大。
                 // 原来的 0.15 权重按比例分给了其余三项（0.62/0.10/0.13 → 0.73/0.12/0.15）。
-                double score = familiarityWeight * (starFit * 0.73 + lengthFit * 0.12 + mapperFit * 0.15) + settings.Exploration * 0.55 * discovery + tagFit * 0.12 + simpleFilterBonus + patternFit * effectivePatternWeight;
+                // 勾了键型时探索度要压下来：默认 0.45 × 0.55 ≈ 0.25 的纯随机项，
+                // 比「25% 叠键」能拿到的 0.15 还大 —— 噪声盖过信号，用户就会觉得勾了没用。
+                double explorationWeight = usesSelection ? 0.35 : 1.0;
+                double score = familiarityWeight * (starFit * 0.73 + lengthFit * 0.12 + mapperFit * 0.15) + settings.Exploration * 0.55 * discovery * explorationWeight + tagFit * 0.12 + simpleFilterBonus + patternFit * effectivePatternWeight;
                 // 理由只记「哪种匹配 + 两个数值」，具体文字按当前语言现拼，
                 // 这样切语言时卡片上的理由会跟着变。
                 ReasonKind reasonKind = tagFit > 0
@@ -131,9 +134,13 @@ public sealed class RecommendationEngine
                     : mapperFit > 0.3
                         ? ReasonKind.Mapper
                         : ReasonKind.Explore;
-                string reasonCategory = pattern is not null && pattern.Source == PatternSource.Osu
-                    ? pattern.Category
-                    : string.Empty;
+                // 勾了键型就直接把「所选键型占多少」写在理由里：卡片上能一眼看出这张是不是真符合，
+                // 而不是只看到一个和选择无关的分类名。
+                string reasonCategory = usesSelection
+                    ? (pattern is null ? string.Empty : $"{selectionLabel(settings.SelectedPatterns)} {pattern.SelectedShare(settings.SelectedPatterns):P0}")
+                    : pattern is not null && pattern.Source == PatternSource.Osu
+                        ? pattern.Category
+                        : string.Empty;
 
                 RecommendationItem item = new()
                 {
@@ -161,6 +168,10 @@ public sealed class RecommendationEngine
     /// 这里取 0.6 让「选了什么」能和星级掰手腕，但不至于完全盖过它。
     /// </summary>
     private const double SelectedPatternWeight = 0.60;
+
+    /// <summary>所选键型的显示名，多选时用 + 连起来（已按当前语言本地化）。</summary>
+    private static string selectionLabel(IReadOnlyList<string> patterns) =>
+        string.Join("+", patterns.Select(Loc.CorePatternLabel));
 
     private static double proximity(double value, double target, double tolerance) => clamp01(1 - Math.Abs(value - target) / Math.Max(1, tolerance));
     private static double clamp01(double value) => Math.Max(0, Math.Min(1, value));

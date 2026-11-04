@@ -64,8 +64,12 @@ public partial class MainWindow : Window
     /// 免得把上一轮的验证结果贴到新池子上。
     /// </summary>
     private int poolGeneration;
-    /// <summary>已经为哪一代池子起过键型验证（每代只起一轮）。</summary>
-    private int verificationGeneration;
+    /// <summary>
+    /// 已经起过验证的池子代次（每代可能补跑，因为候选会分批到）。
+    /// </summary>
+    private int verificationGeneration = -1;
+    /// <summary>上一轮验证开始时的候选数量：候选翻倍才值得再补一轮。</summary>
+    private int verifiedCandidateCount;
     /// <summary>当前这一轮的键型验证任务，首曲预下载要等它一会儿。</summary>
     private Task? patternVerification;
     /// <summary>本轮排序的随机种子：同一轮内重排结果可复现，不同轮之间才有变化。</summary>
@@ -760,15 +764,26 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
         startPatternVerification();
     }
 
-    /// <summary>每轮漫游只起一次验证；池子重建（generation 变了）才会再来一轮。</summary>
+    /// <summary>
+    /// 起一轮键型验证。只有在**候选集已经就绪**时才起：候选还是空的时候起一轮，
+    /// 等于白占掉这一代的验证名额，池子就再也拿不到真实键型（踩过这个坑：
+    /// 日志里「键型预取：候选 0」之后，整个漫游都是纯基础分在排序）。
+    /// 同一代里候选明显变多（比如又翻了几页）才补一轮，避免每批都烧预算。
+    /// </summary>
     private void startPatternVerification()
     {
         if (settings.Mode != "mania" || (settings.SelectedPatterns.Count == 0 && !settings.PreferLn))
             return;
-        if (verificationGeneration == poolGeneration)
+        if (patternVerification is { IsCompleted: false })
+            return;
+        if (candidates.Count == 0)
+            return;
+        if (verificationGeneration == poolGeneration &&
+            candidates.Count < Math.Max(1, verifiedCandidateCount) * 2)
             return;
 
         verificationGeneration = poolGeneration;
+        verifiedCandidateCount = candidates.Count;
         patternVerification = verifyPatternsAsync(poolGeneration);
     }
 
@@ -793,7 +808,9 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
     /// </summary>
     private async Task publishPoolAsync()
     {
-        if (profile is null)
+        // 候选集还没就绪（刚重建、第一批还没回来）时不能重排：空候选排序会算出空结果，
+        // reconcilePool 会把池子里所有能换的卡片都换掉 —— 表现为「池子突然空了/闪一下」。
+        if (profile is null || candidates.Count == 0)
             return;
 
         refreshPatternCache();
