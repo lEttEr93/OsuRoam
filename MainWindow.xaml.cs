@@ -837,8 +837,19 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
 
         bool historyChanged = reconcilePool(desired);
         updatePoolVisibility();
-        if (recommendations.Count > 0 && recommendations.All(item => item.IsRecycled))
+        // 池子空着但候选不为空：说明候选全被筛选条件挡掉了（最常见是「排除已安装谱面」）。
+        // 这时候只说「没有候选谱面」等于把用户堵死，得把漏斗数字说出来。
+        if (desired.Count == 0 && recommendations.Count == 0)
+        {
+            CandidateDiagnosis diagnosis = CandidateFilter.Diagnose(candidates, settings);
+            AppLog.Info($"候选漏斗：{diagnosis.Sets} 个谱面集 → 可推荐难度 {diagnosis.EligibleDiffs} 个" +
+                        $"（已装排除 {diagnosis.InstalledDiffs}，状态不符 {diagnosis.StatusMissedSets} 个集，tag 不符 {diagnosis.TagMissedSets} 个集）");
+            setStatus("status.filtered", diagnosis.Sets, diagnosis.EligibleDiffs, diagnosis.InstalledDiffs);
+        }
+        else if (recommendations.Count > 0 && recommendations.All(item => item.IsRecycled))
+        {
             setStatus("status.recycled");
+        }
         if (historyChanged)
         {
             try

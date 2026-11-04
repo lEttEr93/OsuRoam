@@ -8,6 +8,8 @@ using OsuRoam.Models;
 // 抓 .osu 算键型，落一份 CSV 快照。用来离线评估「勾了 Jacks 到底排出来什么」。
 if (args.Length > 0 && args[0] == "--probe")
     return await probeAsync(args);
+if (args.Length > 0 && args[0] == "--diag")
+    return await diagAsync(args);
 
 testSuccessfulCompletion();
 testAbortDoesNotComplete();
@@ -50,6 +52,7 @@ testPatternLibraryVerifiedOnlyIgnoresTags();
 testPoolReconcilerStreamsReplacements();
 testStreamingRerankIsReproducible();
 testStreamingVerificationReordersPool();
+testCandidateDiagnosisExplainsEmptyPool();
 testPatternSearchHints();
 testCacheCleanerSkipsPoolItems();
 testDirtyTagsAreFiltered();
@@ -2168,4 +2171,154 @@ static async Task<int> probeAsync(string[] args)
 
     static string quote(string value) => "\"" + (value ?? string.Empty).Replace("\"", "'") + "\"";
     return 0;
+}
+
+/// <summary>
+/// 诊断模式：完全按本机 settings.json 跑一遍搜索，然后逐条统计是哪个筛选把候选清空的。
+/// </summary>
+static async Task<int> diagAsync(string[] args)
+{
+    SettingsStore store = new();
+    AppSettings settings = await store.LoadAsync();
+    Console.WriteLine($"设置：{store.SettingsPathForDisplay}");
+    Console.WriteLine($"  用户={settings.Username} 模式={settings.Mode} 键数={settings.ManiaKeys}");
+    Console.WriteLine($"  星级 {settings.MinimumStars}–{settings.MaximumStars} 长度 {settings.MinimumLengthSeconds}–{settings.MaximumLengthSeconds}s 年份 {settings.MinimumYear}–{settings.MaximumYear}");
+    Console.WriteLine($"  tag 白名单 {settings.IncludedTags.Count} 条 / 排除 {settings.ExcludedTags.Count} 条");
+    Console.WriteLine($"  状态 宽松=[{string.Join(",", settings.IncludedStatuses)}] 严格=[{string.Join(",", settings.StrictStatuses)}]");
+    Console.WriteLine($"  类型 宽松=[{string.Join(",", settings.IncludedGenres)}] 严格=[{string.Join(",", settings.StrictGenres)}]");
+    Console.WriteLine($"  语言 宽松=[{string.Join(",", settings.IncludedLanguages)}] 严格=[{string.Join(",", settings.StrictLanguages)}]");
+    Console.WriteLine($"  排除已玩 {settings.ExcludeRecentlyPlayed} 排除已装 {settings.ExcludeInstalledBeatmaps} 已推荐历史 {settings.RecommendationHistory.Count} 条");
+
+    string secret = SecretProtector.Unprotect(settings.ProtectedClientSecret);
+    if (string.IsNullOrEmpty(settings.ClientId) || secret.Length == 0)
+    {
+        Console.WriteLine("拿不到 OAuth 凭据");
+        return 2;
+    }
+    OsuApiClient api = new();
+    api.Configure(settings.ClientId, secret);
+    using CancellationTokenSource cancellation = new(TimeSpan.FromMinutes(10));
+    PlayerProfile profile = await api.BuildProfileAsync(settings.Username, settings.Mode, settings.ManiaKeys, cancellation.Token);
+    Console.WriteLine($"档案：样本 {profile.DifficultySampleCount} 张，已玩谱面集 {profile.PlayedBeatmapsetIds().Count} 个");
+
+    List<OsuBeatmapset> candidates = [];
+    await api.SearchCandidatesInBatchesAsync(settings, settings.MinimumStars, settings.MaximumStars, batch =>
+    {
+        candidates.AddRange(batch);
+        return Task.CompletedTask;
+    }, cancellation.Token);
+    Console.WriteLine($"搜索返回：{candidates.Count} 个谱面集（去重后 {candidates.Select(set => set.Id).Distinct().Count()}）");
+    if (candidates.Count == 0)
+        return 0;
+
+    HashSet<int> played = settings.ExcludeRecentlyPlayed ? [.. profile.PlayedBeatmapsetIds()] : [];
+    Dictionary<string, int> rejected = [];
+    int passed = 0;
+    int eligibleDiffs = 0;
+    List<string> samples = [];
+    void reject(string reason, OsuBeatmapset set)
+    {
+        rejected[reason] = rejected.GetValueOrDefault(reason) + 1;
+        if (samples.Count < 6)
+            samples.Add($"{reason} ← {set.Artist} - {set.Title} [{set.Status}] tags={(set.Tags ?? "").Length}");
+    }
+
+    foreach (OsuBeatmapset set in candidates)
+    {
+        IReadOnlyList<string> setTags = AppSettings.ParseTags(set.Tags);
+        if (played.Contains(set.Id)) { reject("已玩过", set); continue; }
+        if (!settings.MatchesStrictSimpleFilters(set)) { reject("严格状态/类型/语言", set); continue; }
+        if (settings.ExcludedTags.Any(tag => setTags.Contains(tag, StringComparer.OrdinalIgnoreCase))) { reject("命中排除 tag", set); continue; }
+        if (settings.IncludedTags.Count > 0 && !settings.IncludedTags.Any(tag => setTags.Contains(tag, StringComparer.OrdinalIgnoreCase))) { reject("没有白名单 tag", set); continue; }
+        int year = (set.RankedDate ?? set.SubmittedDate)?.Year ?? 0;
+        if (year < settings.MinimumYear || year > settings.MaximumYear) { reject("年份", set); continue; }
+        int diffs = 0;
+        foreach (OsuBeatmap beatmap in set.Beatmaps)
+        {
+            if (!string.Equals(beatmap.Mode, settings.Mode, StringComparison.OrdinalIgnoreCase)) continue;
+            if (settings.Mode == "mania" && (int)Math.Round(beatmap.CircleSize) != settings.ManiaKeys) continue;
+            if (beatmap.DifficultyRating < settings.MinimumStars || beatmap.DifficultyRating > settings.MaximumStars) continue;
+            if (beatmap.TotalLength < settings.MinimumLengthSeconds || beatmap.TotalLength > settings.MaximumLengthSeconds) continue;
+            diffs += 1;
+        }
+        if (diffs == 0) { reject("没有合格难度（星级/时长）", set); continue; }
+        passed += 1;
+        eligibleDiffs += diffs;
+    }
+
+    Console.WriteLine();
+    Console.WriteLine($"通过全部筛选的谱面集 {passed} 个，合格难度 {eligibleDiffs} 个");
+    foreach ((string reason, int count) in rejected.OrderByDescending(pair => pair.Value))
+        Console.WriteLine($"  被拒 {reason}: {count}");
+    // --diag installed：连「排除已安装谱面」一起复现（App 里这个开关打开时最容易把池子筛空）。
+    if (args.Length > 1 && args[1] == "installed")
+    {
+        await LocalBeatmapLibrary.RefreshAsync(store.CacheDirectory, cancellation.Token);
+        settings.ExcludeInstalledBeatmaps = true;
+        Console.WriteLine($"已安装库：{LocalBeatmapLibrary.InstalledBeatmapIds.Count} 个难度 / {LocalBeatmapLibrary.InstalledBeatmapsetIds.Count} 个谱面集（{LocalBeatmapLibrary.Note}）");
+        int installedDiffs = 0;
+        int survivors = 0;
+        foreach (OsuBeatmapset set in candidates)
+        {
+            foreach (OsuBeatmap beatmap in set.Beatmaps)
+            {
+                if (!CandidateFilter.Eligible(set, beatmap, settings))
+                    continue;
+                installedDiffs += 1;
+            }
+        }
+        Console.WriteLine($"打开「排除已安装」后，仍可推荐的难度：{installedDiffs} 个（0 就是池子被筛空的原因）");
+        _ = survivors;
+    }
+
+    // 复现 publishPoolAsync 的那次排序：历史降权、已装排除都跟 App 一致。
+    List<int> lowerPriority = [.. settings.RecommendationHistory];
+    if (settings.ExcludeRecentlyPlayed)
+        lowerPriority.AddRange(profile.PlayedBeatmapsetIds());
+    int inHistory = candidates.Count(set => lowerPriority.Contains(set.Id));
+    Console.WriteLine($"候选里有 {inHistory} 个在「已推荐/已玩」降权表里");
+    IReadOnlyList<RecommendationItem> ranked = new RecommendationEngine().RankAvoidingHistory(
+        candidates, profile, settings, settings.MinimumStars, settings.MaximumStars,
+        new HashSet<int>(), lowerPriority, Math.Max(1, settings.PoolSize),
+        null, null, settings.PatternWeight,
+        settings.ExcludeInstalledBeatmaps && LocalBeatmapLibrary.HasData
+            ? LocalBeatmapLibrary.InstalledBeatmapIds
+            : null,
+        new Random(1));
+    Console.WriteLine($"排序结果：{ranked.Count} 首（池子大小 {settings.PoolSize}）");
+    foreach (RecommendationItem item in ranked)
+        Console.WriteLine($"  {item.Stars:0.00}★ {(item.IsRecycled ? "[回收] " : "")}{item.Artist} - {item.Title}");
+    if (samples.Count > 0)
+    {
+        Console.WriteLine("样例：");
+        foreach (string sample in samples)
+            Console.WriteLine($"  {sample}");
+    }
+    return 0;
+}
+
+static void testCandidateDiagnosisExplainsEmptyPool()
+{
+    // 池子被筛空时必须能说清是哪一层挡的：tag 还是状态。
+    AppSettings settings = recommendationSettings();
+    settings.IncludedTags = ["jack"];
+    settings.StrictStatuses = ["ranked"];
+    settings.MinimumStars = 1;
+    settings.MaximumStars = 10;
+
+    OsuBeatmapset jack = taggedManiaSet(1800, 18001, "jack 叠键");
+    OsuBeatmapset stream = taggedManiaSet(1801, 18011, "stream 流");
+    OsuBeatmapset graveyard = taggedManiaSet(1802, 18021, "jack");
+    graveyard.Status = "graveyard";
+
+    CandidateDiagnosis diagnosis = CandidateFilter.Diagnose([jack, stream, graveyard], settings);
+    assertEqual(3, diagnosis.Sets, "统计应覆盖全部候选谱面集");
+    assertTrue(diagnosis.EligibleDiffs > 0, "符合 tag 与状态的谱面应算作可推荐");
+    assertEqual(1, diagnosis.TagMissedSets, "tag 不匹配的谱面集应单独计数");
+    assertEqual(1, diagnosis.StatusMissedSets, "状态不匹配的谱面集应单独计数");
+
+    // 「排除已安装」只在库里真有数据时才生效，所以这里只验证它不会把未安装的算进去。
+    settings.ExcludeInstalledBeatmaps = true;
+    CandidateDiagnosis withInstalled = CandidateFilter.Diagnose([jack], settings);
+    assertTrue(withInstalled.EligibleDiffs + withInstalled.InstalledDiffs > 0, "两种结局之和应等于之前可推荐的数量");
 }
