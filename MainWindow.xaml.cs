@@ -59,6 +59,21 @@ public partial class MainWindow : Window
     private RecommendationItem? currentRoamItem;
     private bool miniNextBusy;
     private bool settingsControlsReady;
+    /// <summary>
+    /// 推荐池的代次：每建一次池 +1。后台的键型验证发现代次变了就停手，
+    /// 免得把上一轮的验证结果贴到新池子上。
+    /// </summary>
+    private int poolGeneration;
+    /// <summary>已经为哪一代池子起过键型验证（每代只起一轮）。</summary>
+    private int verificationGeneration;
+    /// <summary>当前这一轮的键型验证任务，首曲预下载要等它一会儿。</summary>
+    private Task? patternVerification;
+    /// <summary>本轮排序的随机种子：同一轮内重排结果可复现，不同轮之间才有变化。</summary>
+    private int recommendationSeed;
+    /// <summary>流式发布间隔：验证过程中每隔这么久重排一次池子。</summary>
+    private static readonly TimeSpan StreamingPublishInterval = TimeSpan.FromMilliseconds(400);
+    /// <summary>首曲预下载前等验证的时间上限。</summary>
+    private static readonly TimeSpan FirstDownloadSettleTime = TimeSpan.FromSeconds(2.5);
     private readonly ObservableCollection<string> visibleTags = [];
     private readonly ObservableCollection<SimpleFilterOption> statusFilterOptions = createStatusFilterOptions();
     private readonly ObservableCollection<SimpleFilterOption> genreFilterOptions = createGenreFilterOptions();
@@ -578,6 +593,9 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
             recommendations.Clear();
             playingItem = null;
             preparedNextItem = null;
+            // 新的池子：之前那一轮的验证任务作废，排序换一个种子。
+            poolGeneration += 1;
+            recommendationSeed = Random.Shared.Next();
             refreshTagList();
 
             HashSet<int> candidateIds = [];
@@ -610,8 +628,8 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
                         isRunning = true;
                         roamStarted = true;
                         StartButton.Content = Loc.T("btn.stop");
-                        if (settings.AutoDownload && recommendations.FirstOrDefault() is { } first)
-                            firstPreparation = downloadItemAsync(first, importAfterDownload: settings.AutoImport, "status.preparing");
+                        if (settings.AutoDownload && recommendations.Count > 0)
+                            firstPreparation = prepareFirstItemAsync();
                         else
                             setStatus("status.loaded", recommendations.Count);
                     }
@@ -663,6 +681,9 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
             return;
         }
 
+        // 勾了键型 / 只要面谱：只认真实解析的结果。没验证到的先当「未知」，
+        // 等后台验证落地后重排 —— 拿 tag 推断当结论会让排序看起来有依据，其实是猜的。
+        bool verifiedOnly = settings.SelectedPatterns.Count > 0 || settings.PreferLn;
         Dictionary<int, ManiaPattern?> cache = [];
         foreach (OsuBeatmapset set in candidates)
         {
@@ -673,27 +694,43 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
                     continue;
                 if ((int)Math.Round(beatmap.CircleSize) != settings.ManiaKeys)
                     continue;
-                cache[beatmap.Id] = patternLibrary.Resolve(beatmap.Id, set.Id, tags, settings.ManiaKeys);
+                cache[beatmap.Id] = patternLibrary.Resolve(beatmap.Id, set.Id, tags, settings.ManiaKeys, verifiedOnly);
             }
         }
         patternLookup = id => cache.TryGetValue(id, out ManiaPattern? pattern) ? pattern : null;
     }
 
     /// <summary>
-    /// 键型预取：补一批真实键型，让「勾选键型 / 只要面谱」不必依赖 tag 推断。
-    /// 命中够了就停，预算烧完也停；剩下的候选留给下一轮。
+    /// 键型验证是**流式**的：后台抓 .osu、解析、入库，每落一批就重排一次推荐池，
+    /// 验证前先放出去的未验证结果会被验证后的结果替换掉。
+    /// 整个流程不挡搜索结果 —— 池子是随时间收敛的，而不是等十几秒的空列表。
     /// </summary>
-    private async Task prefetchPatternsAsync()
+    private async Task verifyPatternsAsync(int generation)
     {
         try
         {
             System.Diagnostics.Stopwatch clock = System.Diagnostics.Stopwatch.StartNew();
-            Progress<(int Verified, int Hits)> progress = new(value => setStatus("status.prefetch", value.Verified, value.Hits));
-            PrefetchResult result = await PatternPrefetcher.RunAsync(
+            Progress<(int Verified, int Hits)> progress = new(value =>
+            {
+                if (generation == poolGeneration)
+                    setStatus("status.prefetch", value.Verified, value.Hits);
+            });
+            Task<PrefetchResult> run = PatternPrefetcher.RunAsync(
                 candidates, settings, patternLibrary,
                 (beatmapId, token) => osuFileFetcher.TryFetchAsync(beatmapId, token),
                 PatternPrefetcher.DefaultBudget, PatternPrefetcher.DefaultDeadline, progress, sessionCancellation.Token);
 
+            while (!run.IsCompleted)
+            {
+                await Task.WhenAny(run, Task.Delay(StreamingPublishInterval));
+                if (run.IsCompleted)
+                    break;
+                if (generation != poolGeneration || sessionCancellation.IsCancellationRequested)
+                    break;
+                await publishPoolAsync();
+            }
+
+            PrefetchResult result = await run;
             if (result.Parsed > 0)
                 await patternLibrary.SaveAsync();
 
@@ -701,6 +738,8 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
             AppLog.Info($"键型预取：候选 {result.Considered}，尝试 {result.Attempted}，取回 {result.Completed}，解析 {result.Parsed}，命中 {result.Hits}" +
                         $"（{clock.ElapsedMilliseconds} ms）" +
                         (result.DeadlineReached ? "，到达截止时间" : result.BudgetExhausted ? "，预算用完" : string.Empty));
+            if (generation == poolGeneration)
+                await publishPoolAsync();
         }
         catch (OperationCanceledException)
         {
@@ -711,46 +750,77 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
         }
     }
 
+    /// <summary>补池子：重排一次，需要的话再起一轮后台键型验证。搜索结果每来一批都会调。</summary>
     private async Task refillPoolAsync()
     {
         if (profile is null)
             return;
 
-        // 勾了键型 / 只要面谱：先补一批真实键型，否则这两项只能靠 tag 推断。
-        if (settings.Mode == "mania" && (settings.SelectedPatterns.Count > 0 || settings.PreferLn))
-            await prefetchPatternsAsync();
+        await publishPoolAsync();
+        startPatternVerification();
+    }
+
+    /// <summary>每轮漫游只起一次验证；池子重建（generation 变了）才会再来一轮。</summary>
+    private void startPatternVerification()
+    {
+        if (settings.Mode != "mania" || (settings.SelectedPatterns.Count == 0 && !settings.PreferLn))
+            return;
+        if (verificationGeneration == poolGeneration)
+            return;
+
+        verificationGeneration = poolGeneration;
+        patternVerification = verifyPatternsAsync(poolGeneration);
+    }
+
+    /// <summary>
+    /// 首曲预下载。勾了键型时先让验证跑一小会儿再挑：否则下的是「还没验证就被排到第一」的谱，
+    /// 验证之后那张卡片会被换掉，白下一首。等不到也照样下 —— 不能为了排序把开播卡死。
+    /// </summary>
+    private async Task prepareFirstItemAsync()
+    {
+        if (patternVerification is { IsCompleted: false } verification)
+            await Task.WhenAny(verification, Task.Delay(FirstDownloadSettleTime));
+
+        if (recommendations.FirstOrDefault() is { } first)
+            await downloadItemAsync(first, importAfterDownload: settings.AutoImport, "status.preparing");
+    }
+
+    /// <summary>
+    /// 按「当前已知的键型」重排推荐池，并把结果和现有卡片对齐：
+    /// 锁定中的卡片（正在玩 / 正在下载 / 已预约下一首）留在原位，其余按新排序替换。
+    /// 验证过程中会反复调用，所以排序必须可复现 —— 随机源用本轮固定种子，
+    /// 否则每次重排都会因为探索项抖动把卡片重新洗一遍。
+    /// </summary>
+    private async Task publishPoolAsync()
+    {
+        if (profile is null)
+            return;
 
         refreshPatternCache();
 
-        int missing = Math.Max(0, settings.PoolSize - recommendations.Count);
-        bool historyChanged = false;
-        if (missing > 0)
-        {
-            HashSet<int> excluded = [.. recommendations.Select(item => item.BeatmapsetId)];
-            List<int> lowerPriority =
-            [
-                .. settings.RecommendationHistory,
-                .. sessionImportedBeatmapsetIds
-            ];
-            if (settings.ExcludeRecentlyPlayed)
-                lowerPriority.AddRange(profile.PlayedBeatmapsetIds());
-            IReadOnlyList<RecommendationItem> additions = recommendationEngine.RankAvoidingHistory(
-                candidates, profile, settings, settings.MinimumStars, settings.MaximumStars,
-                excluded, lowerPriority, missing,
-                patternLookup, patternPreference, settings.PatternWeight,
-                settings.ExcludeInstalledBeatmaps && LocalBeatmapLibrary.HasData
-                    ? LocalBeatmapLibrary.InstalledBeatmapIds
-                    : null);
-            foreach (RecommendationItem item in additions)
-            {
-                recommendations.Add(item);
-                settings.RecordRecommendation(item.BeatmapsetId);
-                item.LoadCover();
-                historyChanged = true;
-            }
-        }
+        HashSet<int> inPool = [.. recommendations.Select(item => item.BeatmapsetId)];
+        // 池里已有的谱面要重新参与排序（它们的分数刚被验证结果改过），所以要摘出「历史降权」，
+        // 否则重排会把整个池子换成一批还没验证过的谱面。
+        List<int> lowerPriority =
+        [
+            .. settings.RecommendationHistory.Where(id => !inPool.Contains(id)),
+            .. sessionImportedBeatmapsetIds.Where(id => !inPool.Contains(id))
+        ];
+        if (settings.ExcludeRecentlyPlayed)
+            lowerPriority.AddRange(profile.PlayedBeatmapsetIds().Where(id => !inPool.Contains(id)));
+
+        IReadOnlyList<RecommendationItem> desired = recommendationEngine.RankAvoidingHistory(
+            candidates, profile, settings, settings.MinimumStars, settings.MaximumStars,
+            new HashSet<int>(), lowerPriority, Math.Max(1, settings.PoolSize),
+            patternLookup, patternPreference, settings.PatternWeight,
+            settings.ExcludeInstalledBeatmaps && LocalBeatmapLibrary.HasData
+                ? LocalBeatmapLibrary.InstalledBeatmapIds
+                : null,
+            new Random(recommendationSeed));
+
+        bool historyChanged = reconcilePool(desired);
         updatePoolVisibility();
-        if (missing > 0 && recommendations.Count > 0 && recommendations.All(item => item.IsRecycled))
+        if (recommendations.Count > 0 && recommendations.All(item => item.IsRecycled))
             setStatus("status.recycled");
         if (historyChanged)
         {
@@ -765,6 +835,74 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
             }
         }
         _ = prefetchPoolAsync();
+    }
+
+    /// <summary>
+    /// 把池子对齐到新的排序。返回是否有卡片新进池（需要记历史 / 存设置）。
+    /// 已经加载过封面、展开过详情的同 id 卡片直接复用，避免重排时闪烁。
+    /// </summary>
+    private bool reconcilePool(IReadOnlyList<RecommendationItem> desired)
+    {
+        HashSet<int> pinned = pinnedBeatmapsetIds();
+        List<RecommendationItem> next = PoolReconciler.Build(
+            recommendations, desired, pinned, Math.Max(1, settings.PoolSize));
+        if (PoolReconciler.SameSequence(recommendations, next))
+            return false;
+
+        HashSet<int> known = [.. recommendations.Select(item => item.BeatmapsetId)];
+        // 原地对齐：整表 Clear 再重填会让列表闪烁、滚动位置归零，所以尽量只做 Move / Insert。
+        for (int index = 0; index < next.Count; index += 1)
+        {
+            int existing = indexOfBeatmapset(next[index].BeatmapsetId, index);
+            if (existing == index)
+                continue;
+            if (existing > index)
+                recommendations.Move(existing, index);
+            else
+                recommendations.Insert(index, next[index]);
+        }
+        while (recommendations.Count > next.Count)
+            recommendations.RemoveAt(recommendations.Count - 1);
+
+        bool recorded = false;
+        foreach (RecommendationItem item in next)
+        {
+            if (!known.Add(item.BeatmapsetId))
+                continue;
+            settings.RecordRecommendation(item.BeatmapsetId);
+            item.LoadCover();
+            recorded = true;
+        }
+        AppLog.Info($"推荐池重排：{recommendations.Count} 首（锁定 {pinned.Count}）");
+        return recorded;
+    }
+
+    /// <summary>池子里这个谱面集现在的位置；从 from 开始往后找（前面已经对齐了）。</summary>
+    private int indexOfBeatmapset(int beatmapsetId, int from)
+    {
+        for (int index = from; index < recommendations.Count; index += 1)
+        {
+            if (recommendations[index].BeatmapsetId == beatmapsetId)
+                return index;
+        }
+        return -1;
+    }
+
+    /// <summary>这几张卡片不能被重排换掉：正在玩、正在下载 / 导入、已预约下一首。</summary>
+    private HashSet<int> pinnedBeatmapsetIds()
+    {
+        HashSet<int> pinned = [];
+        foreach (RecommendationItem? item in new[] { playingItem, preparedNextItem, currentRoamItem })
+        {
+            if (item is not null)
+                pinned.Add(item.BeatmapsetId);
+        }
+        foreach (RecommendationItem item in recommendations)
+        {
+            if (item.DownloadState is DownloadState.Queued or DownloadState.Downloading or DownloadState.Importing)
+                pinned.Add(item.BeatmapsetId);
+        }
+        return pinned;
     }
 
     private void DetailButton_Click(object sender, RoutedEventArgs e)

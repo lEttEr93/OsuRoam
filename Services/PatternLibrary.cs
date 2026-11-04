@@ -172,8 +172,15 @@ public sealed class PatternLibrary
     }
 
     /// <summary>候选谱面的键型：优先真实数据，退回 tag 推断（推断结果不入库，避免污染库）。</summary>
-    public ManiaPattern? Resolve(int beatmapId, int beatmapsetId, IReadOnlyList<string> tags, int keys)
+    /// <param name="verifiedOnly">
+    /// 只用「真实解析 + 当前版本」的结果。勾选键型 / 只要面谱时走这条：
+    /// tag 推断出来的占比会让「猜中的」和「真中的」拿同样的分，等于拿猜测当结论。
+    /// </param>
+    public ManiaPattern? Resolve(int beatmapId, int beatmapsetId, IReadOnlyList<string> tags, int keys, bool verifiedOnly = false)
     {
+        if (verifiedOnly)
+            return TryGetVerified(beatmapId);
+
         if (TryGet(beatmapId) is { } known)
             return known;
 

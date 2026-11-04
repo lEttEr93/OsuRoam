@@ -16,13 +16,14 @@ public sealed class RecommendationEngine
         Func<int, ManiaPattern?>? patternLookup = null,
         double[]? patternPreference = null,
         double patternWeight = 0,
-        IReadOnlySet<int>? excludedBeatmapIds = null)
+        IReadOnlySet<int>? excludedBeatmapIds = null,
+        Random? random = null)
     {
         if (count <= 0) return [];
         List<OsuBeatmapset> source = beatmapsets.ToList();
         HashSet<int> historyIds = recommendationHistory.Where(id => id > 0).ToHashSet();
         HashSet<int> excludedFresh = [.. excludedBeatmapsetIds, .. historyIds];
-        List<RecommendationItem> result = Rank(source, profile, settings, minimumStars, maximumStars, excludedFresh, count, false, patternLookup, patternPreference, patternWeight, excludedBeatmapIds).ToList();
+        List<RecommendationItem> result = Rank(source, profile, settings, minimumStars, maximumStars, excludedFresh, count, false, patternLookup, patternPreference, patternWeight, excludedBeatmapIds, random).ToList();
         HashSet<int> selectedIds = [.. excludedBeatmapsetIds, .. result.Select(item => item.BeatmapsetId)];
         if (result.Count >= count) return result;
 
@@ -30,7 +31,7 @@ public sealed class RecommendationEngine
         foreach (int beatmapsetId in recommendationHistory)
         {
             if (beatmapsetId <= 0 || !checkedHistoryIds.Add(beatmapsetId) || selectedIds.Contains(beatmapsetId)) continue;
-            RecommendationItem? reusable = Rank(source.Where(set => set.Id == beatmapsetId), profile, settings, minimumStars, maximumStars, selectedIds, 1, isRecycled: true, patternLookup, patternPreference, patternWeight, excludedBeatmapIds).FirstOrDefault();
+            RecommendationItem? reusable = Rank(source.Where(set => set.Id == beatmapsetId), profile, settings, minimumStars, maximumStars, selectedIds, 1, isRecycled: true, patternLookup, patternPreference, patternWeight, excludedBeatmapIds, random).FirstOrDefault();
             if (reusable is null) continue;
             result.Add(reusable);
             selectedIds.Add(reusable.BeatmapsetId);
@@ -51,7 +52,8 @@ public sealed class RecommendationEngine
         Func<int, ManiaPattern?>? patternLookup = null,
         double[]? patternPreference = null,
         double patternWeight = 0,
-        IReadOnlySet<int>? excludedBeatmapIds = null)
+        IReadOnlySet<int>? excludedBeatmapIds = null,
+        Random? random = null)
     {
         double starCenter = (minimumStars + maximumStars) / 2;
         double starRadius = Math.Max(0.2, (maximumStars - minimumStars) / 2);
@@ -59,6 +61,9 @@ public sealed class RecommendationEngine
         List<OsuBeatmapset> source = beatmapsets.ToList();
         List<RecommendationItem> candidates = [];
         HashSet<int> rankedBeatmapsetIds = [];
+        // 探索项用调用方给的随机源：传入同一个种子时排序可复现，
+        // 流式重排才不会因为随机数抖动把卡片来回洗牌。
+        Random pick = random ?? Random.Shared;
 
         foreach (OsuBeatmapset set in source)
         {
@@ -86,7 +91,7 @@ public sealed class RecommendationEngine
                 double starFit = clamp01(1 - Math.Abs(beatmap.DifficultyRating - starCenter) / starRadius);
                 double lengthFit = proximity(beatmap.TotalLength, profile.PreferredLength, 180);
                 double mapperFit = profile.MapperFrequency.TryGetValue(set.Creator, out int mapperCount) ? (double)mapperCount / maxMapperCount : 0;
-                double discovery = Random.Shared.NextDouble();
+                double discovery = pick.NextDouble();
                 double familiarityWeight = 1 - settings.Exploration * 0.55;
                 double tagFit = settings.IncludedTags.Count == 0 ? 0 : (double)settings.IncludedTags.Count(tag => setTags.Contains(tag, StringComparer.OrdinalIgnoreCase)) / settings.IncludedTags.Count;
                 double simpleFilterFit = settings.SimpleFilterFit(set);

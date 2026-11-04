@@ -39,6 +39,10 @@ testPatternSelectionNormalizes();
 testSelectedPatternShapesRanking();
 testPatternPrefetchFillsLibrary();
 testPatternLibraryRejectsStaleCache();
+testPatternLibraryVerifiedOnlyIgnoresTags();
+testPoolReconcilerStreamsReplacements();
+testStreamingRerankIsReproducible();
+testStreamingVerificationReordersPool();
 testPatternSearchHints();
 testCacheCleanerSkipsPoolItems();
 testDirtyTagsAreFiltered();
@@ -1870,4 +1874,130 @@ static void testSearchSortPlanRotates()
     }
 
     assertEqual(0, OsuApiClient.BuildSortPlan(0, 0).Length, "页数为 0 时应得到空计划");
+}
+
+static void testPoolReconcilerStreamsReplacements()
+{
+    RecommendationItem first = poolCard(1);
+    RecommendationItem downloading = poolCard(2);
+    RecommendationItem stale = poolCard(3);
+    RecommendationItem fresh = poolCard(4);
+
+    // 池子里是 [1,2,3]；验证后新排序是 [4,1]，2 正在下载不能被换掉。
+    List<RecommendationItem> next = PoolReconciler.Build(
+        new[] { first, downloading, stale }, new[] { fresh, first }, new HashSet<int> { 2 }, 3);
+    assertTrue(next.Select(item => item.BeatmapsetId).SequenceEqual(new[] { 2, 4, 1 }), "锁定项在最前，其余按新排序补齐");
+    assertTrue(ReferenceEquals(next[0], downloading), "锁定项应复用原卡片实例");
+    assertTrue(ReferenceEquals(next[2], first), "同 id 卡片应复用原实例，避免重排时封面闪烁");
+
+    // 顺序没变就不该动 UI 集合。
+    List<RecommendationItem> same = PoolReconciler.Build(
+        next, new[] { downloading, fresh, first }, new HashSet<int>(), 3);
+    assertTrue(PoolReconciler.SameSequence(next, same), "同一排序应判定为无变化");
+
+    // 超过池子上限要截断。
+    assertEqual(2, PoolReconciler.Build([], new[] { first, downloading, stale }, new HashSet<int>(), 2).Count, "池子上限应生效");
+}
+
+static void testPatternLibraryVerifiedOnlyIgnoresTags()
+{
+    PatternLibrary library = new();
+    IReadOnlyList<string> tags = ["stream"];
+
+    // 默认允许 tag 推断（刚装上、还没下载过谱面时也要有信号）。
+    assertTrue(library.Resolve(11, 110, tags, 4) is { Source: PatternSource.Tags }, "默认设置下 tag 推断仍然可用");
+    assertTrue(library.Resolve(11, 110, tags, 4, verifiedOnly: true) is null, "勾选键型时 tag 推断不能当结论");
+
+    library.Put(new ManiaPattern
+    {
+        BeatmapId = 12, Source = PatternSource.Osu, AnalyzerVersion = ManiaPatternAnalyzer.Version,
+        LnRatio = 0.4, CoreShares = new() { ["Coordination"] = 0.7 }
+    });
+    assertTrue(library.Resolve(12, 120, tags, 4, verifiedOnly: true) is { LnRatio: 0.4 }, "真实解析结果应通过验证门槛");
+
+    library.Put(new ManiaPattern
+    {
+        BeatmapId = 13, Source = PatternSource.Osu, AnalyzerVersion = ManiaPatternAnalyzer.Version - 1
+    });
+    assertTrue(library.Resolve(13, 130, tags, 4, verifiedOnly: true) is null, "旧分析器版本的缓存要重抓");
+}
+
+static void testStreamingRerankIsReproducible()
+{
+    // 流式发布用同一个种子反复重排：同一批候选必须给出同一个顺序，否则卡片会一直洗牌。
+    AppSettings settings = recommendationSettings();
+    settings.Exploration = 0.45;
+    PlayerProfile profile = emptyProfile();
+    List<OsuBeatmapset> sets = [.. Enumerable.Range(0, 12).Select(index => maniaSet(900 + index, 9001 + index, 4))];
+
+    List<int> ids = [.. sets.Select(set => set.Id)];
+
+    List<int> rank(int seed) => [..
+        new RecommendationEngine()
+            .RankAvoidingHistory(sets, profile, settings, 1, 10, new HashSet<int>(), [], 5, null, null, 0, null, new Random(seed))
+            .Select(item => item.BeatmapsetId)];
+
+    List<int> first = rank(20261104);
+    assertEqual(5, first.Count, "应排出一个完整的池子");
+    assertTrue(first.SequenceEqual(rank(20261104)), "同一种子重排必须可复现");
+    assertTrue(!first.SequenceEqual(rank(1)), "换种子后探索顺序应该不同");
+    assertTrue(first.All(ids.Contains), "排序结果只能来自候选集合");
+}
+
+static RecommendationItem poolCard(int beatmapsetId) => new()
+{
+    BeatmapsetId = beatmapsetId,
+    BeatmapId = beatmapsetId * 10,
+    Artist = "artist",
+    Title = $"set-{beatmapsetId}",
+    DifficultyName = "4K",
+    Mapper = "mapper",
+    Stars = 3,
+    Bpm = 180,
+    LengthSeconds = 120,
+    RankedYear = 2024,
+    Score = 1
+};
+
+static void testStreamingVerificationReordersPool()
+{
+    // 流式发布的完整路径：先按「还没验证」排一个临时池，后台验证落地后再重排。
+    AppSettings settings = recommendationSettings();
+    settings.SelectedPatterns = ["Stream"];
+    PlayerProfile profile = emptyProfile();
+    List<OsuBeatmapset> sets = [maniaSet(710, 7101, 4), maniaSet(711, 7111, 4), maniaSet(712, 7121, 4)];
+
+    PatternLibrary library = new();
+    // 勾了键型时只看真实解析结果 —— 这正是 MainWindow.refreshPatternCache 的做法。
+    Func<int, ManiaPattern?> lookup = id => library.Resolve(id, id / 10, [], 4, verifiedOnly: true);
+
+    List<int> rank() => [..
+        new RecommendationEngine()
+            .RankAvoidingHistory(sets, profile, settings, 1, 10, new HashSet<int>(), [], 3,
+                lookup, null, 0, null, new Random(7))
+            .Select(item => item.BeatmapsetId)];
+
+    List<int> provisional = rank();
+    assertEqual(3, provisional.Count, "没有键型数据时也要先放出临时池，不能等验证");
+    assertEqual(712, provisional[^1], "验证前只看基础分，同分时按候选顺序");
+
+    // 后台验证到 7121 是纯流谱。
+    int[] alternation = [0, 1, 2, 3, 2, 1, 0, 1];
+    List<string> notes = [];
+    for (int index = 0; index < 20; index += 1)
+        notes.Add(note(4, alternation[index % alternation.Length], 1000 + index * 100));
+    assertTrue(library.Ingest(osuFile(4, notes), 7121, 712), "流谱应能解析入库");
+
+    List<int> verified = rank();
+    assertEqual(712, verified[0], "验证出流谱后应重排到最前");
+    assertEqual(3, verified.Count, "重排不应丢掉还没验证的候选");
+
+    // 池子按新排序对齐：712 从最后挪到最前，其他卡片不重下封面。
+    RecommendationItem a = poolCard(710);
+    RecommendationItem b = poolCard(711);
+    RecommendationItem c = poolCard(712);
+    List<RecommendationItem> next = PoolReconciler.Build(
+        new[] { a, b, c }, [c, a, b], new HashSet<int>(), 3);
+    assertTrue(next.Select(item => item.BeatmapsetId).SequenceEqual(verified), "池子应对齐到验证后的排序");
+    assertTrue(ReferenceEquals(next[0], c), "挪位置的卡片应复用原实例");
 }
