@@ -30,6 +30,19 @@ public sealed class PatternLibrary
         }
     }
 
+    /// <summary>
+    /// 库版本号：每次入库 +1。UI 用它判断「键型数据有没有变化」，
+    /// 没变化就不用重排推荐池（长跑时避免每次回包都全量重排）。
+    /// </summary>
+    public int Revision
+    {
+        get
+        {
+            lock (gate)
+                return revision;
+        }
+    }
+
     public int ParsedCount
     {
         get

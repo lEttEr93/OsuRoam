@@ -71,6 +71,7 @@ testPoolDownloadOrderingPutsQualifyingFirst();
 testDownloadCancelRuleUsesMembershipNotQueue();
 testCandidateAdmissionJudgesByVerifiedPattern();
 testSearchStatusFollowsWhitelist();
+testReconcileRefreshesFallbackFlagOnReusedCard();
 testPatternSearchHints();
 testCacheCleanerSkipsPoolItems();
 testDirtyTagsAreFiltered();
@@ -3014,4 +3015,31 @@ static void testSearchStatusFollowsWhitelist()
 
     settings.IncludedStatuses = ["ranked", "graveyard"];
     assertTrue(OsuApiClient.StatusQuery(settings) == "ranked", "含 ranked 时优先 ranked，别把 graveyard 引进页面");
+}
+
+static void testReconcileRefreshesFallbackFlagOnReusedCard()
+{
+    // 卡片实例被复用（保留封面/详情）时，补位标记必须跟着这次排序刷新，
+    // 否则一张卡从严格变成补位，界面上还挂着旧状态。
+    RecommendationItem strictCard = poolCard(3201);
+    RecommendationItem fallbackCard = new()
+    {
+        BeatmapsetId = 3202, BeatmapId = 32021, Artist = "a", Title = "fallback", DifficultyName = "4K",
+        Mapper = "m", Stars = 3, Bpm = 180, LengthSeconds = 120, RankedYear = 2024, Score = 1, IsFallback = true
+    };
+    List<RecommendationItem> pool = [strictCard, fallbackCard];
+
+    // 新排序：3202 变成严格，3201 变成补位（desired 里都是全新实例）。
+    RecommendationItem desiredStrict = poolCard(3202);
+    RecommendationItem desiredFallback = new()
+    {
+        BeatmapsetId = 3201, BeatmapId = 32011, Artist = "a", Title = "now-fallback", DifficultyName = "4K",
+        Mapper = "m", Stars = 3, Bpm = 180, LengthSeconds = 120, RankedYear = 2024, Score = 1, IsFallback = true
+    };
+    List<RecommendationItem> next = PoolReconciler.Build(
+        pool, [desiredStrict, desiredFallback], new HashSet<int>(), 5);
+
+    assertTrue(next.Any(item => item.BeatmapsetId == 3202 && !item.IsFallback), "3202 这次是严格，标记要清掉");
+    assertTrue(next.Any(item => item.BeatmapsetId == 3201 && item.IsFallback), "3201 这次是补位，标记要打上");
+    assertTrue(ReferenceEquals(next[0], fallbackCard), "复用原实例（封面等不重载）");
 }

@@ -54,7 +54,20 @@ public sealed class RecommendationItem : INotifyPropertyChanged
     /// 候选不足时补进来的「凑数」条目：放宽了 tag 白名单或允许已玩过的谱面。
     /// 后台继续翻页/验证后，一旦够格的候选出现，这些卡片会被替换掉。
     /// </summary>
-    public bool IsFallback { get; init; }
+    public bool IsFallback
+    {
+        get => isFallback;
+        set
+        {
+            if (isFallback == value)
+                return;
+            isFallback = value;
+            // 卡片上显示的是 Reason，里面带「放宽补位」，所以必须一起通知。
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Reason)));
+        }
+    }
+
+    private bool isFallback;
     public string CoverUrl => $"https://assets.ppy.sh/beatmaps/{BeatmapsetId}/covers/cover.jpg";
 
     private System.Windows.Media.ImageSource? cover;

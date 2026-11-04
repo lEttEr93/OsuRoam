@@ -39,7 +39,18 @@ public static class PoolReconciler
                 break;
             if (next.Any(other => other.BeatmapsetId == item.BeatmapsetId))
                 continue;
-            next.Add(current.FirstOrDefault(existing => existing.BeatmapsetId == item.BeatmapsetId) ?? item);
+            // 复用同 id 的卡片实例（封面/详情不重载），但「是不是补位」要跟着这次排序更新，
+            // 否则一张卡从严格变成补位时，标签还停在旧状态。
+            RecommendationItem? existing = current.FirstOrDefault(item2 => item2.BeatmapsetId == item.BeatmapsetId);
+            if (existing is null)
+            {
+                next.Add(item);
+            }
+            else
+            {
+                existing.IsFallback = item.IsFallback;
+                next.Add(existing);
+            }
         }
         return next;
     }

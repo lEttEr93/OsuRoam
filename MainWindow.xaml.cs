@@ -84,6 +84,15 @@ public partial class MainWindow : Window
     /// <summary>准入 worker 是否在跑（避免每批候选都叠一个）。</summary>
     private bool admitting;
 
+    /// <summary>上一次真正重排的时间，用于合并高频请求。</summary>
+    private DateTime lastPoolPublishUtc = DateTime.MinValue;
+    /// <summary>已经排了一次延迟重排，别重复排。</summary>
+    private bool poolPublishScheduled;
+    /// <summary>上次重排时的输入指纹：候选数、键型库版本、池内顺序。</summary>
+    private int publishedCandidateCount = -1;
+    private int publishedLibraryRevision = -1;
+    private string publishedPoolSignature = string.Empty;
+
     /// <summary>
     /// 进行中的「池内预下载」，按谱面集 id 索引。池子每次重排都会重新调度：
     /// 出池的取消、新进池的插队，同一个谱面集不会下两次。
@@ -96,6 +105,12 @@ public partial class MainWindow : Window
     private readonly HashSet<int> poolDownloadRetried = [];
     /// <summary>本轮排序的随机种子：同一轮内重排结果可复现，不同轮之间才有变化。</summary>
     private int recommendationSeed;
+    /// <summary>
+    /// 推荐池重排的最小间隔。验证/翻页时每来一批都会请求重排，这里合并成 1.5 秒一次，
+    /// 否则长跑时池子会一直抖（用户说的「抽搐」）。
+    /// </summary>
+    private static readonly TimeSpan PoolPublishInterval = TimeSpan.FromMilliseconds(1500);
+
     /// <summary>准入最多跑几轮（每轮最多 AdmissionBudgetPerRound 次抓取）。</summary>
     private const int AdmissionRounds = 3;
     /// <summary>准入每轮的抓取预算。</summary>
@@ -853,7 +868,7 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
                 patternMismatchSetIds.Add(beatmapsetId);
             }
             rebuildCandidates();
-            _ = publishPoolAsync();
+            requestPoolPublish();
         });
     }
 
@@ -883,6 +898,41 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
     /// 验证过程中会反复调用，所以排序必须可复现 —— 随机源用本轮固定种子，
     /// 否则每次重排都会因为探索项抖动把卡片重新洗一遍。
     /// </summary>
+    /// <summary>
+    /// 请求一次重排：高频调用会被合并（1.5 秒一次），避免池子抽搐。
+    /// 需要立刻拿到结果的场景（准入结束、漫游结束）直接用 <see cref="publishPoolAsync"/>。
+    /// </summary>
+    private void requestPoolPublish()
+    {
+        if (poolPublishScheduled || sessionCancellation.IsCancellationRequested)
+            return;
+        TimeSpan elapsed = DateTime.UtcNow - lastPoolPublishUtc;
+        if (elapsed >= PoolPublishInterval)
+        {
+            _ = publishPoolAsync();
+            return;
+        }
+        poolPublishScheduled = true;
+        _ = publishAfterDelayAsync(PoolPublishInterval - elapsed);
+    }
+
+    private async Task publishAfterDelayAsync(TimeSpan delay)
+    {
+        try
+        {
+            await Task.Delay(delay, sessionCancellation.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            poolPublishScheduled = false;
+            return;
+        }
+        poolPublishScheduled = false;
+        await publishPoolAsync();
+    }
+
+    private string poolSignature() => string.Join(",", recommendations.Select(item => item.BeatmapsetId));
+
     private async Task publishPoolAsync()
     {
         // 候选集还没就绪（刚重建、第一批还没回来）时不能重排：空候选排序会算出空结果，
@@ -890,6 +940,14 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
         if (profile is null || candidates.Count == 0)
             return;
 
+        // 输入没变就不重排：候选数量、键型库版本、池内顺序三者一致时，结果必然一样。
+        string signatureBefore = poolSignature();
+        if (candidates.Count == publishedCandidateCount &&
+            patternLibrary.Revision == publishedLibraryRevision &&
+            signatureBefore == publishedPoolSignature)
+            return;
+
+        lastPoolPublishUtc = DateTime.UtcNow;
         refreshPatternCache();
 
         HashSet<int> inPool = [.. recommendations.Select(item => item.BeatmapsetId)];
@@ -943,9 +1001,9 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
         }
         else if (fallbackCount > 0)
         {
-            // 有补位卡片：告诉玩家候选不足，后台还在继续翻页/验证，够格的会替换掉这些。
-            AppLog.Info($"候选不足：{fallbackCount} 首是按放宽条件补的（tag 降级为加权 / 允许已玩过），继续翻页寻找");
-            setStatus("status.shortcandidates", fallbackCount, recommendations.Count - fallbackCount);
+            // 不弹状态提示了：卡片自己带「放宽补位」标记，状态栏提示会被验证/下载状态顶掉，
+            // 反而更混乱。日志留一条够排查。
+            AppLog.Info($"补位卡 {fallbackCount} 首（tag 降级为加权 / 允许已玩过），后台继续找够格的替换");
         }
         else if (recommendations.Count > 0 && recommendations.All(item => item.IsRecycled))
         {
@@ -963,6 +1021,9 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
                 AppLog.Error("Failed to save recommendation history", exception);
             }
         }
+        publishedCandidateCount = candidates.Count;
+        publishedLibraryRevision = patternLibrary.Revision;
+        publishedPoolSignature = poolSignature();
         schedulePoolDownloads();
     }
 
@@ -1158,7 +1219,7 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
         if (profile is null)
             return;
 
-        await publishPoolAsync();
+        requestPoolPublish();
         if (usesPatternGate())
             startAdmission();
     }
