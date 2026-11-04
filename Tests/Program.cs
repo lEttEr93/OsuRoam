@@ -69,6 +69,8 @@ testKeywordCandidatesAreJudgedByVerifiedPattern();
 testKeywordCandidatesEnterVerificationQueue();
 testPoolDownloadOrderingPutsQualifyingFirst();
 testDownloadCancelRuleUsesMembershipNotQueue();
+testCandidateAdmissionJudgesByVerifiedPattern();
+testSearchStatusFollowsWhitelist();
 testPatternSearchHints();
 testCacheCleanerSkipsPoolItems();
 testDirtyTagsAreFiltered();
@@ -2955,4 +2957,39 @@ static void testDownloadCancelRuleUsesMembershipNotQueue()
     assertTrue(!PoolDownloadPlanner.ShouldCancel(3103, pool), "已排队的不能取消");
     assertTrue(PoolDownloadPlanner.ShouldCancel(3104, pool), "已经下完的不再需要下载，可以释放通道");
     assertTrue(PoolDownloadPlanner.ShouldCancel(3199, pool), "已经不在池子里的必须取消");
+}
+
+static void testCandidateAdmissionJudgesByVerifiedPattern()
+{
+    AppSettings settings = recommendationSettings();
+    settings.SelectedPatterns = ["Jacks"];
+    // SelectedShare 是「所选键型在六个核心型里的时间占比」，所以没被选中的键型也要写进去。
+    ManiaPattern jack = new() { CoreShares = new() { ["Jacks"] = 0.4, ["Stream"] = 0.6 }, LnRatio = 0 };
+    ManiaPattern weak = new() { CoreShares = new() { ["Jacks"] = 0.1, ["Stream"] = 0.9 }, LnRatio = 0 };
+    assertTrue(CandidateAdmission.IsStrict(jack, settings), "叠键 40% 应判定为达标候选");
+    assertTrue(!CandidateAdmission.IsStrict(weak, settings), "叠键 10% 只能当备用");
+    assertTrue(!CandidateAdmission.IsStrict(null, settings), "没解析出键型就不算达标（准入必判）");
+
+    settings.SelectedPatterns = [];
+    settings.PreferLn = true;
+    ManiaPattern ln = new() { LnRatio = 0.4, CoreShares = [] };
+    ManiaPattern rice = new() { LnRatio = 0.05, CoreShares = [] };
+    assertTrue(CandidateAdmission.IsStrict(ln, settings), "「只要面谱」时 LN 谱达标");
+    assertTrue(!CandidateAdmission.IsStrict(rice, settings), "非 LN 谱只能当备用");
+}
+
+static void testSearchStatusFollowsWhitelist()
+{
+    AppSettings settings = recommendationSettings();
+    settings.IncludedStatuses = ["ranked", "loved"];
+    assertTrue(OsuApiClient.StatusQuery(settings) == "ranked", "勾了 ranked+loved 时应按 ranked 查（loved 靠本地过滤）");
+
+    settings.IncludedStatuses = ["loved"];
+    assertTrue(OsuApiClient.StatusQuery(settings) == "loved", "只勾 loved 就查 loved");
+
+    settings.IncludedStatuses = [];
+    assertTrue(OsuApiClient.StatusQuery(settings) == "any", "没勾状态时不限制");
+
+    settings.IncludedStatuses = ["ranked", "graveyard"];
+    assertTrue(OsuApiClient.StatusQuery(settings) == "ranked", "含 ranked 时优先 ranked，别把 graveyard 引进页面");
 }

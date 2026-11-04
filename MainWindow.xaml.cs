@@ -64,16 +64,25 @@ public partial class MainWindow : Window
     /// </summary>
     private int poolGeneration;
     /// <summary>
-    /// 已经起过验证的池子代次（每代可能补跑，因为候选会分批到）。
-    /// </summary>
-    private int verificationGeneration = -1;
-    /// <summary>上一轮验证开始时的候选数量：候选翻倍才值得再补一轮。</summary>
-    private int verifiedCandidateCount;
-    /// <summary>
     /// 关键字搜索召回、但 tag 白名单没命中的谱面集。它们的 tag 不可信（可能只是曲名/作者撞词），
     /// 决断权交给解析出来的真实键型。
     /// </summary>
     private readonly HashSet<int> keywordBeatmapsetIds = [];
+
+    /// <summary>
+    /// 搜索到的全部谱面集（包括还没判键型的）。勾了键型时它们只是「待判」，
+    /// 判定通过才进 candidates；没勾键型时直接就是候选。
+    /// </summary>
+    private List<OsuBeatmapset> searchResults = [];
+
+    /// <summary>键型判定通过、可以进候选的谱面集。</summary>
+    private readonly HashSet<int> admittedSetIds = [];
+
+    /// <summary>键型不达标的谱面集：严格池不用，候选不足时才拿来兜底。</summary>
+    private readonly HashSet<int> patternMismatchSetIds = [];
+
+    /// <summary>准入 worker 是否在跑（避免每批候选都叠一个）。</summary>
+    private bool admitting;
 
     /// <summary>
     /// 进行中的「池内预下载」，按谱面集 id 索引。池子每次重排都会重新调度：
@@ -85,14 +94,16 @@ public partial class MainWindow : Window
     private sealed record PoolDownload(CancellationTokenSource Cancellation, Task Task);
     /// <summary>已经失败过一次的谱面集，避免失败即重试的死循环（每张只补一次）。</summary>
     private readonly HashSet<int> poolDownloadRetried = [];
-    /// <summary>当前这一轮的键型验证任务，首曲预下载要等它一会儿。</summary>
-    private Task? patternVerification;
     /// <summary>本轮排序的随机种子：同一轮内重排结果可复现，不同轮之间才有变化。</summary>
     private int recommendationSeed;
+    /// <summary>准入最多跑几轮（每轮最多 AdmissionBudgetPerRound 次抓取）。</summary>
+    private const int AdmissionRounds = 3;
+    /// <summary>准入每轮的抓取预算。</summary>
+    private const int AdmissionBudgetPerRound = 12;
+    /// <summary>准入每轮的截止秒数。</summary>
+    private const int AdmissionSecondsPerRound = 8;
     /// <summary>流式发布间隔：验证过程中每隔这么久重排一次池子。</summary>
     private static readonly TimeSpan StreamingPublishInterval = TimeSpan.FromMilliseconds(400);
-    /// <summary>首曲预下载前等验证的时间上限。</summary>
-    private static readonly TimeSpan FirstDownloadSettleTime = TimeSpan.FromSeconds(2.5);
     private readonly ObservableCollection<string> visibleTags = [];
     private readonly ObservableCollection<SimpleFilterOption> statusFilterOptions = createStatusFilterOptions();
     private readonly ObservableCollection<SimpleFilterOption> genreFilterOptions = createGenreFilterOptions();
@@ -609,6 +620,9 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
             ProfileText.Text = $"{profile.User.Username} · {difficultyProfileLabel()} · {formatStarRange(settings.MinimumStars, settings.MaximumStars)}{sampleLabel}";
             setStatus("status.search");
             candidates = [];
+            searchResults = [];
+            admittedSetIds.Clear();
+            patternMismatchSetIds.Clear();
             recommendations.Clear();
             playingItem = null;
             preparedNextItem = null;
@@ -633,11 +647,16 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
 
                     if (fromKeyword)
                         keywordBeatmapsetIds.UnionWith(newSets.Select(set => set.Id));
-                    candidates = candidates.Concat(newSets).ToList();
+                    searchResults.AddRange(newSets);
+                    rebuildCandidates();
                     settings.RecordTags(newSets.SelectMany(set => AppSettings.ParseTags(set.Tags)));
                     refreshTagList();
                     maybeSubmitTags();
-                    await refillPoolAsync();
+                    // 勾了键型：先判键型再进候选（准入 worker 自己边判边发布）。
+                    if (usesPatternGate())
+                        startAdmission();
+                    else
+                        await refillPoolAsync();
 
                     if (!roamStarted && recommendations.Count > 0)
                     {
@@ -730,106 +749,133 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
     }
 
     /// <summary>
-    /// 键型验证是**流式**的：后台抓 .osu、解析、入库，每落一批就重排一次推荐池，
-    /// 验证前先放出去的未验证结果会被验证后的结果替换掉。
-    /// 整个流程不挡搜索结果 —— 池子是随时间收敛的，而不是等十几秒的空列表。
+    /// 候选准入：**先判键型，再决定要不要进候选**。
+    ///
+    /// 流程：搜索结果先进 <see cref="searchResults"/>（全部待判），这里逐张抓 `.osu`、解析键型，
+    /// 占比达标的进候选（`admittedSetIds`），不达标的记为备用（`patternMismatchSetIds`），
+    /// 严格池不够时才会用备用。够格候选攒到 `PoolSize × 2` 就停手，不再烧预算。
     /// </summary>
-    private async Task verifyPatternsAsync(int generation)
+    private void startAdmission()
+    {
+        if (!usesPatternGate() || admitting || searchResults.Count == 0)
+            return;
+        if (sessionCancellation.IsCancellationRequested)
+            return;
+        admitting = true;
+        _ = admitPatternsAsync(poolGeneration);
+    }
+
+    private async Task admitPatternsAsync(int generation)
     {
         try
         {
+            int wanted = Math.Max(1, settings.PoolSize) * 2;
             System.Diagnostics.Stopwatch clock = System.Diagnostics.Stopwatch.StartNew();
-            Progress<(int Verified, int Hits)> progress = new(value =>
+            for (int round = 0; round < AdmissionRounds; round += 1)
             {
-                if (generation == poolGeneration)
-                    setStatus("status.prefetch", value.Verified, value.Hits);
-            });
-            Task<PrefetchResult> run = PatternPrefetcher.RunAsync(
-                candidates, settings, patternLibrary,
-                (beatmapId, token) => osuFileFetcher.TryFetchAsync(beatmapId, token),
-                PatternPrefetcher.DefaultBudget, PatternPrefetcher.DefaultDeadline, progress, sessionCancellation.Token,
-                keywordBeatmapsetIds);
-
-            while (!run.IsCompleted)
-            {
-                await Task.WhenAny(run, Task.Delay(StreamingPublishInterval));
-                if (run.IsCompleted)
-                    break;
                 if (generation != poolGeneration || sessionCancellation.IsCancellationRequested)
-                    break;
-                await publishPoolAsync();
+                    return;
+                if (admittedSetIds.Count >= wanted || searchResults.Count == 0)
+                    return;
+                int before = admittedSetIds.Count;
+                Progress<(int Verified, int Hits)> progress = new(value =>
+                {
+                    if (generation == poolGeneration)
+                        setStatus("status.admitting", value.Verified, admittedSetIds.Count, wanted);
+                });
+                PrefetchResult result = await PatternPrefetcher.RunAsync(
+                    searchResults, settings, patternLibrary,
+                    (beatmapId, token) => osuFileFetcher.TryFetchAsync(beatmapId, token),
+                    AdmissionBudgetPerRound, TimeSpan.FromSeconds(AdmissionSecondsPerRound),
+                    progress, sessionCancellation.Token, keywordBeatmapsetIds,
+                    onIngested: admitJudgedChart, targetOverride: wanted);
+                if (result.Parsed > 0)
+                    await patternLibrary.SaveAsync();
+                if (admittedSetIds.Count == before)
+                {
+                    AppLog.Info($"候选准入：第 {round + 1} 轮没捞到达标候选（解析 {result.Parsed}），停止判定");
+                    return;
+                }
             }
-
-            PrefetchResult result = await run;
-            if (result.Parsed > 0)
-                await patternLibrary.SaveAsync();
-
             clock.Stop();
-            AppLog.Info($"键型预取：候选 {result.Considered}，尝试 {result.Attempted}，取回 {result.Completed}，解析 {result.Parsed}，命中 {result.Hits}" +
-                        $"（{clock.ElapsedMilliseconds} ms）" +
-                        (result.DeadlineReached ? "，到达截止时间" : result.BudgetExhausted ? "，预算用完" : string.Empty));
-            if (generation == poolGeneration)
-                await publishPoolAsync();
+            AppLog.Info($"候选准入结束：达标 {admittedSetIds.Count} 个谱面集，备用 {patternMismatchSetIds.Count} 个（{clock.ElapsedMilliseconds} ms）");
         }
         catch (OperationCanceledException)
         {
         }
         catch (Exception exception)
         {
-            AppLog.Error("键型预取失败", exception);
+            AppLog.Error("候选准入失败", exception);
+        }
+        finally
+        {
+            admitting = false;
+            if (generation == poolGeneration)
+            {
+                await publishPoolAsync();
+                if (admittedSetIds.Count == 0)
+                {
+                    AppLog.Info($"候选准入：判定 {patternMismatchSetIds.Count} 张都不达标，没有可用候选");
+                    setStatus("status.admissionempty", patternMismatchSetIds.Count);
+                }
+                else if (settings.AutoDownload && playingItem is null && preparedNextItem is null &&
+                         recommendations.Count > 0)
+                {
+                    // 准入比首曲预下载慢：这里补一次，否则池子填好了却没人开始下载。
+                    _ = prepareFirstItemAsync();
+                }
+            }
         }
     }
 
-    /// <summary>补池子：重排一次，需要的话再起一轮后台键型验证。搜索结果每来一批都会调。</summary>
-    private async Task refillPoolAsync()
+    /// <summary>预取器每解析完一张就回调这里，跑在工作线程上，必须切回 UI 线程改状态。</summary>
+    private void admitJudgedChart(int beatmapId, int beatmapsetId)
     {
-        if (profile is null)
-            return;
-
-        await publishPoolAsync();
-        startPatternVerification();
+        _ = Dispatcher.InvokeAsync(() =>
+        {
+            ManiaPattern? pattern = patternLibrary.TryGetVerified(beatmapId);
+            if (pattern is null || !searchResults.Any(set => set.Id == beatmapsetId))
+                return;
+            if (CandidateAdmission.IsStrict(pattern, settings))
+            {
+                admittedSetIds.Add(beatmapsetId);
+                // tag 白名单没命中、但真实键型达标的：排序时按真实键型放行（rank 里的 keywordSourced 分支）。
+                OsuBeatmapset? set = searchResults.FirstOrDefault(item => item.Id == beatmapsetId);
+                if (set is not null && settings.IncludedTags.Count > 0)
+                {
+                    IReadOnlyList<string> tags = AppSettings.ParseTags(set.Tags);
+                    if (!settings.IncludedTags.Any(tag => tags.Contains(tag, StringComparer.OrdinalIgnoreCase)))
+                        keywordBeatmapsetIds.Add(beatmapsetId);
+                }
+            }
+            else
+            {
+                patternMismatchSetIds.Add(beatmapsetId);
+            }
+            rebuildCandidates();
+            _ = publishPoolAsync();
+        });
     }
 
     /// <summary>
-    /// 起一轮键型验证。只有在**候选集已经就绪**时才起：候选还是空的时候起一轮，
-    /// 等于白占掉这一代的验证名额，池子就再也拿不到真实键型（踩过这个坑：
-    /// 日志里「键型预取：候选 0」之后，整个漫游都是纯基础分在排序）。
-    /// 同一代里候选明显变多（比如又翻了几页）才补一轮，避免每批都烧预算。
-    /// </summary>
-    private void startPatternVerification()
-    {
-        if (settings.Mode != "mania" || (settings.SelectedPatterns.Count == 0 && !settings.PreferLn))
-            return;
-        if (patternVerification is { IsCompleted: false })
-            return;
-        if (candidates.Count == 0)
-            return;
-        if (verificationGeneration == poolGeneration &&
-            candidates.Count < Math.Max(1, verifiedCandidateCount) * 2)
-            return;
-
-        verificationGeneration = poolGeneration;
-        verifiedCandidateCount = candidates.Count;
-        patternVerification = verifyPatternsAsync(poolGeneration);
-    }
-
-    /// <summary>
-    /// 首曲预下载。勾了键型时先让验证跑一小会儿再挑：否则下的是「还没验证就被排到第一」的谱，
-    /// 验证之后那张卡片会被换掉，白下一首。等不到也照样下 —— 不能为了排序把开播卡死。
+    /// 首曲预下载：先等准入把第一批候选判出来（最多几秒），否则下的是注定被换掉的谱。
     /// </summary>
     private async Task prepareFirstItemAsync()
     {
-        if (patternVerification is { IsCompleted: false } verification)
-            await Task.WhenAny(verification, Task.Delay(FirstDownloadSettleTime));
+        for (int wait = 0; wait < 15 && recommendations.Count == 0; wait += 1)
+        {
+            if (sessionCancellation.IsCancellationRequested)
+                return;
+            await Task.Delay(200);
+        }
 
         if (recommendations.FirstOrDefault() is not { } first)
             return;
 
-        // 先把调度器跑一遍：够格的候选会顶掉占用通道的补位下载，
-        // 然后这里要么等同一张卡的在途任务，要么自己开始下。
         schedulePoolDownloads();
         await downloadItemAsync(first, importAfterDownload: settings.AutoImport, "status.preparing");
     }
+
 
     /// <summary>
     /// 按「当前已知的键型」重排推荐池，并把结果和现有卡片对齐：
@@ -859,7 +905,9 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
 
         // 严格条件先排；不够再用「放宽」补位（够格的谱面永远排在补位的前面，
         // 后续翻页/验证找到够格的就自然把它们替换掉）。
-        IReadOnlyList<RecommendationItem> desired = rankPool(lowerPriority, relaxed: false);
+        // 严格段只用「键型达标」的候选；备用（键型不达标）留给下面补位。
+        IReadOnlyList<RecommendationItem> desired = rankPool(
+            lowerPriority, relaxed: false, excludeSetIds: usesPatternGate() ? patternMismatchSetIds : null);
         bool relaxedInstalled = false;
         if (desired.Count < Math.Max(1, settings.PoolSize))
         {
@@ -930,12 +978,15 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
         List<int> lowerPriority,
         bool relaxed,
         IReadOnlyList<RecommendationItem>? alreadyPicked = null,
-        bool relaxInstalledExclusion = false)
+        bool relaxInstalledExclusion = false,
+        IReadOnlySet<int>? excludeSetIds = null)
     {
         int wanted = Math.Max(1, settings.PoolSize) - (alreadyPicked?.Count ?? 0);
         if (wanted <= 0)
             return [];
         HashSet<int> excluded = [.. alreadyPicked?.Select(item => item.BeatmapsetId) ?? []];
+        if (excludeSetIds is not null)
+            excluded.UnionWith(excludeSetIds);
         return recommendationEngine.RankAvoidingHistory(
             candidates, profile!, settings, settings.MinimumStars, settings.MaximumStars,
             excluded,
@@ -1099,6 +1150,38 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
             poolDownloads[item.BeatmapsetId] = new PoolDownload(cancellation, task);
         }
         reportPoolDownloadProgress();
+    }
+
+    /// <summary>补池子：重排一次，需要的话启动准入。搜索结果每来一批都会调。</summary>
+    private async Task refillPoolAsync()
+    {
+        if (profile is null)
+            return;
+
+        await publishPoolAsync();
+        if (usesPatternGate())
+            startAdmission();
+    }
+
+    /// <summary>勾了键型 / 只要面谱时，候选必须先过键型判定。</summary>
+    private bool usesPatternGate() =>
+        settings.Mode == "mania" && (settings.SelectedPatterns.Count > 0 || settings.PreferLn);
+
+    /// <summary>这张谱在「所选键型」上的占比；「只要面谱」时按是否 LN 谱算 1/0。</summary>
+    private double PatternShare(ManiaPattern pattern) =>
+        settings.SelectedPatterns.Count > 0
+            ? pattern.SelectedShare(settings.SelectedPatterns)
+            : pattern.IsLnChart ? 1 : 0;
+
+    /// <summary>把候选列表刷新成「判定通过 + 备用」的那部分。</summary>
+    private void rebuildCandidates()
+    {
+        if (!usesPatternGate())
+        {
+            candidates = searchResults;
+            return;
+        }
+        candidates = [.. searchResults.Where(set => admittedSetIds.Contains(set.Id) || patternMismatchSetIds.Contains(set.Id))];
     }
 
     /// <summary>待下载顺序，规则见 <see cref="PoolDownloadPlanner"/>。</summary>

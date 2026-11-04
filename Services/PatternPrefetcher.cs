@@ -43,7 +43,9 @@ public static class PatternPrefetcher
         TimeSpan deadline,
         IProgress<(int Verified, int Hits)>? progress,
         CancellationToken cancellationToken,
-        IReadOnlySet<int>? keywordBeatmapsetIds = null)
+        IReadOnlySet<int>? keywordBeatmapsetIds = null,
+        Action<int, int>? onIngested = null,
+        int? targetOverride = null)
     {
         DateTimeOffset started = DateTimeOffset.UtcNow;
         List<Candidate> pending = collect(candidates, settings, library, keywordBeatmapsetIds);
@@ -60,7 +62,7 @@ public static class PatternPrefetcher
             return byPriority != 0 ? byPriority : left.BeatmapId.CompareTo(right.BeatmapId);
         });
 
-        int target = Math.Max(1, settings.PoolSize);
+        int target = Math.Max(1, targetOverride ?? settings.PoolSize);
         List<Candidate> queue = pending.Take(Math.Max(1, budget)).ToList();
 
         object gate = new();
@@ -111,6 +113,8 @@ public static class PatternPrefetcher
                         parsed += 1;
                         if (isHit(library.TryGetVerified(candidate.BeatmapId), settings))
                             hits += 1;
+                        // 调用方用这个回调做「判完键型再决定要不要进候选」的准入。
+                        onIngested?.Invoke(candidate.BeatmapId, candidate.BeatmapsetId);
                     }
                 }
                 progress?.Report((parsed, hits));

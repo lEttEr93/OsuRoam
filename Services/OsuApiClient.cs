@@ -146,9 +146,9 @@ public sealed class OsuApiClient : IDisposable
         int total = 0;
         string? cursor = null;
         int mode = settings.Mode switch { "taiko" => 1, "fruits" => 2, "mania" => 3, _ => 0 };
-        // Status, genre, and language are hard filters applied after the API
-        // response arrives; requesting any status avoids dropping selections.
-        const string status = "any";
+        // 只查用户真正想要的状态。用 any 的话，部分排序会把整页 graveyard/pending 排在前面，
+        // 一页 50 条全被本地状态过滤掉（现场出现过一轮 600 个候选 100% 被状态筛掉）。
+        string status = StatusQuery(settings);
         string query = FormattableString.Invariant(
             $"stars>={minimumStars:0.0} stars<={maximumStars:0.0} length>={settings.MinimumLengthSeconds} length<={settings.MaximumLengthSeconds}");
         if (settings.Mode == "mania")
@@ -241,6 +241,24 @@ public sealed class OsuApiClient : IDisposable
 
         if (resultCount > 0 && total > resultCount)
             AppLog.Info($"候选检索：本轮到 {resultCount} 个谱面集（该查询服务端命中约 {total} 个，页面上限 {pageBudget * 50}）");
+    }
+
+    /// <summary>
+    /// 把用户的「状态」选择翻译成 API 的 <c>s=</c> 参数。API 只能给一个状态，所以：
+    /// 只勾一个就用它；勾了多个且含 ranked 就用 ranked（loved 数量很小，靠本地过滤补）；
+    /// 否则退回 any。
+    /// </summary>
+    internal static string StatusQuery(AppSettings settings)
+    {
+        IReadOnlyList<string> statuses = settings.IncludedStatuses;
+        if (statuses.Count == 0)
+            return "any";
+        if (statuses.Count == 1)
+        {
+            string only = statuses[0];
+            return only is "ranked" or "loved" or "qualified" or "pending" or "graveyard" or "wip" ? only : "any";
+        }
+        return statuses.Contains("ranked", StringComparer.OrdinalIgnoreCase) ? "ranked" : "any";
     }
 
     private async Task authorizeAsync(CancellationToken cancellationToken)
