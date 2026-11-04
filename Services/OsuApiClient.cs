@@ -123,7 +123,7 @@ public sealed class OsuApiClient : IDisposable
     /// <summary>池子填不满时最多翻到这么多页，别把一次漫游拖成几分钟。</summary>
     public const int ExtendedPageBudget = 24;
 
-    /// <summary>每个关键字翻几页（50 条/页）。关键字查询的命中率远高于默认排序。</summary>
+    /// <summary>关键字检索**合计**翻几页（50 条/页）。关键字查询命中率远高于默认排序，但不能无限翻。</summary>
     public const int HintPageBudget = 4;
 
     /// <summary>
@@ -154,6 +154,8 @@ public sealed class OsuApiClient : IDisposable
         if (settings.Mode == "mania")
             query += $" keys={settings.ManiaKeys}";
 
+        // 关键字翻页不计入 resultCount：它是「对症」的额外一轮，
+        // 吃满预算的话默认排序就一页都翻不到了，广度会归零。
         int pageBudget = Math.Max(SearchPageBudget, maximumPages);
         string[] sortPlan = BuildSortPlan(settings.SearchRotation, pageBudget);
         string? activeSort = null;
@@ -161,16 +163,20 @@ public sealed class OsuApiClient : IDisposable
         // 勾了键型/面谱时，先用关键字搜一轮（q 会匹配 mapper tags，见 PatternSearchHints）。
         // 每个关键字翻几页：单页 50 条远不够 —— 实测 q=jack 翻到第 6 页才捞到第一张已知的叠键谱，
         // 而默认排序翻 1200 条一张都捞不到。这批结果交给调用方按「真实键型」甄别。
+        int hintPagesLeft = Math.Max(1, hintPages);
         foreach (string hint in PatternSearchHints.For(settings))
         {
+            if (hintPagesLeft <= 0)
+                break;
             string hinted = $"{query} {hint}";
             string? hintCursor = null;
             int hintSeen = 0;
-            for (int page = 0; page < Math.Max(1, hintPages); page += 1)
+            while (hintPagesLeft > 0)
             {
                 // 池子已经被够格的候选填满，就没必要再翻关键字了（第一个请求总是要发的）。
                 if (hintSeen > 0 && enoughStrictCandidates?.Invoke() == true)
                     break;
+                hintPagesLeft -= 1;
                 string path = $"api/v2/beatmapsets/search?m={mode}&s={status}&sort=relevance&q={Uri.EscapeDataString(hinted)}";
                 if (!string.IsNullOrEmpty(hintCursor))
                     path += $"&cursor_string={Uri.EscapeDataString(hintCursor)}";
@@ -180,7 +186,6 @@ public sealed class OsuApiClient : IDisposable
                     OsuBeatmapsetSearch response = await getAsync<OsuBeatmapsetSearch>(path, cancellationToken);
                     if (response.Beatmapsets.Count == 0)
                         break;
-                    resultCount += response.Beatmapsets.Count;
                     hintSeen += response.Beatmapsets.Count;
                     await onBatch(response.Beatmapsets, true);
                     nextCursor = response.CursorString;
@@ -253,10 +258,26 @@ public sealed class OsuApiClient : IDisposable
 
     private async Task<T> getAsync<T>(string path, CancellationToken cancellationToken)
     {
-        using HttpResponseMessage response = await http.GetAsync(path, cancellationToken);
-        await ensureSuccessAsync(response, cancellationToken);
-        return (await response.Content.ReadFromJsonAsync<T>(cancellationToken: cancellationToken)) ?? throw new InvalidOperationException("osu! API 返回了空响应。");
+        // 走代理时偶发 TLS/EOF 抖动，重试一次比整轮失败划算（401/404 这类业务错误不重试）。
+        for (int attempt = 0; ; attempt += 1)
+        {
+            try
+            {
+                using HttpResponseMessage response = await http.GetAsync(path, cancellationToken);
+                await ensureSuccessAsync(response, cancellationToken);
+                return (await response.Content.ReadFromJsonAsync<T>(cancellationToken: cancellationToken))
+                       ?? throw new InvalidOperationException("osu! API 返回了空响应。");
+            }
+            catch (Exception exception) when (attempt == 0 && isTransient(exception))
+            {
+                AppLog.Info($"osu! API 请求重试：{exception.GetType().Name} {exception.Message}");
+                await Task.Delay(TimeSpan.FromSeconds(1), cancellationToken);
+            }
+        }
     }
+
+    private static bool isTransient(Exception exception) =>
+        exception is HttpRequestException or System.IO.IOException or System.Net.Sockets.SocketException;
 
     private static async Task ensureSuccessAsync(HttpResponseMessage response, CancellationToken cancellationToken)
     {

@@ -17,6 +17,8 @@ if (args.Length > 1 && args[0] == "--sets")
     return await setsAsync(args);
 if (args.Length > 2 && args[0] == "--hint")
     return await hintAsync(args);
+if (args.Length > 0 && args[0] == "--verify")
+    return await verifyAsync(args);
 
 testSuccessfulCompletion();
 testAbortDoesNotComplete();
@@ -2751,4 +2753,155 @@ static void testKeywordCandidatesEnterVerificationQueue()
         return Task.FromResult<string?>(text);
     }, 1, PatternPrefetcher.DefaultDeadline, null, CancellationToken.None, new HashSet<int> { 2200 }).GetAwaiter().GetResult();
     assertEqual(1, fetched.Count, "关键字召回的谱面应进入验证队列");
+}
+
+/// <summary>
+/// 推荐算法自验证：完全按 App 的管线跑一遍（关键字翻页 → 抓 .osu 验证 → 严格/补位排序），
+/// 再用「进池谱面的真实键型」算精度，和「没有键型数据时的同一排序」对比。
+///
+/// 用法：--verify [轮数]
+/// 输出：每轮的候选/验证/池子明细 + 精度汇总（选中的键型占比 >= 25% 视作命中）。
+/// </summary>
+static async Task<int> verifyAsync(string[] args)
+{
+    int rounds = args.Length > 1 ? int.Parse(args[1], CultureInfo.InvariantCulture) : 3;
+    SettingsStore store = new();
+    AppSettings settings = await store.LoadAsync();
+    Console.WriteLine($"设置：{store.SettingsPathForDisplay}");
+    Console.WriteLine($"  用户={settings.Username} 星级 {settings.MinimumStars}–{settings.MaximumStars} 键数={settings.ManiaKeys}");
+    Console.WriteLine($"  勾选键型=[{string.Join(",", settings.SelectedPatterns)}] 只要面谱={settings.PreferLn} 池大小={settings.PoolSize}");
+    Console.WriteLine($"  tag 白名单 {settings.IncludedTags.Count} 条，排除已装 {settings.ExcludeInstalledBeatmaps}，排除已玩 {settings.ExcludeRecentlyPlayed}");
+
+    string secret = SecretProtector.Unprotect(settings.ProtectedClientSecret);
+    OsuApiClient api = new();
+    api.Configure(settings.ClientId, secret);
+    using CancellationTokenSource cancellation = new(TimeSpan.FromMinutes(40));
+    PlayerProfile profile = await api.BuildProfileAsync(settings.Username, settings.Mode, settings.ManiaKeys, cancellation.Token);
+    PatternLibrary library = new();
+    await library.LoadAsync();
+    if (settings.ExcludeInstalledBeatmaps)
+        await LocalBeatmapLibrary.RefreshAsync(store.CacheDirectory, cancellation.Token);
+    Console.WriteLine($"  键型库 {library.Count} 条（真实解析 {library.ParsedCount}）；已安装 {LocalBeatmapLibrary.InstalledBeatmapIds.Count} 个难度");
+
+    OsuFileFetcher fetcher = new();
+    int startRotation = settings.SearchRotation;
+    int poolSize = Math.Max(1, settings.PoolSize);
+    int poolHits = 0;
+    int poolSamples = 0;
+    int baselineHits = 0;
+    int baselineSamples = 0;
+    int fallbackFilled = 0;
+
+    for (int round = 0; round < rounds; round += 1)
+    {
+      try
+      {
+        settings.SearchRotation = startRotation + round;
+        List<OsuBeatmapset> candidates = [];
+        HashSet<int> keywordSets = [];
+        System.Diagnostics.Stopwatch clock = System.Diagnostics.Stopwatch.StartNew();
+        await api.SearchCandidatesInBatchesAsync(settings, settings.MinimumStars, settings.MaximumStars, (batch, fromKeyword) =>
+        {
+            candidates.AddRange(batch);
+            if (fromKeyword)
+                keywordSets.UnionWith(batch.Select(set => set.Id));
+            return Task.CompletedTask;
+        }, cancellation.Token, maximumPages: OsuApiClient.SearchPageBudget, hintPages: OsuApiClient.HintPageBudget);
+        candidates = [.. candidates.GroupBy(set => set.Id).Select(group => group.First())];
+        long searchMs = clock.ElapsedMilliseconds;
+
+        clock.Restart();
+        PrefetchResult prefetch = await PatternPrefetcher.RunAsync(
+            candidates, settings, library, (beatmapId, token) => fetcher.TryFetchAsync(beatmapId, token),
+            PatternPrefetcher.DefaultBudget, PatternPrefetcher.DefaultDeadline, null, cancellation.Token, keywordSets);
+        long verifyMs = clock.ElapsedMilliseconds;
+
+        List<int> lowerPriority = [.. settings.RecommendationHistory];
+        if (settings.ExcludeRecentlyPlayed)
+            lowerPriority.AddRange(profile.PlayedBeatmapsetIds());
+        IReadOnlySet<int>? installed = settings.ExcludeInstalledBeatmaps && LocalBeatmapLibrary.HasData
+            ? LocalBeatmapLibrary.InstalledBeatmapIds
+            : null;
+        Random seed = new(round + 1);
+        Func<int, ManiaPattern?> lookup = id => library.TryGetVerified(id);
+
+        IReadOnlyList<RecommendationItem> strict = new RecommendationEngine().RankAvoidingHistory(
+            candidates, profile, settings, settings.MinimumStars, settings.MaximumStars,
+            new HashSet<int>(), lowerPriority, poolSize, lookup, null, settings.PatternWeight, installed, seed,
+            false, false, keywordSets);
+        IReadOnlyList<RecommendationItem> filler = strict.Count >= poolSize
+            ? []
+            : new RecommendationEngine().RankAvoidingHistory(
+                candidates, profile, settings, settings.MinimumStars, settings.MaximumStars,
+                new HashSet<int>(strict.Select(item => item.BeatmapsetId)), [], poolSize - strict.Count,
+                lookup, null, settings.PatternWeight, installed, seed, true, true, keywordSets);
+        List<RecommendationItem> pool = [.. strict, .. filler];
+        // 公平基线：同样的候选与放开的 tag（否则关键字召回的谱面会被 tag 拦掉，
+        // 等于让基线对着一个更小的池子，比出来的差距是假的），只是没有键型数据。
+        IReadOnlyList<RecommendationItem> baseline = new RecommendationEngine().RankAvoidingHistory(
+            candidates, profile, settings, settings.MinimumStars, settings.MaximumStars,
+            new HashSet<int>(), lowerPriority, poolSize, null, null, settings.PatternWeight, installed, seed,
+            true, false, null);
+
+        // 池内还没验证的谱面补抓一次，否则精度算不准（这就是 App 里预下载后解析的那一步）。
+        foreach (RecommendationItem item in pool.Concat(baseline))
+        {
+            if (lookup(item.BeatmapId) is not null)
+                continue;
+            string? text = await fetcher.TryFetchAsync(item.BeatmapId, cancellation.Token);
+            if (text is not null)
+                library.Ingest(text, item.BeatmapId, item.BeatmapsetId);
+        }
+
+        double Share(RecommendationItem item)
+        {
+            ManiaPattern? pattern = lookup(item.BeatmapId);
+            if (pattern is null)
+                return -1;
+            if (settings.SelectedPatterns.Count > 0)
+                return pattern.SelectedShare(settings.SelectedPatterns);
+            return pattern.IsLnChart ? 1 : 0;
+        }
+        int Hits(IReadOnlyList<RecommendationItem> items) => items.Count(item => Share(item) >= 0.25);
+        if (filler.Count > 0)
+            fallbackFilled += 1;
+        poolHits += Hits(pool);
+        poolSamples += pool.Count;
+        baselineHits += Hits(baseline);
+        baselineSamples += baseline.Count;
+
+        Console.WriteLine();
+        Console.WriteLine($"轮次 {round + 1}（rotation={settings.SearchRotation}）：候选 {candidates.Count}（关键字召回 {keywordSets.Count} 个谱面集）");
+        Console.WriteLine($"  检索 {searchMs} ms；验证 {prefetch.Attempted} 次 / 解析 {prefetch.Parsed} / 命中 {prefetch.Hits}（{verifyMs} ms）");
+        Console.WriteLine($"  严格 {strict.Count} 首 + 补位 {filler.Count} 首 = 池 {pool.Count}/{poolSize}");
+        foreach (RecommendationItem item in pool)
+        {
+            double share = Share(item);
+            Console.WriteLine($"    {(item.IsFallback ? "[补位] " : string.Empty)}{share:0.00}  {item.Stars:0.00}★ {item.Title[..Math.Min(item.Title.Length, 34)]}");
+        }
+        Console.WriteLine($"  基线（无键型数据）top{baseline.Count}：{Hits(baseline)} 首命中；带键型：{Hits(pool)}/{pool.Count}");
+      }
+      catch (Exception exception) when (exception is not OperationCanceledException)
+      {
+        Console.WriteLine();
+        Console.WriteLine($"轮次 {round + 1} 失败（网络）：{exception.GetType().Name} {exception.Message}");
+        Console.WriteLine("  —— 该轮跳过，继续下一轮");
+      }
+    }
+
+    Console.WriteLine();
+    Console.WriteLine("=== 汇总 ===");
+    Console.WriteLine($"带键型：{poolHits}/{poolSamples} 首命中（选用键型占比 >= 25%）");
+    Console.WriteLine($"无键型：{baselineHits}/{baselineSamples} 首命中");
+    Console.WriteLine($"补位轮次：{fallbackFilled}/{rounds}");
+    double precision = poolSamples == 0 ? 0 : (double)poolHits / poolSamples;
+    double baselinePrecision = baselineSamples == 0 ? 0 : (double)baselineHits / baselineSamples;
+    Console.WriteLine($"精度：{precision:P0} vs 基线 {baselinePrecision:P0}（差 {(precision - baselinePrecision):P0}）");
+    if (poolSamples == 0)
+        Console.WriteLine("结论：没有可评估的池子（候选/筛选条件过窄）");
+    else if (precision - baselinePrecision < 0.10)
+        Console.WriteLine("结论：键型项没有显著拉开差距 —— 供给或权重还需要调");
+    else
+        Console.WriteLine("结论：键型项显著有效（进池谱面的真实键型占比明显高于无键型基线）");
+    return 0;
 }
