@@ -58,6 +58,7 @@
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
             </Grid.RowDefinitions>
 
             <!-- 头部：封面 + 曲名 + 难度 + 谱师 -->
@@ -96,8 +97,41 @@
                 <WrapPanel x:Name="CapsulePanel" Grid.Column="1" Margin="10,0,0,0" VerticalAlignment="Center" />
             </Grid>
 
+            <!-- RC / LN 占比横条：LN 过面谱门槛时右侧变粉 -->
+            <Grid x:Name="RatioRow" Grid.Row="2" Margin="0,9,0,0" Visibility="Collapsed">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+
+                <Grid Grid.Row="0">
+                    <TextBlock x:Name="RcRatioLabel" FontSize="9" Foreground="{StaticResource SecondaryBrush}" />
+                    <TextBlock x:Name="LnRatioLabel" FontSize="9" HorizontalAlignment="Right"
+                               Foreground="{StaticResource MutedTextBrush}" />
+                </Grid>
+
+                <Border Grid.Row="1" Height="6" Margin="0,3,0,0" CornerRadius="3"
+                        Background="#22262A" ClipToBounds="True">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition x:Name="RcRatioColumn" />
+                            <ColumnDefinition x:Name="LnRatioColumn" />
+                        </Grid.ColumnDefinitions>
+                        <Border Grid.Column="0" CornerRadius="3,0,0,3">
+                            <Border.Background>
+                                <LinearGradientBrush StartPoint="0,0" EndPoint="1,0">
+                                    <GradientStop Color="#2E8FC0" Offset="0" />
+                                    <GradientStop Color="#3FAFA6" Offset="1" />
+                                </LinearGradientBrush>
+                            </Border.Background>
+                        </Border>
+                        <Border x:Name="LnRatioBar" Grid.Column="1" CornerRadius="0,3,3,0" Background="#FF5C8A" />
+                    </Grid>
+                </Border>
+            </Grid>
+
             <!-- 雷达 + 键型占比 -->
-            <Grid x:Name="PatternRow" Grid.Row="2" Margin="0,9,0,0">
+            <Grid x:Name="PatternRow" Grid.Row="3" Margin="0,9,0,0">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="*" />
@@ -112,12 +146,12 @@
                 <controls:PatternBars x:Name="Bars" Grid.Column="1" Margin="12,0,0,0" VerticalAlignment="Center" />
             </Grid>
 
-            <Border Grid.Row="3" Height="1" Background="#242A30" Margin="0,10,0,8" />
+            <Border Grid.Row="4" Height="1" Background="#242A30" Margin="0,10,0,8" />
 
-            <TextBlock x:Name="DetailText" Grid.Row="4" Margin="0,0,0,0" FontSize="10"
+            <TextBlock x:Name="DetailText" Grid.Row="5" Margin="0,0,0,0" FontSize="10"
                        TextWrapping="Wrap" Foreground="{StaticResource MutedTextBrush}" />
 
-            <TextBlock x:Name="ReasonText" Grid.Row="5" Margin="0,5,0,0" FontSize="10"
+            <TextBlock x:Name="ReasonText" Grid.Row="6" Margin="0,5,0,0" FontSize="10"
                        TextWrapping="Wrap" Foreground="{StaticResource WarningBrush}" />
             </Grid>
         </Grid>

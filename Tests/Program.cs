@@ -70,6 +70,9 @@ testKeywordCandidatesEnterVerificationQueue();
 testPoolDownloadOrderingPutsQualifyingFirst();
 testDownloadCancelRuleUsesMembershipNotQueue();
 testCandidateAdmissionJudgesByVerifiedPattern();
+testLnThresholdCountsAsFaceChart();
+testLnTriangleFillsCircleWhenBalancedAtFullLn();
+testLnTriangleScalesWithLnRatioAndShares();
 testSearchStatusFollowsWhitelist();
 testReconcileRefreshesFallbackFlagOnReusedCard();
 testPatternSearchHints();
@@ -2999,6 +3002,60 @@ static void testCandidateAdmissionJudgesByVerifiedPattern()
     ManiaPattern rice = new() { LnRatio = 0.05, CoreShares = [] };
     assertTrue(CandidateAdmission.IsStrict(ln, settings), "「只要面谱」时 LN 谱达标");
     assertTrue(!CandidateAdmission.IsStrict(rice, settings), "非 LN 谱只能当备用");
+}
+
+static void testLnThresholdCountsAsFaceChart()
+{
+    assertTrue(new ManiaPattern { LnRatio = 0.21 }.IsLnChart, "LN 21% 应算面谱（1.5.3 门槛 0.20）");
+    assertTrue(new ManiaPattern { LnRatio = 0.20 }.IsLnChart, "刚好 20% 算面谱");
+    assertTrue(!new ManiaPattern { LnRatio = 0.19 }.IsLnChart, "LN 19% 不算面谱");
+}
+
+static void testLnTriangleFillsCircleWhenBalancedAtFullLn()
+{
+    // 锚点：LN 100% + 三项等分 ⇒ 三个顶点都贴到外接圆（长度 1.0）。
+    ManiaPattern pattern = new()
+    {
+        LnRatio = 1.0,
+        CoreShares = new() { ["Coordination"] = 0.3, ["Density"] = 0.3, ["Wildcard"] = 0.3 }
+    };
+
+    double[]? lens = LnRadarBuilder.Build(pattern);
+    assertTrue(lens is { Length: 3 }, "LN 100% 且三项等分应给出三个顶点");
+    assertNear(1.0, lens![0], "协调顶点应贴外接圆");
+    assertNear(1.0, lens[1], "密度顶点应贴外接圆");
+    assertNear(1.0, lens[2], "杂项顶点应贴外接圆");
+}
+
+static void testLnTriangleScalesWithLnRatioAndShares()
+{
+    // 份额按最大项归一，整体再乘 f(LN) = 2·LN/(1+LN)。
+    ManiaPattern pattern = new()
+    {
+        LnRatio = 0.5,
+        CoreShares = new() { ["Coordination"] = 0.2, ["Density"] = 0.4, ["Wildcard"] = 0.1 }
+    };
+
+    double[]? lens = LnRadarBuilder.Build(pattern);
+    assertTrue(lens is { Length: 3 }, "份额合法时应给出三个顶点");
+    assertNear(2.0 / 3.0, lens![1], "最大份额那根应等于 f(0.5) = 2/3");
+    assertNear(1.0 / 3.0, lens[0], "协调 = 0.2/0.4 × f");
+    assertNear(1.0 / 6.0, lens[2], "杂项 = 0.1/0.4 × f");
+
+    // LN 占比越高三角越大（单调）。
+    ManiaPattern lighter = new()
+    {
+        LnRatio = 0.25,
+        CoreShares = new() { ["Coordination"] = 0.2, ["Density"] = 0.4, ["Wildcard"] = 0.1 }
+    };
+    double[]? lighterLens = LnRadarBuilder.Build(lighter);
+    assertTrue(lighterLens![1] < lens[1], "LN 25% 的三角应小于 LN 50%");
+
+    // 没有长条、或者三个 LN 核心型都没命中时不该画。
+    assertTrue(LnRadarBuilder.Build(new ManiaPattern { LnRatio = 0, CoreShares = new() { ["Coordination"] = 0.4 } }) is null,
+        "LN 为 0 时不画三角");
+    assertTrue(LnRadarBuilder.Build(new ManiaPattern { LnRatio = 0.6, CoreShares = new() { ["Stream"] = 1 } }) is null,
+        "三个 LN 核心型全为 0 时不画三角");
 }
 
 static void testSearchStatusFollowsWhitelist()

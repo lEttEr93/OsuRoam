@@ -28,6 +28,8 @@ public partial class MapInfoWindow : Window
     private static readonly Brush CapsuleBackground = freeze(new SolidColorBrush(Color.FromRgb(0x1E, 0x22, 0x26)));
     private static readonly Brush CapsuleBorder = freeze(new SolidColorBrush(Color.FromRgb(0x2C, 0x32, 0x38)));
     private static readonly Brush TrackBrush = freeze(new SolidColorBrush(Color.FromRgb(0x27, 0x2C, 0x31)));
+    private static readonly Brush LnBrush = freeze(new SolidColorBrush(Color.FromRgb(0xFF, 0x5C, 0x8A)));
+    private static readonly Brush LnDimBrush = freeze(new SolidColorBrush(Color.FromRgb(0x8A, 0x4A, 0x5E)));
 
     private Window? dockOwner;
     private RecommendationItem? currentItem;
@@ -310,14 +312,18 @@ public partial class MapInfoWindow : Window
         ManiaPattern? pattern = item.Pattern;
         if (pattern is null)
         {
+            RatioRow.Visibility = Visibility.Collapsed;
             PatternRow.Visibility = Visibility.Collapsed;
             Radar.Labels = null;
             Radar.Values = null;
+            Radar.OverlayValues = null;
+            Radar.OverlayLabels = null;
             Bars.Labels = null;
             Bars.Shares = null;
             return;
         }
 
+        buildRatioBar(pattern);
         PatternRow.Visibility = Visibility.Visible;
 
         // 7 轴技能强度：各轴独立，适合雷达图。
@@ -326,6 +332,11 @@ public partial class MapInfoWindow : Window
             RadarPanel.Visibility = Visibility.Visible;
             Radar.Labels = Loc.SkillPatternLabels();
             Radar.Values = pattern.SkillAxes;
+            // 面谱才叠 LN 三轴；悬停/点击时标签切换在雷达控件内部处理。
+            Radar.OverlayValues = pattern.IsLnChart ? LnRadarBuilder.Build(pattern) : null;
+            Radar.OverlayLabels = Radar.OverlayValues is null
+                ? null
+                : [Loc.CorePatternLabel("Coordination"), Loc.CorePatternLabel("Density"), Loc.CorePatternLabel("Misc")];
         }
         else
         {
@@ -333,12 +344,36 @@ public partial class MapInfoWindow : Window
             RadarPanel.Visibility = Visibility.Collapsed;
             Radar.Labels = null;
             Radar.Values = null;
+            Radar.OverlayValues = null;
+            Radar.OverlayLabels = null;
         }
 
         // 6 个核心键型占比：加起来是 1，用直方图看长短（雷达图会误导）。
         Bars.Labels = Loc.CorePatternLabels();
         Bars.Shares = pattern.ToVector();
     }
+
+    /// <summary>
+    /// RC / LN 占比横条：两段按星号列宽分配，容器改宽度时自动跟着走。
+    /// </summary>
+    private void buildRatioBar(ManiaPattern pattern)
+    {
+        double ln = Math.Clamp(pattern.LnRatio, 0, 1);
+        bool faceChart = pattern.IsLnChart;
+
+        RcRatioColumn.Width = new GridLength(Math.Max(0.0001, 1 - ln), GridUnitType.Star);
+        LnRatioColumn.Width = new GridLength(Math.Max(0.0001, ln), GridUnitType.Star);
+        RcRatioLabel.Text = $"RC {(1 - ln):P0}";
+        LnRatioLabel.Text = $"LN {ln:P0}";
+        LnRatioLabel.Foreground = faceChart ? LnBrush : MutedBrush;
+        LnRatioBar.Background = faceChart ? LnBrush : LnDimBrush;
+        RatioRow.Visibility = Visibility.Visible;
+    }
+
+    /// <summary>
+    /// LN 三轴三角的三个顶点长度（0–1，占雷达半径）。
+    /// 口径见 <see cref="LnRadarBuilder"/>：锚点是「LN 100% 且三项等分 ⇒ 贴满外接圆」。
+    /// </summary>
 
     private static string buildDetailLine(RecommendationItem item)
     {

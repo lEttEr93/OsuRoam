@@ -53,9 +53,10 @@ public sealed class ManiaPattern
     /// <summary>核心型固定顺序，向量与权重都按这个顺序对齐。</summary>
     /// <summary>
     /// 「面谱」门槛：长条占比到这个数就算 LN 向的谱面。
-    /// 玩家体感上 25% 是一道分水岭，也和 osu! 官方排位页给出的单点/长条比例口径一致。
+    /// 1.5.3 起从 0.25 降到 0.20 —— 同一个标准同时管筛选（勾「只要面谱」/ 准入 / 预取）
+    /// 和显示（信息窗是否叠 LN 三轴雷达）。
     /// </summary>
-    public const double LnChartThreshold = 0.25;
+    public const double LnChartThreshold = 0.20;
 
     public static readonly string[] CorePatterns =
     [

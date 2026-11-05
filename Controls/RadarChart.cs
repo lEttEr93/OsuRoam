@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Windows;
+using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
 using OsuRoam.Services;
@@ -31,6 +32,15 @@ public sealed class RadarChart : FrameworkElement
     private static readonly Pen RingPen = freeze(new Pen(GridBrush, 0.6));
     private static readonly Pen AxisPen = freeze(new Pen(AxisBrush, 0.5));
 
+    // 叠加层（LN 三轴）：粉色，与主多边形的青色区分开。
+    private static readonly Brush OverlayLabelBrush = freeze(new SolidColorBrush(Color.FromRgb(0xFF, 0x5C, 0x8A)));
+    private static readonly Brush OverlayFillBrush = freeze(new SolidColorBrush(Color.FromArgb(0x3C, 0xFF, 0x5C, 0x8A)));
+    private static readonly Brush OverlayFillActiveBrush = freeze(new SolidColorBrush(Color.FromArgb(0x70, 0xFF, 0x5C, 0x8A)));
+    private static readonly Pen OverlayPen = freeze(new Pen(freeze(new SolidColorBrush(Color.FromRgb(0xFF, 0x5C, 0x8A))), 1.5));
+
+    /// <summary>叠加层三条轴的固定朝向：正下、右上、左上。</summary>
+    private static readonly double[] OverlayAngles = [90, 330, 210];
+
     public static readonly DependencyProperty LabelsProperty = DependencyProperty.Register(
         nameof(Labels), typeof(IReadOnlyList<string>), typeof(RadarChart),
         new FrameworkPropertyMetadata(null, FrameworkPropertyMetadataOptions.AffectsRender, onLabelsChanged));
@@ -38,6 +48,19 @@ public sealed class RadarChart : FrameworkElement
     public static readonly DependencyProperty ValuesProperty = DependencyProperty.Register(
         nameof(Values), typeof(IReadOnlyList<double>), typeof(RadarChart),
         new FrameworkPropertyMetadata(null, FrameworkPropertyMetadataOptions.AffectsRender, onValuesChanged));
+
+    /// <summary>
+    /// 叠加层数值：3 个 0–1 的半径比例，顺序是「正下、右上、左上」。
+    /// null 表示这张谱没有叠加层（例如 LN 占比不到面谱门槛）。
+    /// </summary>
+    public static readonly DependencyProperty OverlayValuesProperty = DependencyProperty.Register(
+        nameof(OverlayValues), typeof(IReadOnlyList<double>), typeof(RadarChart),
+        new FrameworkPropertyMetadata(null, FrameworkPropertyMetadataOptions.AffectsRender, onOverlayChanged));
+
+    /// <summary>叠加层标签；悬停或点击锁定后替换掉主标签。</summary>
+    public static readonly DependencyProperty OverlayLabelsProperty = DependencyProperty.Register(
+        nameof(OverlayLabels), typeof(IReadOnlyList<string>), typeof(RadarChart),
+        new FrameworkPropertyMetadata(null, FrameworkPropertyMetadataOptions.AffectsRender, onOverlayChanged));
 
     /// <summary>补间进度，0→1；动画期间每帧只重画多边形。</summary>
     private static readonly DependencyProperty GrowthProperty = DependencyProperty.Register(
@@ -54,6 +77,12 @@ public sealed class RadarChart : FrameworkElement
 
     private double[] fromValues = [];
     private double[] targetValues = [];
+
+    // 叠加层的交互状态：悬停临时显示，点击锁存（触屏/键鼠都能用）。
+    private bool overlayHovered;
+    private bool overlayLocked;
+    private FormattedText[]? cachedOverlayTexts;
+    private string? cachedOverlaySignature;
 
     // 标签布局缓存：只有标签文本、DPI 或控件尺寸变化时才重算 FormattedText。
     private FormattedText[]? cachedTexts;
@@ -77,6 +106,23 @@ public sealed class RadarChart : FrameworkElement
         get => (IReadOnlyList<double>?)GetValue(ValuesProperty);
         set => SetValue(ValuesProperty, value);
     }
+
+    public IReadOnlyList<double>? OverlayValues
+    {
+        get => (IReadOnlyList<double>?)GetValue(OverlayValuesProperty);
+        set => SetValue(OverlayValuesProperty, value);
+    }
+
+    public IReadOnlyList<string>? OverlayLabels
+    {
+        get => (IReadOnlyList<string>?)GetValue(OverlayLabelsProperty);
+        set => SetValue(OverlayLabelsProperty, value);
+    }
+
+    private bool HasOverlay => OverlayValues is { Count: 3 };
+
+    /// <summary>悬停或点击锁定任一成立时，标签切到叠加层的三轴。</summary>
+    private bool ShowOverlayLabels => HasOverlay && (overlayHovered || overlayLocked);
 
     /// <summary>标签字体；为 null 时跟随 <see cref="Services.Typography.Current"/>。</summary>
     public FontFamily? LabelFontFamily
@@ -112,6 +158,69 @@ public sealed class RadarChart : FrameworkElement
     private static void onValuesChanged(DependencyObject target, DependencyPropertyChangedEventArgs e)
     {
         ((RadarChart)target).beginGrowth(e.NewValue as IReadOnlyList<double>);
+    }
+
+    private static void onOverlayChanged(DependencyObject target, DependencyPropertyChangedEventArgs e)
+    {
+        RadarChart chart = (RadarChart)target;
+        chart.cachedOverlayTexts = null;
+        chart.cachedOverlaySignature = null;
+
+        if (!chart.HasOverlay)
+        {
+            chart.overlayHovered = false;
+            chart.overlayLocked = false;
+            chart.Cursor = null;
+        }
+        else
+        {
+            chart.Cursor = Cursors.Hand;
+        }
+    }
+
+    /// <summary>
+    /// 叠加层存在时，把整个雷达圆盘（而非只是粉色三角）当作可命中区域：
+    /// 三角在 LN 刚过门槛时只有二十几像素，按多边形判悬停根本对不进去。
+    /// </summary>
+    protected override HitTestResult? HitTestCore(PointHitTestParameters hitTestParameters)
+    {
+        if (!HasOverlay)
+            return base.HitTestCore(hitTestParameters);
+
+        Point center = new(ActualWidth / 2, ActualHeight / 2);
+        double hitRadius = Math.Min(ActualWidth, ActualHeight) / 2 * 0.8;
+        return (hitTestParameters.HitPoint - center).Length <= hitRadius
+            ? new PointHitTestResult(this, hitTestParameters.HitPoint)
+            : null;
+    }
+
+    protected override void OnMouseEnter(MouseEventArgs e)
+    {
+        base.OnMouseEnter(e);
+        if (!HasOverlay || overlayHovered)
+            return;
+        overlayHovered = true;
+        InvalidateVisual();
+    }
+
+    protected override void OnMouseLeave(MouseEventArgs e)
+    {
+        base.OnMouseLeave(e);
+        if (!overlayHovered)
+            return;
+        overlayHovered = false;
+        InvalidateVisual();
+    }
+
+    protected override void OnMouseLeftButtonUp(MouseButtonEventArgs e)
+    {
+        base.OnMouseLeftButtonUp(e);
+        if (!HasOverlay)
+            return;
+        overlayLocked = !overlayLocked;
+        Cursor = Cursors.Hand;
+        InvalidateVisual();
+        e.Handled = true;
     }
 
     /// <summary>字体换了：标签宽度会变，缓存的 FormattedText 全部作废。</summary>
@@ -259,24 +368,79 @@ public sealed class RadarChart : FrameworkElement
             context.DrawGeometry(ValueBrush, ValuePen, shape);
         }
 
-        for (int index = 0; index < count; index++)
+        if (HasOverlay)
         {
-            FormattedText text = texts[index];
-            double directionX = Math.Cos(angleOf(index, count));
-            double directionY = Math.Sin(angleOf(index, count));
-
-            // 锚点贴着多边形的外沿，文字再按方向往外排：
-            // 右侧左对齐、左侧右对齐、正上下居中，这样多字标签也不会出界。
-            Point anchor = point(center, radius + LabelGap, index, count);
-            double x = directionX > 0.2 ? anchor.X
-                : directionX < -0.2 ? anchor.X - text.WidthIncludingTrailingWhitespace
-                : anchor.X - text.WidthIncludingTrailingWhitespace / 2;
-            double y = directionY > 0.2 ? anchor.Y
-                : directionY < -0.2 ? anchor.Y - text.Height
-                : anchor.Y - text.Height / 2;
-
-            context.DrawText(text, new Point(x, y));
+            StreamGeometry overlayShape = new();
+            using (StreamGeometryContext geometry = overlayShape.Open())
+            {
+                for (int index = 0; index < 3; index++)
+                {
+                    double value = OverlayValues![index];
+                    double scaled = double.IsFinite(value) ? Math.Clamp(value, 0, 1) : 0;
+                    Point vertex = pointAt(center, radius * scaled, OverlayAngles[index] * Math.PI / 180);
+                    if (index == 0)
+                        geometry.BeginFigure(vertex, true, true);
+                    else
+                        geometry.LineTo(vertex, true, false);
+                }
+            }
+            overlayShape.Freeze();
+            context.DrawGeometry(ShowOverlayLabels ? OverlayFillActiveBrush : OverlayFillBrush, OverlayPen, overlayShape);
         }
+
+        if (ShowOverlayLabels)
+        {
+            FormattedText[] overlayTexts = resolveOverlayTexts(pixelsPerDip);
+            for (int index = 0; index < overlayTexts.Length; index++)
+                placeLabel(context, overlayTexts[index], center, radius + LabelGap, OverlayAngles[index] * Math.PI / 180);
+        }
+        else
+        {
+            for (int index = 0; index < count; index++)
+                placeLabel(context, texts[index], center, radius + LabelGap, angleOf(index, count));
+        }
+    }
+
+    /// <summary>把一行标签按方向摆到半径外沿：右侧左对齐、左侧右对齐、正上下居中。</summary>
+    private static void placeLabel(DrawingContext context, FormattedText text, Point center, double radius, double angle)
+    {
+        double directionX = Math.Cos(angle);
+        double directionY = Math.Sin(angle);
+        Point anchor = pointAt(center, radius, angle);
+
+        double x = directionX > 0.2 ? anchor.X
+            : directionX < -0.2 ? anchor.X - text.WidthIncludingTrailingWhitespace
+            : anchor.X - text.WidthIncludingTrailingWhitespace / 2;
+        double y = directionY > 0.2 ? anchor.Y
+            : directionY < -0.2 ? anchor.Y - text.Height
+            : anchor.Y - text.Height / 2;
+
+        context.DrawText(text, new Point(x, y));
+    }
+
+    private FormattedText[] resolveOverlayTexts(double pixelsPerDip)
+    {
+        IReadOnlyList<string>? overlayLabels = OverlayLabels;
+        int count = overlayLabels?.Count ?? 0;
+        string signature = overlayLabels is null ? string.Empty : string.Join('\u001f', overlayLabels);
+
+        if (cachedOverlayTexts is not null &&
+            cachedOverlayTexts.Length == count &&
+            string.Equals(cachedOverlaySignature, signature, StringComparison.Ordinal))
+        {
+            return cachedOverlayTexts;
+        }
+
+        FormattedText[] texts = new FormattedText[count];
+        for (int index = 0; index < count; index++)
+            texts[index] = new FormattedText(overlayLabels![index] ?? string.Empty,
+                CultureInfo.CurrentUICulture, FlowDirection.LeftToRight,
+                new Typeface(LabelFontFamily ?? Typography.Current, FontStyles.Normal, FontWeights.Normal, FontStretches.Normal),
+                LabelFontSize, OverlayLabelBrush, pixelsPerDip);
+
+        cachedOverlayTexts = texts;
+        cachedOverlaySignature = signature;
+        return texts;
     }
 
     private FormattedText[] resolveTexts(IReadOnlyList<string> labels, double pixelsPerDip)
@@ -365,6 +529,9 @@ public sealed class RadarChart : FrameworkElement
         double angle = angleOf(index, count);
         return new Point(center.X + radius * Math.Cos(angle), center.Y + radius * Math.Sin(angle));
     }
+
+    private static Point pointAt(Point center, double radius, double angleRadians) =>
+        new(center.X + radius * Math.Cos(angleRadians), center.Y + radius * Math.Sin(angleRadians));
 
     private FormattedText format(string text, double pixelsPerDip) =>
         new(text, CultureInfo.CurrentUICulture, FlowDirection.LeftToRight,
