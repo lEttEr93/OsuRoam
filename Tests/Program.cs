@@ -73,6 +73,8 @@ testCandidateAdmissionJudgesByVerifiedPattern();
 testLnThresholdCountsAsFaceChart();
 testLnTriangleFillsCircleWhenBalancedAtFullLn();
 testLnTriangleScalesWithLnRatioAndShares();
+testManiaStarRatingHandlesHolds();
+testManiaStarRatingScalesWithDensity();
 testSearchStatusFollowsWhitelist();
 testReconcileRefreshesFallbackFlagOnReusedCard();
 testPatternSearchHints();
@@ -3056,6 +3058,56 @@ static void testLnTriangleScalesWithLnRatioAndShares()
         "LN 为 0 时不画三角");
     assertTrue(LnRadarBuilder.Build(new ManiaPattern { LnRatio = 0.6, CoreShares = new() { ["Stream"] = 1 } }) is null,
         "三个 LN 核心型全为 0 时不画三角");
+}
+
+static void testManiaStarRatingHandlesHolds()
+{
+    string withHolds = syntheticManiaChart(keys: 4, bpm: 180, notes: 400, everyNthIsHold: 4);
+    (double Star, double RiceStar)? pair = ManiaStarRating.ComputePair(withHolds);
+
+    assertTrue(pair is not null, "合成面谱应能解析出星数");
+    assertTrue(pair!.Value.Star > 0, "面谱星数应大于 0");
+    assertTrue(pair.Value.RiceStar < pair.Value.Star,
+        $"删掉长条后星数应下降：原 {pair.Value.Star:0.000} vs 米线 {pair.Value.RiceStar:0.000}");
+
+    // 非 mania 谱面直接拒绝
+    assertTrue(ManiaStarRating.Compute(withHolds.Replace("Mode: 3", "Mode: 0")) is null, "非 mania 模式不应给星数");
+    assertTrue(ManiaStarRating.Compute("") is null, "空文本不应给星数");
+}
+
+static void testManiaStarRatingScalesWithDensity()
+{
+    double slow = ManiaStarRating.Compute(syntheticManiaChart(keys: 4, bpm: 150, notes: 500, everyNthIsHold: 0)) ?? 0;
+    double fast = ManiaStarRating.Compute(syntheticManiaChart(keys: 4, bpm: 300, notes: 500, everyNthIsHold: 0)) ?? 0;
+
+    assertTrue(slow > 0 && fast > slow, $"同样音符数下密度翻倍应加难度：{slow:0.000} → {fast:0.000}");
+    assertTrue(fast < slow * 4, $"星数不应随密度线性膨胀：{slow:0.000} → {fast:0.000}");
+}
+
+/// <summary>造一张可解析的 4K mania 谱：固定 1/4 拍距，列循环，每隔 N 个出一个长条。</summary>
+static string syntheticManiaChart(int keys, double bpm, int notes, int everyNthIsHold)
+{
+    StringBuilder builder = new();
+    builder.AppendLine("osu file format v14");
+    builder.AppendLine("[General]");
+    builder.AppendLine("Mode: 3");
+    builder.AppendLine("[Difficulty]");
+    builder.AppendLine($"CircleSize:{keys}");
+    builder.AppendLine("[HitObjects]");
+
+    double step = 60000.0 / bpm / 4.0;
+    for (int index = 0; index < notes; index++)
+    {
+        int column = index % keys;
+        int x = (int)((column + 0.5) * 512 / keys);
+        int time = (int)(1000 + index * step);
+        bool hold = everyNthIsHold > 0 && index % everyNthIsHold == 0;
+        builder.AppendLine(hold
+            ? $"{x},192,{time},128,0,{time + (int)(step * 2)}:0:0:0:0:"
+            : $"{x},192,{time},1,0,0:0:0:0:");
+    }
+
+    return builder.ToString();
 }
 
 static void testSearchStatusFollowsWhitelist()
