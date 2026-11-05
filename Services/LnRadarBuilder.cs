@@ -12,7 +12,9 @@ namespace OsuRoam.Services;
 ///    再除以原谱星数。原谱星数直接用 osu! API 给的值，删长条后的星数由
 ///    <see cref="ManiaStarRating"/> 在本地算；
 /// 3. 锚点 <see cref="Anchor"/> = 0.30：实测本机纯面谱的 ΔSR/SR 最大 30.6%、中位 14.5%，
-///    取 0.30 意味着「最难的面谱刚好填满」，中位面谱落在半格左右。超过锚点按满格截断。
+///    取 0.30 意味着「最难的面谱刚好填满」，中位面谱落在半格左右。超过锚点按满格截断；
+/// 4. 缩放取**开方**：ΔSR/SR 的分布极度偏科（LN 20–40% 那批中位只有 0.8%），线性映射会让
+///    绝大多数面谱缩成一个点。开方不改排序，只把低处抬起来 —— 3.3% 从 11% 半径变成 33%。
 ///
 /// 顺序固定为「正下 / 右上 / 左上」，与 <see cref="Controls.RadarChart"/> 的叠加层朝向一致。
 /// </summary>
@@ -45,7 +47,7 @@ public static class LnRadarBuilder
             return null;
 
         double ratio = delta / officialStarRating;
-        double scale = Math.Min(1, ratio / Anchor);
+        double scale = Math.Sqrt(Math.Min(1, ratio / Anchor));
 
         return
         [

@@ -3052,9 +3052,11 @@ static void testLnTriangleScalesWithStarDelta()
 
     double[]? lens = LnRadarBuilder.Build(pattern, 6.0);
     assertTrue(lens is { Length: 3 }, "份额合法时应给出三个顶点");
-    assertNear(0.5, lens![1], "最大份额那根应等于缩放系数 0.5");
-    assertNear(0.25, lens[0], "协调 = 0.2/0.4 × 0.5");
-    assertNear(0.125, lens[2], "杂项 = 0.1/0.4 × 0.5");
+    // ΔSR/SR = 0.15 是锚点的一半，开方后缩放 = √0.5 ≈ 0.7071
+    double expected = Math.Sqrt(0.5);
+    assertNear(expected, lens![1], "最大份额那根应等于 √(0.15/0.30)");
+    assertNear(expected * 0.5, lens[0], "协调 = 0.2/0.4 × 缩放");
+    assertNear(expected * 0.25, lens[2], "杂项 = 0.1/0.4 × 缩放");
 
     // 长条越难，三角越大。
     ManiaPattern harder = new()
