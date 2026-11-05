@@ -31,6 +31,13 @@ public sealed class ManiaPattern
     /// <summary>变速强度（非 1 的 SV 点数量），>0 即为有 SV。</summary>
     public double SvAmount { get; set; }
 
+    /// <summary>
+    /// 「长条压成单点」之后的星数（本地算，见 <see cref="Services.ManiaStarRating"/>）。
+    /// 原谱星数用 osu! API 给的值，两者之差除以原谱星数就是长条贡献的难度占比 —— 信息窗三角的大小。
+    /// 0 表示还没算过（旧缓存），此时不画三角。
+    /// </summary>
+    public double RiceStarRating { get; set; }
+
     /// <summary>核心型时长占比（0–1，按匹配时长归一）。</summary>
     public Dictionary<string, double> CoreShares { get; set; } = [];
 

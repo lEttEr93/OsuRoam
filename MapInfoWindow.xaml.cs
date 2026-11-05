@@ -333,7 +333,7 @@ public partial class MapInfoWindow : Window
             Radar.Labels = Loc.SkillPatternLabels();
             Radar.Values = pattern.SkillAxes;
             // 面谱才叠 LN 三轴；悬停/点击时标签切换在雷达控件内部处理。
-            Radar.OverlayValues = pattern.IsLnChart ? LnRadarBuilder.Build(pattern) : null;
+            Radar.OverlayValues = pattern.IsLnChart ? LnRadarBuilder.Build(pattern, item.Stars) : null;
             Radar.OverlayLabels = Radar.OverlayValues is null
                 ? null
                 : [Loc.CorePatternLabel("Coordination"), Loc.CorePatternLabel("Density"), Loc.CorePatternLabel("Misc")];

@@ -6,10 +6,13 @@ namespace OsuRoam.Services;
 /// 信息窗里叠在七轴雷达上的 LN 三轴三角。
 ///
 /// 口径（1.5.3 定稿）：
-/// 1. 三个核心型份额在三角内部按三者之和归一，显示成百分比，和 = 100%；
-/// 2. 顶点长度 = (份额 / 最大份额) × f(LN)，最大那根正好等于 f(LN)，所以形状不受绝对量影响；
-/// 3. f(LN) = 2·LN/(1+LN) —— 由「长条尾按 200 计分」的 pp 损失 1.875·LN/(1+LN)
-///    按 LN = 100% 归一化得到，于是 LN = 100% 且三项等分时三个顶点都贴到外接圆。
+/// 1. 三角的**形状**来自三个 LN 核心型：协调（正下）/ 密度（右上）/ 杂项（左上），
+///    各自按「除以三者中最大的那个」归一，所以最大那根永远等于整体缩放系数；
+/// 2. 三角的**大小**来自长条的难度贡献：ΔSR/SR —— 原谱星数减去「长条压成单点」后的星数，
+///    再除以原谱星数。原谱星数直接用 osu! API 给的值，删长条后的星数由
+///    <see cref="ManiaStarRating"/> 在本地算；
+/// 3. 锚点 <see cref="Anchor"/> = 0.30：实测本机纯面谱的 ΔSR/SR 最大 30.6%、中位 14.5%，
+///    取 0.30 意味着「最难的面谱刚好填满」，中位面谱落在半格左右。超过锚点按满格截断。
 ///
 /// 顺序固定为「正下 / 右上 / 左上」，与 <see cref="Controls.RadarChart"/> 的叠加层朝向一致。
 /// </summary>
@@ -17,20 +20,16 @@ public static class LnRadarBuilder
 {
     public const int AxisCount = 3;
 
-    /// <summary>LN 强度系数：LN = 0 → 0，LN = 100% → 1。</summary>
-    public static double Peak(double lnRatio)
-    {
-        double clamped = Math.Clamp(lnRatio, 0, 1);
-        return 2 * clamped / (1 + clamped);
-    }
+    /// <summary>ΔSR/SR 到多少算填满外接圆。</summary>
+    public const double Anchor = 0.30;
 
     /// <summary>
     /// 三个顶点长度（0–1，占雷达半径）：正下 = 协调，右上 = 密度，左上 = 杂项。
-    /// 三项全为零、或者 LN 占比为 0 时返回 null —— 没有可画的东西。
+    /// 缺少数据（没有长条、没算过米线星数、官方星数缺失）时返回 null —— 不画三角。
     /// </summary>
-    public static double[]? Build(ManiaPattern? pattern)
+    public static double[]? Build(ManiaPattern? pattern, double officialStarRating)
     {
-        if (pattern is null)
+        if (pattern is null || officialStarRating <= 0 || pattern.RiceStarRating <= 0)
             return null;
 
         double coordination = shareOf(pattern, "Coordination");
@@ -41,15 +40,18 @@ public static class LnRadarBuilder
         if (max <= 0.0001)
             return null;
 
-        double peak = Peak(pattern.LnRatio);
-        if (peak <= 0)
+        double delta = officialStarRating - pattern.RiceStarRating;
+        if (delta <= 0)
             return null;
+
+        double ratio = delta / officialStarRating;
+        double scale = Math.Min(1, ratio / Anchor);
 
         return
         [
-            Math.Clamp(coordination / max * peak, 0, 1),
-            Math.Clamp(density / max * peak, 0, 1),
-            Math.Clamp(wildcard / max * peak, 0, 1)
+            Math.Clamp(coordination / max * scale, 0, 1),
+            Math.Clamp(density / max * scale, 0, 1),
+            Math.Clamp(wildcard / max * scale, 0, 1)
         ];
     }
 
