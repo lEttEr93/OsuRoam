@@ -50,6 +50,7 @@ public sealed class SvRings : FrameworkElement
     private FormattedText[]? cachedLabels;
     private string? cachedLabelSignature;
     private double cachedPixelsPerDip;
+    private bool batching;
 
     public IReadOnlyList<string>? Labels
     {
@@ -203,12 +204,37 @@ public sealed class SvRings : FrameworkElement
         return texts;
     }
 
+    /// <summary>
+    /// 一次性换数据。三个依赖属性分开赋值会各自触发一次生长动画，
+    /// 看起来就是「转一圈、回到起点、再转一圈」。窗口每次刷新都走这里。
+    /// </summary>
+    public void SetData(IReadOnlyList<string>? labels, IReadOnlyList<double>? values, IReadOnlyList<bool>? higherIsWorse = null)
+    {
+        batching = true;
+        try
+        {
+            Labels = labels;
+            Values = values;
+            HigherIsWorse = higherIsWorse;
+        }
+        finally
+        {
+            batching = false;
+        }
+
+        cachedLabels = null;
+        cachedLabelSignature = null;
+        beginGrowth();
+    }
+
     private static void onDataChanged(DependencyObject target, DependencyPropertyChangedEventArgs e)
     {
         SvRings rings = (SvRings)target;
         rings.cachedLabels = null;
         rings.cachedLabelSignature = null;
-        rings.beginGrowth();
+        // 批量赋值时只让 SetData 收尾时放一次动画。
+        if (!rings.batching)
+            rings.beginGrowth();
     }
 
     /// <summary>换数据时让环从 0 转出来，和键型条的 Growth 一致。</summary>

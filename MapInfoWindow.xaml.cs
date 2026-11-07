@@ -38,14 +38,25 @@ public partial class MapInfoWindow : Window
     /// <summary>非 null 时窗口处于「提示」状态（比如 tosu 没读到 osu!），不再显示谱面数据。</summary>
     private string? noticeKey;
 
+    /// <summary>上一次画过的键型数据：同一个对象就不重画，避免动画重放。</summary>
+    private ManiaPattern? renderedPattern;
+    private double renderedStars;
+
     public MapInfoWindow()
     {
         InitializeComponent();
         SizeChanged += (_, _) => reposition();
         Loaded += (_, _) => reposition();
         // 换语言：胶囊、详情行、雷达标签全是代码拼的，得自己重算。
-        Loc.Changed += refresh;
-        Closed += (_, _) => Loc.Changed -= refresh;
+        Loc.Changed += onLanguageChanged;
+        Closed += (_, _) => Loc.Changed -= onLanguageChanged;
+    }
+
+    /// <summary>换语言后标签要重画，先把「画过了」的标记清掉。</summary>
+    private void onLanguageChanged()
+    {
+        renderedPattern = null;
+        refresh();
     }
 
     /// <summary>挂在主窗口下面，跟随它移动/缩放，不单独占任务栏。</summary>
@@ -141,6 +152,8 @@ public partial class MapInfoWindow : Window
         DetailText.Visibility = Visibility.Collapsed;
         ReasonText.Text = string.Empty;
         ReasonText.Visibility = Visibility.Collapsed;
+        // 提示态把三个控件都清空了，回到谱面态必须整块重画。
+        renderedPattern = null;
 
         NoticeReason.Text = Loc.T(noticeKey ?? "mapinfo.tosu.nobeatmap");
         NoticeHint.Text = Loc.T("mapinfo.tosu.hint");
@@ -387,49 +400,51 @@ public partial class MapInfoWindow : Window
         ManiaPattern? pattern = item.Pattern;
         if (pattern is null)
         {
+            renderedPattern = null;
             RatioRow.Visibility = Visibility.Collapsed;
             PatternRow.Visibility = Visibility.Collapsed;
-            Radar.Labels = null;
-            Radar.Values = null;
-            Radar.OverlayValues = null;
-            Radar.OverlayLabels = null;
-            Bars.Labels = null;
-            Bars.Shares = null;
-            SvRingRow.Labels = null;
-            SvRingRow.Values = null;
+            Radar.SetData(null, null, null, null);
+            Bars.SetData(null, null);
+            SvRingRow.SetData(null, null);
             SvRingRow.Visibility = Visibility.Collapsed;
             return;
         }
+
+        // 曲绘/封面加载完会再触发一次 refresh，键型对象却还是同一个 ——
+        // 这时候重建等于把三个动画各重放一遍，看起来就是「每次出现渲染两遍」。
+        if (ReferenceEquals(pattern, renderedPattern) && Math.Abs(renderedStars - item.Stars) < 0.0001)
+            return;
+
+        renderedPattern = pattern;
+        renderedStars = item.Stars;
 
         buildRatioBar(pattern);
         buildSvRings(pattern);
         PatternRow.Visibility = Visibility.Visible;
 
-        // 7 轴技能强度：各轴独立，适合雷达图。
+        // 7 轴技能强度：各轴独立，适合雷达图。面谱才叠 LN 三轴；
+        // 悬停/点击时标签切换在雷达控件内部处理。
         if (pattern.SkillAxes.Length == ManiaPattern.SkillPatterns.Length)
         {
             RadarPanel.Visibility = Visibility.Visible;
-            Radar.Labels = Loc.SkillPatternLabels();
-            Radar.Values = pattern.SkillAxes;
-            // 面谱才叠 LN 三轴；悬停/点击时标签切换在雷达控件内部处理。
-            Radar.OverlayValues = pattern.IsLnChart ? LnRadarBuilder.Build(pattern, item.Stars) : null;
-            Radar.OverlayLabels = Radar.OverlayValues is null
-                ? null
-                : [Loc.CorePatternLabel("Coordination"), Loc.CorePatternLabel("Density"), Loc.CorePatternLabel("Misc")];
+            double[]? overlay = pattern.IsLnChart ? LnRadarBuilder.Build(pattern, item.Stars) : null;
+            Radar.SetData(
+                Loc.SkillPatternLabels(),
+                pattern.SkillAxes,
+                overlay,
+                overlay is null
+                    ? null
+                    : [Loc.CorePatternLabel("Coordination"), Loc.CorePatternLabel("Density"), Loc.CorePatternLabel("Misc")]);
         }
         else
         {
             // 没有技能轴时宁可空着，也不要拿"占比和 = 1"的核心键型去凑雷达图。
             RadarPanel.Visibility = Visibility.Collapsed;
-            Radar.Labels = null;
-            Radar.Values = null;
-            Radar.OverlayValues = null;
-            Radar.OverlayLabels = null;
+            Radar.SetData(null, null, null, null);
         }
 
         // 6 个核心键型占比：加起来是 1，用直方图看长短（雷达图会误导）。
-        Bars.Labels = Loc.CorePatternLabels();
-        Bars.Shares = pattern.ToVector();
+        Bars.SetData(Loc.CorePatternLabels(), pattern.ToVector());
     }
 
     /// <summary>
@@ -458,17 +473,14 @@ public partial class MapInfoWindow : Window
         SvMetrics? sv = pattern.Sv;
         if (sv is null || sv.Rows <= 0)
         {
-            SvRingRow.Labels = null;
-            SvRingRow.Values = null;
+            SvRingRow.SetData(null, null);
             SvRingRow.ToolTip = null;
             SvRingRow.Visibility = Visibility.Collapsed;
             return;
         }
 
         double[] values = sv.DisplayValues();
-        SvRingRow.Labels = Loc.SvLabels();
-        SvRingRow.Values = values;
-        SvRingRow.HigherIsWorse = SvMetrics.HigherIsWorse;
+        SvRingRow.SetData(Loc.SvLabels(), values, SvMetrics.HigherIsWorse);
         SvRingRow.ToolTip = Loc.F("sv.tip",
             percent(values[0]), percent(values[1]), percent(values[2]), percent(values[3]));
         SvRingRow.Visibility = Visibility.Visible;

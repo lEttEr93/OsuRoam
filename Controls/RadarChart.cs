@@ -93,6 +93,8 @@ public sealed class RadarChart : FrameworkElement
     private Geometry? cachedAxes;
     private double cachedGeometryRadius;
     private Size cachedGeometrySize;
+    /// <summary>批量赋值期间不重放生长动画（见 <see cref="SetData"/>）。</summary>
+    private bool batching;
     private int cachedGeometryCount;
 
     public IReadOnlyList<string>? Labels
@@ -144,6 +146,36 @@ public sealed class RadarChart : FrameworkElement
         return new Size(width, height);
     }
 
+    /// <summary>
+    /// 一次性换数据（标签 + 数值 + 叠加层）。分开赋值时每个属性都会重放一次生长动画，
+    /// 看起来是雷达图「长出来、缩回去、再长出来」。
+    /// </summary>
+    public void SetData(
+        IReadOnlyList<string>? labels,
+        IReadOnlyList<double>? values,
+        IReadOnlyList<double>? overlayValues = null,
+        IReadOnlyList<string>? overlayLabels = null)
+    {
+        batching = true;
+        try
+        {
+            Labels = labels;
+            Values = values;
+            OverlayValues = overlayValues;
+            OverlayLabels = overlayLabels;
+        }
+        finally
+        {
+            batching = false;
+        }
+
+        cachedTexts = null;
+        cachedLabelSignature = null;
+        cachedRings = null;
+        cachedAxes = null;
+        beginGrowth(values);
+    }
+
     private static void onLabelsChanged(DependencyObject target, DependencyPropertyChangedEventArgs e)
     {
         RadarChart chart = (RadarChart)target;
@@ -152,12 +184,15 @@ public sealed class RadarChart : FrameworkElement
         chart.cachedRings = null;
         chart.cachedAxes = null;
         // 轴数变了要按新轴数重新评估向量（第一次绑定时 Labels 可能晚于 Values 到位）。
-        chart.beginGrowth(chart.Values);
+        if (!chart.batching)
+            chart.beginGrowth(chart.Values);
     }
 
     private static void onValuesChanged(DependencyObject target, DependencyPropertyChangedEventArgs e)
     {
-        ((RadarChart)target).beginGrowth(e.NewValue as IReadOnlyList<double>);
+        RadarChart chart = (RadarChart)target;
+        if (!chart.batching)
+            chart.beginGrowth(e.NewValue as IReadOnlyList<double>);
     }
 
     private static void onOverlayChanged(DependencyObject target, DependencyPropertyChangedEventArgs e)

@@ -2630,8 +2630,9 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
             return null;
         }
 
-        BeatmapDetail? detail = BeatmapDetailReader.Parse(osuText);
-        ManiaPattern? pattern = settings.Mode == "mania" ? ManiaPatternAnalyzer.Analyze(osuText) : null;
+        // 详情（CS/OD/AR/物件数）很便宜，直接算；键型 + 星数 + SV 要几十到几百毫秒，
+        // 放到后台线程，窗口先出来再补图 —— 否则选歌时按下方向键会明显卡一下。
+        BeatmapDetail? detail = await Task.Run(() => BeatmapDetailReader.Parse(osuText));
 
         RecommendationItem item = new()
         {
@@ -2649,11 +2650,57 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
             KeyCount = detail?.KeyCount ?? 0
         };
         item.ApplyDetail(detail);
-        item.ApplyPattern(pattern);
         // 曲绘走的是 Roam 自己的 CoverLoader（和推荐卡片同一套模糊底），
         // 不加载的话信息窗就只剩纯色背景。
         item.LoadCover();
+
+        if (settings.Mode == "mania")
+            _ = analyzeTosuPatternAsync(item, osuText);
+
         return item;
+    }
+
+    /// <summary>
+    /// 键型（含星数与 SV）在后台算完再回填到同一个条目上，信息窗会自己刷新。
+    /// 算过的谱面走键型库 —— 这就是「保存算过的 SV」：patterns.json 里连 SvMetrics 一起存，
+    /// 换首歌再转回来不用重算。
+    /// </summary>
+    private async Task analyzeTosuPatternAsync(RecommendationItem item, string osuText)
+    {
+        ManiaPattern? cached = patternLibrary.TryGetVerified(item.BeatmapId);
+        if (cached is not null)
+        {
+            item.ApplyPattern(cached);
+            return;
+        }
+
+        try
+        {
+            await patternGate.WaitAsync();
+            try
+            {
+                System.Diagnostics.Stopwatch clock = System.Diagnostics.Stopwatch.StartNew();
+                bool stored = await Task.Run(() => patternLibrary.Ingest(osuText, item.BeatmapId, item.BeatmapsetId));
+                if (!stored)
+                    return;
+                await patternLibrary.SaveAsync();
+                if (clock.ElapsedMilliseconds > 150)
+                    AppLog.Info($"信息栏键型解析较慢：{item.DisplayTitle}，{clock.ElapsedMilliseconds}ms（已在后台线程）");
+            }
+            finally
+            {
+                patternGate.Release();
+            }
+        }
+        catch (Exception exception)
+        {
+            AppLog.Error($"信息栏：解析谱面键型失败 {item.BeatmapId}", exception);
+            return;
+        }
+
+        ManiaPattern? pattern = patternLibrary.TryGet(item.BeatmapId);
+        if (pattern is not null)
+            item.ApplyPattern(pattern);
     }
 
     /// <summary>勾选键型：多选，勾中的核心型用强权重参与排序（不硬筛）。</summary>

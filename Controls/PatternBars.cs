@@ -54,6 +54,7 @@ public sealed class PatternBars : FrameworkElement
     private FormattedText[]? cachedLabels;
     private string? cachedLabelSignature;
     private double cachedPixelsPerDip;
+    private bool batching;
 
     /// <summary>真正要画的行（跳过显示为 0% 的键型），按 Labels/Shares 变化重算。</summary>
     private int[]? visibleRows;
@@ -196,13 +197,41 @@ public sealed class PatternBars : FrameworkElement
 
     private static double rowHeight() => LabelFontSize + TextGap + BarHeight + RowGap;
 
+    /// <summary>
+    /// 一次性换数据：<see cref="Labels"/> 和 <see cref="Shares"/> 分开赋值会各自触发一次生长动画，
+    /// 肉眼看到的就是「长一遍、缩回去、再长一遍」。窗口每次刷新都走这里。
+    /// </summary>
+    public void SetData(IReadOnlyList<string>? labels, IReadOnlyList<double>? shares)
+    {
+        batching = true;
+        try
+        {
+            Labels = labels;
+            Shares = shares;
+        }
+        finally
+        {
+            batching = false;
+        }
+
+        resetCaches();
+        beginGrowth();
+    }
+
+    private void resetCaches()
+    {
+        cachedLabels = null;
+        cachedLabelSignature = null;
+        visibleRows = null;
+    }
+
     private static void onDataChanged(DependencyObject target, DependencyPropertyChangedEventArgs e)
     {
         PatternBars bars = (PatternBars)target;
-        bars.cachedLabels = null;
-        bars.cachedLabelSignature = null;
-        bars.visibleRows = null;
-        bars.beginGrowth();
+        bars.resetCaches();
+        // 批量赋值时只让 SetData 收尾时放一次动画。
+        if (!bars.batching)
+            bars.beginGrowth();
     }
 
     /// <summary>
