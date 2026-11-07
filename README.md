@@ -1,4 +1,4 @@
-# osu! Roam v1.5.3
+# osu! Roam v1.5.5
 
 [English](#english) · [中文](#中文)
 
@@ -15,23 +15,26 @@ keep roaming without touching it.
 
 | Package | UI language | Default download source |
 |---|---|---|
-| `osu-roam-1.5.3-portable.zip` | follows the system language | sayobot mirrors (China) |
-| `osu-roam-1.5.3-en-portable.zip` | English | catboy / beatconnect (international) |
+| `osu-roam-1.5.5-portable.zip` | follows the system language | sayobot mirrors (China) |
+| `osu-roam-1.5.5-en-portable.zip` | English | catboy / beatconnect (international) |
 
 The .NET runtime and `tosu.exe` are already inside the archive — extract and run. Each build keeps its own `data`
 folder, so **do not install one over the other**.  A fresh folder inherits the analysed-pattern library from a
 neighbouring `osu-roam*` install, so pattern data does not start from zero.
 
-## What's new in 1.5.3
+## What's new in 1.5.5
 
-- **LN charts get their own breakdown (mania).** When long notes pass 20% of the chart, the info panel adds an
-  RC/LN ratio bar and draws a 3-axis triangle (coordination / density / misc) over the 7-axis radar. Hover it, or
-  click to pin it, and the skill labels switch to the LN ones.
-- **The triangle is sized by what the holds are worth** — the star rating the chart loses once every hold is
-  collapsed into a tap, divided by the real star rating. A local port of the osu!mania star rating algorithm
-  (lazer `20241007`) computes both; it agrees with the API's `difficulty_rating` to within 1e-4 on 90 charts.
-- **LN threshold lowered from 25% to 20%**, so borderline charts are no longer missed.
-- Everything from 1.5.2 is unchanged. Recommendations, downloads and tosu integration work exactly as before.
+- **A beatmap preview window in song select.** While you browse, Roam opens a second window next to the info
+  panel — same height — and scrolls the selected mania chart with the preview audio osu! is playing (tosu reports
+  the position in milliseconds). Plain lanes and tiles: no judgement, no sound, no skin files.
+- **SV charts are scored, not just star-rated.** The info panel gains four rings — isochrony and comfort (higher
+  is better), memorisation and intensity (higher is worse).
+- **tosu trouble is visible.** When tosu cannot read osu!, the info panel says why instead of staying empty.
+- **The info panel stopped jumping.** Details come first and the card is laid out at its final height, so the radar
+  and pattern bars arriving a moment later no longer resize it; the notice state uses that same height.
+- **osu! detection was rewritten**: Velopack-installed lazer, a missing `.osz` association and non-default install
+  folders all import now.
+- Everything from 1.5.3 is unchanged.
 
 ## Quick start
 
@@ -66,6 +69,8 @@ neighbouring `osu-roam*` install, so pattern data does not start from zero.
   show up. Costs ~2 s on the first run, then it is cached.
 - **Info panel shows**: the beatmap Roam just imported, or whatever is selected in osu! (read live from
   tosu, no download needed).
+- **Beatmap preview in song select** (on by default): scrolls the selected mania chart with the game's preview
+  audio; the window docks to the right of the info panel at exactly the same height.
 - **History** (title bar) shows the last 50 recommendations.
 
 ## Download and tosu
@@ -109,15 +114,17 @@ osu! 谱面漫游推荐工具，Windows / WPF / .NET 8。读你的成绩样本�
 
 | 包 | 界面语言 | 默认下载源 |
 |---|---|---|
-| `osu-roam-1.5.3-portable.zip` | 跟随系统 | sayobot 镜像（国内） |
-| `osu-roam-1.5.3-en-portable.zip` | 英文 | catboy / beatconnect（国际） |
+| `osu-roam-1.5.5-portable.zip` | 跟随系统 | sayobot 镜像（国内） |
+| `osu-roam-1.5.5-en-portable.zip` | 英文 | catboy / beatconnect（国际） |
 
-## 1.5.3 新增
+## 1.5.5 新增
 
-- **面谱有单独的拆解了（mania）**：长条占比过 20% 时，信息窗多一条 RC/LN 占比横条，并在 7 轴雷达上叠一个三轴三角（协调 / 密度 / 杂项）。悬停看看，点一下钉住，标签就换成面谱那三个。
-- **三角大小 = 长条值多少难度**：把每根长条都压成单点后重算星数，掉的那部分除以原星数就是比例。两边的星数都由本地移植的 osu!mania 星数算法算出（对齐 lazer `20241007`），90 张谱与 API 的 `difficulty_rating` 误差都在 1e-4 以内。
-- **LN 阈值 25% → 20%**，边缘的谱面不再漏掉。
-- 1.5.2 的功能全部照旧：推荐、预下载、tosu 联动都是原来的行为。
+- **选歌界面有谱面预览了**：浏览谱面时，信息窗旁边再开一个等高的窗口，按 osu! 正在播的那段预览音频滚动当前选中的 mania 谱面（位置由 tosu 报毫秒）。只有轨道和方砖：不判定、不出声、不读皮肤。
+- **SV 也打分了**：信息窗多四个小环 —— 等时性、舒适度（越高越好），背谱、强度（越高越差）。
+- **tosu 出问题会说人话**：tosu 读不到 osu! 时，信息窗直接说明原因，而不是空着不显示。
+- **信息窗不再跳一下**：详情先出、卡片按最终高度布好，键型雷达晚一步出现也不会改高度；提示态用同一个高度。
+- **osu! 定位重写**：lazer 用 Velopack 安装、`.osz` 没有默认关联、装在非默认目录，导入都能用了。
+- 1.5.3 的功能全部照旧。
 
 .NET 运行时和 `tosu.exe` 都在包里，解压即用。两版各有自己的 `data` 目录，**不要覆盖安装**。
 
@@ -148,6 +155,7 @@ osu! 谱面漫游推荐工具，Windows / WPF / .NET 8。读你的成绩样本�
 - **排除已安装的谱面**（默认开）：扫一遍 osu! 的谱面目录（stable 的 `Songs`、lazer 的 `files`），
   已经在你机器上的难度不再推荐；同一首歌的其他难度仍会出现。首次约 2 秒，之后走缓存。
 - **信息栏显示**：可以选「导入的谱面」或「游戏内选中的谱面」（后者直接读 tosu，不用下载）。
+- **选歌时显示谱面预览**（默认开）：跟着游戏的预览音频滚当前选中的 mania 谱面；窗口贴在信息窗右侧、和它等高。
 - **历史**（标题栏）看最近推荐的 50 首。
 
 ## 下载与 tosu
