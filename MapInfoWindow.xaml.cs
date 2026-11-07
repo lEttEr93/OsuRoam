@@ -42,6 +42,16 @@ public partial class MapInfoWindow : Window
     private ManiaPattern? renderedPattern;
     private double renderedStars;
 
+    /// <summary>提示态和高低未定的卡片统一用这个高度：最后一次「完整卡片」的自然高度。</summary>
+    private double cardHeight;
+    private const double FallbackCardHeight = 420;
+
+    /// <summary>
+    /// 键型就绪时详情行会长出「模式 / 主导键型 / 细分键型」几行，
+    /// 于是卡片会变高。预留 4 行（10px 字号约 12.6px/行）把这段高度先占住。
+    /// </summary>
+    private const double ReservedDetailHeight = 51;
+
     public MapInfoWindow()
     {
         InitializeComponent();
@@ -73,8 +83,10 @@ public partial class MapInfoWindow : Window
     /// <summary>显示（或更新）某个条目的信息；已经可见时只刷新内容。</summary>
     public void ShowFor(RecommendationItem item)
     {
-        // 从提示态回到谱面态：把提示时藏起来的部件放回来。
+        // 从提示态回到谱面态：把提示时藏起来的部件放回来，高度也交回 SizeToContent。
         noticeKey = null;
+        SizeToContent = SizeToContent.Height;
+        Height = double.NaN;
         StarPanel.Visibility = Visibility.Visible;
         CapsulePanel.Visibility = Visibility.Visible;
         NoticePanel.Visibility = Visibility.Collapsed;
@@ -117,6 +129,10 @@ public partial class MapInfoWindow : Window
 
         DataContext = null;
         applyNotice();
+
+        // 提示卡和普通卡片同高：一高一矮来回跳，看起来像窗口在抽搐。
+        SizeToContent = SizeToContent.Manual;
+        Height = cardHeight > 0 ? cardHeight : FallbackCardHeight;
         reposition();
 
         if (IsVisible)
@@ -321,6 +337,32 @@ public partial class MapInfoWindow : Window
         DetailText.Visibility = DetailText.Text.Length == 0 ? Visibility.Collapsed : Visibility.Visible;
         ReasonText.Text = item.Reason;
         ReasonText.Visibility = string.IsNullOrWhiteSpace(item.Reason) ? Visibility.Collapsed : Visibility.Visible;
+
+        rememberCardHeight();
+    }
+
+    /// <summary>
+    /// 记下「完整卡片」的自然高度（含键型占位），提示态拿它对齐。
+    /// 等布局稳定再读：此时 ActualHeight 才是 SizeToContent 算完的结果。
+    /// </summary>
+    /// <summary>开发用：把各行的高度打出来，便于核对「占位态」和「谱面态」是否等高。</summary>
+    internal string DescribeHeights() =>
+        string.Create(System.Globalization.CultureInfo.InvariantCulture,
+            $"ratio={RatioRow.ActualHeight:0.0} pattern={PatternRow.ActualHeight:0.0} " +
+            $"radar={RadarPanel.ActualHeight:0.0} side={PatternSidePanel.ActualHeight:0.0} " +
+            $"placeholder={PatternPlaceholder.ActualHeight:0.0} detail={DetailText.ActualHeight:0.0} " +
+            $"reason={ReasonText.ActualHeight:0.0} sep={Separator.ActualHeight:0.0} notice={NoticePanel.ActualHeight:0.0}");
+
+    private void rememberCardHeight()
+    {
+        Dispatcher.BeginInvoke(new Action(() =>
+        {
+            if (noticeKey is null && SizeToContent == SizeToContent.Height &&
+                PatternRow.Visibility == Visibility.Visible && ActualHeight > 120)
+            {
+                cardHeight = ActualHeight;
+            }
+        }), System.Windows.Threading.DispatcherPriority.Loaded);
     }
 
     private static string buildMetaLine(RecommendationItem item)
@@ -401,8 +443,18 @@ public partial class MapInfoWindow : Window
         if (pattern is null)
         {
             renderedPattern = null;
+
+            // 键型还在后台算：先按「算完的样子」占位，卡片高度不会等数据到了再跳一次。
+            if (item.IsPatternPending)
+            {
+                buildPendingPattern(item);
+                return;
+            }
+
             RatioRow.Visibility = Visibility.Collapsed;
             PatternRow.Visibility = Visibility.Collapsed;
+            PatternPlaceholder.Visibility = Visibility.Collapsed;
+            DetailText.MinHeight = 0;
             Radar.SetData(null, null, null, null);
             Bars.SetData(null, null);
             SvRingRow.SetData(null, null);
@@ -418,9 +470,12 @@ public partial class MapInfoWindow : Window
         renderedPattern = pattern;
         renderedStars = item.Stars;
 
-        buildRatioBar(pattern);
+        buildRatioBar(pattern.LnRatio, pattern.IsLnChart);
         buildSvRings(pattern);
+        DetailText.MinHeight = ReservedDetailHeight;
         PatternRow.Visibility = Visibility.Visible;
+        PatternPlaceholder.Visibility = Visibility.Collapsed;
+        PatternSidePanel.Visibility = Visibility.Visible;
 
         // 7 轴技能强度：各轴独立，适合雷达图。面谱才叠 LN 三轴；
         // 悬停/点击时标签切换在雷达控件内部处理。
@@ -448,12 +503,39 @@ public partial class MapInfoWindow : Window
     }
 
     /// <summary>
-    /// RC / LN 占比横条：两段按星号列宽分配，容器改宽度时自动跟着走。
+    /// 键型未就绪时的占位：圆形区域留 152（和雷达一样高），右侧的环与直方图先不画。
+    /// RC/LN 占比条倒是能立刻给出来 —— 长条数 / 音符数在 <see cref="BeatmapDetail"/> 里已经有了。
     /// </summary>
-    private void buildRatioBar(ManiaPattern pattern)
+    private void buildPendingPattern(RecommendationItem item)
     {
-        double ln = Math.Clamp(pattern.LnRatio, 0, 1);
-        bool faceChart = pattern.IsLnChart;
+        BeatmapDetail? detail = item.Detail;
+        int notes = detail?.CircleCount ?? 0;
+        int holds = detail?.HoldCount ?? 0;
+        if (detail is { HasObjects: true } && notes + holds > 0)
+        {
+            double ln = holds / (double)(notes + holds);
+            buildRatioBar(ln, ln >= ManiaPattern.LnChartThreshold);
+        }
+        else
+        {
+            RatioRow.Visibility = Visibility.Collapsed;
+        }
+
+        PatternRow.Visibility = Visibility.Visible;
+        DetailText.MinHeight = ReservedDetailHeight;
+        RadarPanel.Visibility = Visibility.Collapsed;
+        PatternSidePanel.Visibility = Visibility.Collapsed;
+        PatternPlaceholder.Visibility = Visibility.Visible;
+    }
+
+    /// <summary>
+    /// RC / LN 占比横条：两段按星号列宽分配，容器改宽度时自动跟着走。
+    /// 入参是比例而不是 <see cref="ManiaPattern"/> —— 键型还没算完时可以先用
+    /// <see cref="BeatmapDetail"/> 里的音符数/长条数给出同样的结果。
+    /// </summary>
+    private void buildRatioBar(double lnRatio, bool faceChart)
+    {
+        double ln = Math.Clamp(lnRatio, 0, 1);
 
         RcRatioColumn.Width = new GridLength(Math.Max(0.0001, 1 - ln), GridUnitType.Star);
         LnRatioColumn.Width = new GridLength(Math.Max(0.0001, ln), GridUnitType.Star);
@@ -520,7 +602,7 @@ public partial class MapInfoWindow : Window
             if (top.Length > 0)
                 parts.Add(string.Join(" · ", top.Select(pair => $"{pair.Key} {pair.Value:P0}")));
         }
-        else if (item.KeyCount is 0 or 4)
+        else if (item.KeyCount is 0 or 4 && !item.IsPatternPending)
         {
             parts.Add(Loc.T("detail.maniaonly"));
         }

@@ -326,14 +326,39 @@ public partial class MainWindow : Window
             return;
         }
 
-        // 开发用：--notice 截「tosu 没读到 osu!」的提示态（--notice=memory 换原因）
+        // 开发用：--notice 截「tosu 没读到 osu!」的提示态（--notice=memory 换原因）。
+        // 先正常显示一张卡片量到高度，再切提示态 —— 和真实顺序一致，能验证「高度锁定」。
         if (Environment.GetCommandLineArgs().FirstOrDefault(arg => arg.StartsWith("--notice", StringComparison.OrdinalIgnoreCase)) is { } noticeArg)
         {
             string reason = noticeArg.Contains('=') ? noticeArg[(noticeArg.IndexOf('=') + 1)..] : "memory";
-            showTosuNotice(reason == "nobeatmap" ? "mapinfo.tosu.nobeatmap" : "mapinfo.tosu.memory");
+            showMapInfoFor(buildSnapshotItem());
             await Task.Delay(900);
             if (mapInfoWindow is not null)
+                AppLog.Info($"信息窗高度（谱面态）：{mapInfoWindow.ActualHeight:0.0}｜{mapInfoWindow.DescribeHeights()}");
+            showTosuNotice(reason == "nobeatmap" ? "mapinfo.tosu.nobeatmap" : "mapinfo.tosu.memory");
+            await Task.Delay(700);
+            if (mapInfoWindow is not null)
+            {
+                AppLog.Info($"信息窗高度（提示态）：{mapInfoWindow.ActualHeight:0.0}｜{mapInfoWindow.DescribeHeights()}");
                 RenderDiagnostics.CaptureWindow(mapInfoWindow, path);
+            }
+            Close();
+            return;
+        }
+
+        // 开发用：--pending 截「键型还没算完」的占位态，验证高度和算完以后一致
+        if (Environment.GetCommandLineArgs().Any(arg => arg == "--pending"))
+        {
+            RecommendationItem item = buildSnapshotItem();
+            item.ApplyPattern(null);
+            item.SetPatternPending(true);
+            showMapInfoFor(item);
+            await Task.Delay(900);
+            if (mapInfoWindow is not null)
+            {
+                AppLog.Info($"信息窗高度（占位态）：{mapInfoWindow.ActualHeight:0.0}｜{mapInfoWindow.DescribeHeights()}");
+                RenderDiagnostics.CaptureWindow(mapInfoWindow, path);
+            }
             Close();
             return;
         }
@@ -2655,7 +2680,10 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
         item.LoadCover();
 
         if (settings.Mode == "mania")
+        {
+            item.SetPatternPending(true);
             _ = analyzeTosuPatternAsync(item, osuText);
+        }
 
         return item;
     }
@@ -2670,6 +2698,7 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
         ManiaPattern? cached = patternLibrary.TryGetVerified(item.BeatmapId);
         if (cached is not null)
         {
+            item.SetPatternPending(false);
             item.ApplyPattern(cached);
             return;
         }
@@ -2682,7 +2711,12 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
                 System.Diagnostics.Stopwatch clock = System.Diagnostics.Stopwatch.StartNew();
                 bool stored = await Task.Run(() => patternLibrary.Ingest(osuText, item.BeatmapId, item.BeatmapsetId));
                 if (!stored)
+                {
+                    // 算不出来（键数/音符不够）也要把占位撤掉，否则卡片一直空着一块。
+                    item.SetPatternPending(false);
                     return;
+                }
+
                 await patternLibrary.SaveAsync();
                 if (clock.ElapsedMilliseconds > 150)
                     AppLog.Info($"信息栏键型解析较慢：{item.DisplayTitle}，{clock.ElapsedMilliseconds}ms（已在后台线程）");
@@ -2695,9 +2729,11 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
         catch (Exception exception)
         {
             AppLog.Error($"信息栏：解析谱面键型失败 {item.BeatmapId}", exception);
+            item.SetPatternPending(false);
             return;
         }
 
+        item.SetPatternPending(false);
         ManiaPattern? pattern = patternLibrary.TryGet(item.BeatmapId);
         if (pattern is not null)
             item.ApplyPattern(pattern);

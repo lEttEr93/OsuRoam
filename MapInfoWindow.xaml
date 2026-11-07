@@ -53,7 +53,9 @@
             <Grid Margin="11,9,11,10">
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto" />
-                <RowDefinition Height="Auto" />
+                <!-- 星级/胶囊那一行用星号：卡片高度锁定时，剩余空间都给它，
+                     提示态的文字才能垂直居中；正常态 SizeToContent 下等价于 Auto -->
+                <RowDefinition Height="*" />
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" />
@@ -130,11 +132,12 @@
                 </Border>
             </Grid>
 
-            <!-- tosu 读不到 osu! 时的提示：和星级/胶囊同一行，同一时刻只显示一组 -->
-            <StackPanel x:Name="NoticePanel" Grid.Row="1" Margin="0,10,0,0" Visibility="Collapsed">
+            <!-- tosu 读不到 osu! 时的提示：跨所有行、垂直居中，提示态和谱面态同高 -->
+            <StackPanel x:Name="NoticePanel" Grid.Row="1" VerticalAlignment="Center"
+                        Margin="0,6,0,0" Visibility="Collapsed">
                 <TextBlock x:Name="NoticeReason" FontSize="11" TextWrapping="Wrap"
                            Foreground="{StaticResource WarningBrush}" />
-                <TextBlock x:Name="NoticeHint" FontSize="10" Margin="0,5,0,0" TextWrapping="Wrap"
+                <TextBlock x:Name="NoticeHint" FontSize="10" Margin="0,6,0,0" TextWrapping="Wrap"
                            Foreground="{StaticResource MutedTextBrush}" />
             </StackPanel>
 
@@ -152,10 +155,18 @@
                 </StackPanel>
 
                 <!-- 右列：SV 四个小环（等时性 / 舒适度 / 背谱 / 强度）压在键型占比上面 -->
-                <StackPanel Grid.Column="1" Margin="12,0,0,0" VerticalAlignment="Center">
+                <StackPanel x:Name="PatternSidePanel" Grid.Column="1" Margin="12,0,0,0" VerticalAlignment="Center">
                     <controls:SvRings x:Name="SvRingRow" Margin="0,0,0,8" Visibility="Collapsed" />
                     <controls:PatternBars x:Name="Bars" />
                 </StackPanel>
+
+                <!-- 键型还在后台算：撑住和雷达一样的高度，数据到达时卡片不会跳一下 -->
+                <Border x:Name="PatternPlaceholder" Grid.ColumnSpan="2" Height="152" Visibility="Collapsed"
+                        Background="#101417" BorderBrush="#232A30" BorderThickness="1" CornerRadius="6">
+                    <TextBlock Text="{DynamicResource L.mapinfo.analyzing}" FontSize="10"
+                               Foreground="{StaticResource MutedTextBrush}"
+                               HorizontalAlignment="Center" VerticalAlignment="Center" />
+                </Border>
             </Grid>
 
             <Border x:Name="Separator" Grid.Row="4" Height="1" Background="#242A30" Margin="0,10,0,8" />

@@ -197,6 +197,23 @@ public sealed class RecommendationItem : INotifyPropertyChanged
 
     public ManiaPattern? Pattern => pattern;
 
+    private bool patternPending;
+
+    /// <summary>
+    /// 键型（含星数与 SV）还在后台算。信息窗据此**先撑住最终高度**，
+    /// 免得数据到达时卡片从矮变高跳一下。
+    /// </summary>
+    public bool IsPatternPending => patternPending;
+
+    public void SetPatternPending(bool value)
+    {
+        if (patternPending == value)
+            return;
+
+        patternPending = value;
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IsPatternPending)));
+    }
+
     private BeatmapDetail? detail;
 
     /// <summary>从 .osz 解析出来的谱面静态详情（CS/OD/物件数/实际 BPM），非 mania 也有。</summary>

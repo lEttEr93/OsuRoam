@@ -125,6 +125,7 @@ public static class LocTable
         ["mapinfo.objects"] = "物件",
         ["mapinfo.detail"] = "详情",
         ["mapinfo.detailpending"] = "导入后解析",
+        ["mapinfo.analyzing"] = "键型解析中…",
         // tosu 没读到 osu!（信息栏 = 游戏内谱面时）
         ["mapinfo.tosu.title"] = "tosu 没读到 osu!",
         ["mapinfo.tosu.nobeatmap"] = "tosu 连上了，但没报出当前谱面：游戏可能没开，或者它读不到这个客户端。",
@@ -398,6 +399,7 @@ public static class LocTable
         ["mapinfo.objects"] = "Objects",
         ["mapinfo.detail"] = "Details",
         ["mapinfo.detailpending"] = "parsed on import",
+        ["mapinfo.analyzing"] = "analysing pattern…",
         // tosu could not read osu! (info panel = in-game beatmap)
         ["mapinfo.tosu.title"] = "tosu can't read osu!",
         ["mapinfo.tosu.nobeatmap"] = "tosu is connected but reports no beatmap: the game may not be running, or tosu can't read this client.",
