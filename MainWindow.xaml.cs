@@ -370,9 +370,22 @@ public partial class MainWindow : Window
         }
 
         // 开发用：--preview 截谱面预览窗。先用缓存里第一张 .osz 摆出信息窗当高度参照，
-        // 这样能一次看清「两个窗等高」和「预览画得对不对」；--preview=noclock 截「没时钟」提示。
-        if (Environment.GetCommandLineArgs().Any(arg => arg.StartsWith("--preview", StringComparison.OrdinalIgnoreCase)))
+        // 这样能一次看清「两个窗等高」和「预览画得对不对」。
+        //   --preview=noclock        模拟 tosu 不给预览音频位置，验证那条提示
+        //   --preview=layered        用分层窗口截一张（帧率对照用）
+        //   --preview=fps            量帧率（默认的普通窗口）
+        //   --preview=fps-layered    量帧率（分层窗口，对照）
+        string? previewArgument = Environment.GetCommandLineArgs()
+            .FirstOrDefault(arg => arg.StartsWith("--preview", StringComparison.OrdinalIgnoreCase));
+        if (previewArgument is not null)
         {
+            string mode = previewArgument.Contains('=')
+                ? previewArgument[(previewArgument.IndexOf('=') + 1)..].Trim().ToLowerInvariant()
+                : string.Empty;
+            bool fpsProbe = mode is "fps" or "fps-layered" or "fps-static" or "fps-tiny" or "fps-floating";
+            bool layeredWindow = mode is "layered" or "fps-layered";
+            bool standalone = mode == "fps-tiny";
+
             ManiaPreviewChart? chart = null;
             string osuTitle = "24eeev0-$";
             string mapper = "Asymetrical";
@@ -404,20 +417,52 @@ public partial class MainWindow : Window
                 return;
             }
 
-            showMapInfoFor(buildSnapshotItem());
-            await Task.Delay(1000);
+            if (!fpsProbe)
+            {
+                showMapInfoFor(buildSnapshotItem());
+                await Task.Delay(1000);
+            }
 
-            previewWindow = new PreviewWindow();
+            previewWindow = new PreviewWindow(layered: layeredWindow);
             previewWindow.Closed += (_, _) => previewWindow = null;
-            previewWindow.DockTo(this);
-            previewWindow.Anchor = mapInfoWindow;
+            if (standalone)
+            {
+                // 探针：不挂主窗口、固定小尺寸，用来看帧时间跟像素数量有没有关系。
+                previewWindow.Width = 160;
+                previewWindow.Height = 160;
+            }
+            else
+            {
+                previewWindow.DockTo(this);
+                previewWindow.Anchor = fpsProbe ? null : mapInfoWindow;
+            }
+
+            if (mode == "fps-floating")
+                previewWindow.Topmost = false;
+
             previewWindow.ShowChart(chart, osuTitle, $"{chart.KeyCount}K · {mapper}");
-            // --preview=noclock：模拟「tosu 不给预览音频位置」，验证那条提示。
-            bool noClock = Environment.GetCommandLineArgs()
-                .Any(arg => arg.StartsWith("--preview=", StringComparison.OrdinalIgnoreCase) &&
-                            arg.EndsWith("noclock", StringComparison.OrdinalIgnoreCase));
-            previewWindow.SetTime(noClock ? 0 : chart.FirstNoteTime + 30000);
-            await Task.Delay(noClock ? 3400 : 1000);
+
+            if (fpsProbe)
+            {
+                // 先让启动期的后台活干完（扫已安装谱面、拉 tag 池），否则量到的是那些任务的占用。
+                await Task.Delay(5000);
+                previewWindow.BeginFpsProbe(freeze: mode == "fps-static");
+                // 模拟 tosu：每 90ms 灌一条时间，持续 3 秒（窗口自己每帧外推补平）
+                System.Diagnostics.Stopwatch feed = System.Diagnostics.Stopwatch.StartNew();
+                double anchorTime = chart.FirstNoteTime + 20000;
+                while (feed.ElapsedMilliseconds < 3000)
+                {
+                    previewWindow.SetTime(anchorTime + feed.Elapsed.TotalMilliseconds);
+                    await Task.Delay(90);
+                }
+
+                AppLog.Info($"帧率探针（{mode}）：{previewWindow.DescribeFps()}");
+                Close();
+                return;
+            }
+
+            previewWindow.SetTime(mode == "noclock" ? 0 : chart.FirstNoteTime + 30000);
+            await Task.Delay(mode == "noclock" ? 3400 : 1000);
 
             AppLog.Info($"预览窗：{previewWindow.Describe()}");
             AppLog.Info($"信息窗高度：{mapInfoWindow?.ActualHeight:0.0}（预览窗 {previewWindow.ActualHeight:0.0}）");

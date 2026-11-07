@@ -79,15 +79,16 @@
                                    Foreground="{StaticResource MutedTextBrush}" />
                     </Grid>
 
+                    <!-- 进度条用 RenderTransform 缩放，不改进度条宽度：改宽度会触发布局，
+                         每 200ms 一次布局正好是帧时间 p95 的那几个尖峰。 -->
                     <Border Grid.Row="1" Height="3" Margin="0,4,0,0" CornerRadius="2"
                             Background="#22262A" ClipToBounds="True">
-                        <Grid>
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition x:Name="ProgressColumn" Width="0*" />
-                                <ColumnDefinition x:Name="RestColumn" Width="1*" />
-                            </Grid.ColumnDefinitions>
-                            <Border Grid.Column="0" CornerRadius="2,0,0,2" Background="#3FAFA6" />
-                        </Grid>
+                        <Border x:Name="ProgressFill" Background="#3FAFA6" CornerRadius="2"
+                                RenderTransformOrigin="0,0.5" IsHitTestVisible="False">
+                            <Border.RenderTransform>
+                                <ScaleTransform x:Name="ProgressScale" ScaleX="0" />
+                            </Border.RenderTransform>
+                        </Border>
                     </Border>
                 </Grid>
             </Grid>

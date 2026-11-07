@@ -13,6 +13,11 @@ namespace OsuRoam.Controls;
 ///
 /// 每帧只画「还在画面里」的物件：物件按起点排序，先用二分找到最前面可能露头的一个
 /// （往前让出最长长条的时间），再往后画到超出画面上沿为止。
+///
+/// **不用 OnRender / InvalidateVisual**：<c>UIElement.InvalidateVisual()</c> 按文档会
+/// 「强制一次完整的新布局」，每帧一次布局是白白浪费。这里改成自己持有一个
+/// <see cref="DrawingVisual"/>，每帧只重开它的绘制内容（<see cref="DrawingVisual.RenderOpen"/>）
+/// —— 只动渲染数据，布局完全不参与。
 /// </summary>
 public sealed class ManiaPreview : FrameworkElement
 {
@@ -27,11 +32,32 @@ public sealed class ManiaPreview : FrameworkElement
     private static readonly Pen KeyPen = freeze(new Pen(freeze(new SolidColorBrush(Color.FromRgb(0x28, 0x33, 0x3B))), 1));
     private static readonly Brush HitZoneBrush = freeze(new SolidColorBrush(Color.FromRgb(0x0B, 0x0F, 0x12)));
 
+    private readonly DrawingVisual surface = new();
+
     private ManiaPreviewChart? chart;
     private double time;
 
     /// <summary>判定线离底边留多高：下面这条带子画键位，不做判定。</summary>
     private const double KeyBandHeight = 26;
+
+    public ManiaPreview()
+    {
+        AddVisualChild(surface);
+    }
+
+    protected override int VisualChildrenCount => 1;
+
+    protected override Visual GetVisualChild(int index) => surface;
+
+    /// <summary>
+    /// 占满父容器给的格子。不参与测量协商，父容器（星号行）给多大就是多大，
+    /// 这样换卡片高度不需要重新协商。
+    /// </summary>
+    protected override Size MeasureOverride(Size availableSize) =>
+        new(double.IsInfinity(availableSize.Width) ? 0 : availableSize.Width,
+            double.IsInfinity(availableSize.Height) ? 0 : availableSize.Height);
+
+    protected override Size ArrangeOverride(Size finalSize) => finalSize;
 
     /// <summary>判定线以上的可见时长（秒）：越大越「慢」，也和卡片高度无关地保持信息量。</summary>
     public double VisibleSeconds { get; set; } = 1.25;
@@ -42,7 +68,7 @@ public sealed class ManiaPreview : FrameworkElement
         set
         {
             chart = value;
-            InvalidateVisual();
+            Redraw();
         }
     }
 
@@ -56,13 +82,35 @@ public sealed class ManiaPreview : FrameworkElement
     /// <summary>画面里现在画了多少个物件（开发用：确认二分查找没漏东西）。</summary>
     public int DrawnNotes { get; private set; }
 
-    protected override void OnRender(DrawingContext drawingContext)
+    /// <summary>开发用：本控件 OnRender 的平均耗时（毫秒），判断瓶颈是不是画物件本身。</summary>
+    public double AverageRenderMilliseconds => renderSamples > 0 ? renderTotal / renderSamples : 0;
+
+    public int RenderSamples => renderSamples;
+
+    private readonly System.Diagnostics.Stopwatch renderClock = System.Diagnostics.Stopwatch.StartNew();
+    private double renderTotal;
+    private int renderSamples;
+
+    /// <summary>裁剪区按尺寸缓存，尺寸不变就不重新分配。</summary>
+    private RectangleGeometry? clipGeometry;
+    private double clipWidth = -1;
+    private double clipHeight = -1;
+
+    /// <summary>按当前 <see cref="Time"/> 重画一帧。每帧由窗口调用，不触发布局。</summary>
+    public void Redraw()
     {
+        double started = renderClock.Elapsed.TotalMilliseconds;
         double width = ActualWidth;
         double height = ActualHeight;
         DrawnNotes = 0;
         if (width <= 0 || height <= 0 || chart is null)
+        {
+            using (surface.RenderOpen()) { }
+            countRender(started);
             return;
+        }
+
+        using DrawingContext drawingContext = surface.RenderOpen();
 
         int keys = chart.KeyCount;
         double laneWidth = width / keys;
@@ -72,7 +120,16 @@ public sealed class ManiaPreview : FrameworkElement
         drawLanes(drawingContext, width, height, keys, laneWidth, judgementY);
 
         // 判定线以上才是滚动区，长条越过线就裁掉，别压到底部的键位带子。
-        drawingContext.PushClip(new RectangleGeometry(new Rect(0, 0, width, judgementY)));
+        // 裁剪几何按尺寸缓存：每帧 new 一个只在 GC 上调得出来，但没必要。
+        if (clipGeometry is null || Math.Abs(clipHeight - judgementY) > 0.01 || Math.Abs(clipWidth - width) > 0.01)
+        {
+            clipGeometry = new RectangleGeometry(new Rect(0, 0, width, judgementY));
+            clipGeometry.Freeze();
+            clipWidth = width;
+            clipHeight = judgementY;
+        }
+
+        drawingContext.PushClip(clipGeometry);
         drawNotes(drawingContext, laneWidth, judgementY, pixelsPerMs, keys);
         drawingContext.Pop();
 
@@ -83,6 +140,14 @@ public sealed class ManiaPreview : FrameworkElement
             Rect keyRect = new(key * laneWidth + 2, judgementY + 4, Math.Max(1, laneWidth - 4), KeyBandHeight - 8);
             drawingContext.DrawRoundedRectangle(KeyBrush, KeyPen, keyRect, 3, 3);
         }
+
+        countRender(started);
+    }
+
+    private void countRender(double started)
+    {
+        renderTotal += renderClock.Elapsed.TotalMilliseconds - started;
+        renderSamples++;
     }
 
     private void drawLanes(DrawingContext drawingContext, double width, double height, int keys,

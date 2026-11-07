@@ -40,15 +40,42 @@ public partial class PreviewWindow : Window
     private double lastFrame;
     private double lastHousekeeping;
     private double zeroClockSince = -1;
+    private double probeWarmup;
+    private double dpiScale = 1;
+    private bool freezeRendering;
 
     private int shownSecond = -1;
     private double shownProgress = -1;
+    private string? shownSpan;
 
-    public PreviewWindow()
+    /// <summary>开发用：帧率探针的帧间隔采样，null = 没在采样。</summary>
+    private List<double>? probeFrames;
+
+    /// <param name="layered">
+    /// 是否用分层窗口（<c>AllowsTransparency=True</c>）。默认不用 —— 分层窗口在 WPF 里
+    /// 只能走软件合成（整窗每帧重新栅格化 + 一次 alpha 贴图），实测帧率只有普通窗口的
+    /// 一半左右（645x630 物理像素：14.3ms vs 6.3ms 一帧，见 docs\1.5.5-谱面预览.md）。
+    /// 控件自己的 OnRender 只有 0.06ms，瓶颈完全在这一层。
+    /// </param>
+    public PreviewWindow(bool layered = false)
     {
         InitializeComponent();
+        if (!layered)
+        {
+            AllowsTransparency = false;
+            Background = new SolidColorBrush(Color.FromRgb(0x12, 0x14, 0x16));
+            // 普通窗口没有 8px 透明边距可用：卡片直接铺满，四角交给 DWM 切（Win11 有效）。
+            RootCard.Margin = new Thickness(0);
+            RootCard.CornerRadius = new CornerRadius(0);
+            SourceInitialized += (_, _) => roundWindowCorners();
+        }
+
         SizeChanged += (_, _) => reposition();
-        Loaded += (_, _) => reposition();
+        Loaded += (_, _) =>
+        {
+            dpiScale = VisualTreeHelper.GetDpi(this).DpiScaleX;
+            reposition();
+        };
         IsVisibleChanged += (_, _) =>
         {
             if (IsVisible)
@@ -222,12 +249,16 @@ public partial class PreviewWindow : Window
         double delta = Math.Clamp(now - lastFrame, 0, 120);
         lastFrame = now;
 
+        if (probeFrames is not null && now > probeWarmup)
+            probeFrames.Add(delta);
+
         previewClock.Advance(now, delta);
 
         Field.Time = previewClock.Time;
-        Field.InvalidateVisual();
+        if (!freezeRendering)
+            Field.Redraw();
 
-        if (now - lastHousekeeping < 200)
+        if (now - lastHousekeeping < 300)
             return;
 
         lastHousekeeping = now;
@@ -253,14 +284,19 @@ public partial class PreviewWindow : Window
 
         double span = chart.LastNoteTime;
         double progress = span > 1 ? Math.Clamp(previewClock.Time / span, 0, 1) : 0;
+        string spanText = formatTime(span);
         if (Math.Abs(progress - shownProgress) > 0.005)
         {
             shownProgress = progress;
-            ProgressColumn.Width = new GridLength(Math.Max(0.0001, progress), GridUnitType.Star);
-            RestColumn.Width = new GridLength(Math.Max(0.0001, 1 - progress), GridUnitType.Star);
+            // 只改 RenderTransform：改宽度/列宽会引发布局，正好在帧时间上留下尖峰。
+            ProgressScale.ScaleX = progress;
         }
 
-        SpanText.Text = formatTime(span);
+        if (!string.Equals(shownSpan, spanText, StringComparison.Ordinal))
+        {
+            shownSpan = spanText;
+            SpanText.Text = spanText;
+        }
 
         // tosu 一直报 0（它自己没读到预览音频位置）：与其让人盯着一动不动的空轨道，不如说清楚。
         if (previewClock.HasSource && previewClock.SourceTime > 1)
@@ -375,6 +411,53 @@ public partial class PreviewWindow : Window
         $"h={ActualHeight:0.0} w={ActualWidth:0.0} top={Top:0.0} left={Left:0.0} " +
         $"chart={chart?.KeyCount ?? 0}K/{chart?.Notes.Count ?? 0} " +
         $"time={previewClock.Time:0}ms source={previewClock.SourceTime:0}ms notes={Field.DrawnNotes}");
+
+    /// <summary>开发用：开始采样帧间隔（前 600ms 丢掉，避开窗口刚弹出的抖动）。</summary>
+    internal void BeginFpsProbe(bool freeze = false)
+    {
+        freezeRendering = freeze;
+        probeWarmup = clock.Elapsed.TotalMilliseconds + 600;
+        probeFrames = [];
+    }
+
+    /// <summary>开发用：帧间隔 + 控件自身绘制耗时的统计。</summary>
+    internal string DescribeFps()
+    {
+        List<double> frames = probeFrames ?? [];
+        if (frames.Count < 10)
+            return $"样本太少（{frames.Count} 帧），窗口可能没在渲染";
+
+        frames.Sort();
+        double p50 = frames[frames.Count / 2];
+        double p90 = frames[Math.Min(frames.Count - 1, (int)(frames.Count * 0.90))];
+        double p95 = frames[Math.Min(frames.Count - 1, (int)(frames.Count * 0.95))];
+        double p99 = frames[Math.Min(frames.Count - 1, (int)(frames.Count * 0.99))];
+        int slow = frames.Count(value => value > 20);
+        double average = frames.Sum() / frames.Count;
+        return string.Create(System.Globalization.CultureInfo.InvariantCulture,
+            $"{frames.Count} 帧｜p50={p50:0.0} p90={p90:0.0} p95={p95:0.0} p99={p99:0.0} max={frames[^1]:0.0}ms " +
+            $"平均={average:0.0}ms ≈{1000 / p50:0}fps｜>20ms {slow} 帧｜控件 OnRender 平均={Field.AverageRenderMilliseconds:0.00}ms " +
+            $"（{Field.RenderSamples} 次）｜逻辑 {ActualWidth:0}x{ActualHeight:0}｜" +
+            $"物理 {(int)Math.Round(ActualWidth * dpiScale)}x{(int)Math.Round(ActualHeight * dpiScale)}@{dpiScale:0.##}x");
+    }
+
+    /// <summary>Win11 的 DWM 圆角；失败（旧系统）就保持方角，不影响任何功能。</summary>
+    private void roundWindowCorners()
+    {
+        try
+        {
+            IntPtr handle = new System.Windows.Interop.WindowInteropHelper(this).Handle;
+            int preference = 2; // DWMWCP_ROUND
+            _ = DwmSetWindowAttribute(handle, 33 /* DWMWA_WINDOW_CORNER_PREFERENCE */, ref preference, sizeof(int));
+        }
+        catch (Exception exception)
+        {
+            AppLog.Info($"预览窗圆角设置失败（不影响功能）：{exception.Message}");
+        }
+    }
+
+    [System.Runtime.InteropServices.DllImport("dwmapi.dll")]
+    private static extern int DwmSetWindowAttribute(IntPtr window, int attribute, ref int value, int size);
 
     private void CloseButton_Click(object sender, RoutedEventArgs e) => Dismiss();
 }
