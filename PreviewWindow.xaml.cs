@@ -43,6 +43,7 @@ public partial class PreviewWindow : Window
     private double probeWarmup;
     private double dpiScale = 1;
     private bool freezeRendering;
+    private readonly bool layeredWindow;
 
     private int shownSecond = -1;
     private double shownProgress = -1;
@@ -60,6 +61,7 @@ public partial class PreviewWindow : Window
     public PreviewWindow(bool layered = false)
     {
         InitializeComponent();
+        layeredWindow = layered;
         if (!layered)
         {
             AllowsTransparency = false;
@@ -150,13 +152,28 @@ public partial class PreviewWindow : Window
 
         try
         {
-            DoubleAnimation fade = new(1, 0, TimeSpan.FromMilliseconds(160))
+            if (layeredWindow)
             {
-                EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseIn },
-                FillBehavior = FillBehavior.HoldEnd
-            };
-            fade.Completed += (_, _) => finishExit();
-            RootCard.BeginAnimation(OpacityProperty, fade, HandoffBehavior.SnapshotAndReplace);
+                DoubleAnimation fade = new(1, 0, TimeSpan.FromMilliseconds(160))
+                {
+                    EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseIn },
+                    FillBehavior = FillBehavior.HoldEnd
+                };
+                fade.Completed += (_, _) => finishExit();
+                RootCard.BeginAnimation(OpacityProperty, fade, HandoffBehavior.SnapshotAndReplace);
+            }
+            else
+            {
+                // 普通窗口没有透明底：把卡片淡成半透明只会剩一块深色方块，所以只做位移+收缩。
+                DoubleAnimation slideOut = new(0, 8, TimeSpan.FromMilliseconds(120))
+                {
+                    EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseIn },
+                    FillBehavior = FillBehavior.HoldEnd
+                };
+                slideOut.Completed += (_, _) => finishExit();
+                CardSlide.BeginAnimation(TranslateTransform.YProperty, slideOut, HandoffBehavior.SnapshotAndReplace);
+                return;
+            }
 
             DoubleAnimation slide = new(0, 8, TimeSpan.FromMilliseconds(160))
             {
@@ -192,12 +209,17 @@ public partial class PreviewWindow : Window
 
         try
         {
-            DoubleAnimation fade = new(0, 1, TimeSpan.FromMilliseconds(180))
+            // 普通窗口的底色是不透明的：卡片从 0 淡到 1 只会变成「先出现一块深色方块」，
+            // 所以那种情况只做位移 + 轻微放大。
+            if (layeredWindow)
             {
-                EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut },
-                FillBehavior = FillBehavior.Stop
-            };
-            RootCard.BeginAnimation(OpacityProperty, fade, HandoffBehavior.SnapshotAndReplace);
+                DoubleAnimation fade = new(0, 1, TimeSpan.FromMilliseconds(180))
+                {
+                    EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut },
+                    FillBehavior = FillBehavior.Stop
+                };
+                RootCard.BeginAnimation(OpacityProperty, fade, HandoffBehavior.SnapshotAndReplace);
+            }
 
             DoubleAnimation slide = new(9, 0, TimeSpan.FromMilliseconds(220))
             {

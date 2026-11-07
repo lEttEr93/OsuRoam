@@ -382,7 +382,7 @@ public partial class MainWindow : Window
             string mode = previewArgument.Contains('=')
                 ? previewArgument[(previewArgument.IndexOf('=') + 1)..].Trim().ToLowerInvariant()
                 : string.Empty;
-            bool fpsProbe = mode is "fps" or "fps-layered" or "fps-static" or "fps-tiny" or "fps-floating";
+            bool fpsProbe = mode is "fps" or "fps-layered" or "fps-static" or "fps-tiny" or "fps-floating" or "fps-pair";
             bool layeredWindow = mode is "layered" or "fps-layered";
             bool standalone = mode == "fps-tiny";
 
@@ -417,7 +417,7 @@ public partial class MainWindow : Window
                 return;
             }
 
-            if (!fpsProbe)
+            if (!fpsProbe || mode == "fps-pair")
             {
                 showMapInfoFor(buildSnapshotItem());
                 await Task.Delay(1000);
