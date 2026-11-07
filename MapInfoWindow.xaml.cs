@@ -46,11 +46,16 @@ public partial class MapInfoWindow : Window
     private double cardHeight;
     private const double FallbackCardHeight = 420;
 
-    /// <summary>
-    /// 键型就绪时详情行会长出「模式 / 主导键型 / 细分键型」几行，
+    /// <summary>键型就绪时详情行会长出「模式 / 主导键型 / 细分键型」几行，
     /// 于是卡片会变高。预留 4 行（10px 字号约 12.6px/行）把这段高度先占住。
     /// </summary>
     private const double ReservedDetailHeight = 51;
+
+    /// <summary>
+    /// 卡片现在（或收起时「应该」）有多高。预览窗拿它对齐高度：
+    /// 信息窗没开的时候，谱面预览也得和它一样高，不能自己猜一个。
+    /// </summary>
+    public double PreferredHeight => ActualHeight > 120 ? ActualHeight : cardHeight > 0 ? cardHeight : FallbackCardHeight;
 
     public MapInfoWindow()
     {

@@ -43,6 +43,11 @@ public partial class MainWindow : Window
     private readonly SemaphoreSlim patternGate = new(1, 1);
     private readonly ArchiveStore archiveStore = new();
     private MapInfoWindow? mapInfoWindow;
+    private PreviewWindow? previewWindow;
+    /// <summary>谱面预览的「当前是哪一首」：id|难度名，换歌才重新取 .osu。</summary>
+    private string previewKey = string.Empty;
+    private ManiaPreviewChart? previewChart;
+    private readonly Dictionary<int, ManiaPreviewChart> previewCharts = [];
     private HistoryWindow? historyWindow;
     private bool historyWasVisible;
     private AppSettings settings = new();
@@ -178,6 +183,7 @@ public partial class MainWindow : Window
         {
             updateGameState(snapshot);
             updateInGameInfo(snapshot);
+            updatePreview(snapshot);
         });
         tosu.PlayStarted += snapshot => Dispatcher.BeginInvoke(async () => await handlePlayStartedAsync(snapshot));
         tosu.PlaySucceeded += snapshot => Dispatcher.BeginInvoke(async () => await handlePlaySucceededAsync(snapshot));
@@ -359,6 +365,66 @@ public partial class MainWindow : Window
                 AppLog.Info($"信息窗高度（占位态）：{mapInfoWindow.ActualHeight:0.0}｜{mapInfoWindow.DescribeHeights()}");
                 RenderDiagnostics.CaptureWindow(mapInfoWindow, path);
             }
+            Close();
+            return;
+        }
+
+        // 开发用：--preview 截谱面预览窗。先用缓存里第一张 .osz 摆出信息窗当高度参照，
+        // 这样能一次看清「两个窗等高」和「预览画得对不对」；--preview=noclock 截「没时钟」提示。
+        if (Environment.GetCommandLineArgs().Any(arg => arg.StartsWith("--preview", StringComparison.OrdinalIgnoreCase)))
+        {
+            ManiaPreviewChart? chart = null;
+            string osuTitle = "24eeev0-$";
+            string mapper = "Asymetrical";
+            try
+            {
+                string? osz = Directory.Exists(settingsStore.CacheDirectory)
+                    ? Directory.EnumerateFiles(settingsStore.CacheDirectory, "*.osz").FirstOrDefault()
+                    : null;
+                if (osz is not null && OszReader.TryReadBeatmapText(osz, 0, out string text, out _))
+                {
+                    chart = ManiaPreviewChart.Parse(text);
+                    BeatmapDetail? detail = BeatmapDetailReader.Parse(text);
+                    if (detail is not null)
+                    {
+                        osuTitle = detail.Title;
+                        mapper = detail.Creator;
+                    }
+                }
+            }
+            catch (Exception exception)
+            {
+                AppLog.Error("截图模式解析预览谱面失败", exception);
+            }
+
+            if (chart is null)
+            {
+                AppLog.Info("--preview：缓存里没有可用的 mania 谱面");
+                Close();
+                return;
+            }
+
+            showMapInfoFor(buildSnapshotItem());
+            await Task.Delay(1000);
+
+            previewWindow = new PreviewWindow();
+            previewWindow.Closed += (_, _) => previewWindow = null;
+            previewWindow.DockTo(this);
+            previewWindow.Anchor = mapInfoWindow;
+            previewWindow.ShowChart(chart, osuTitle, $"{chart.KeyCount}K · {mapper}");
+            // --preview=noclock：模拟「tosu 不给预览音频位置」，验证那条提示。
+            bool noClock = Environment.GetCommandLineArgs()
+                .Any(arg => arg.StartsWith("--preview=", StringComparison.OrdinalIgnoreCase) &&
+                            arg.EndsWith("noclock", StringComparison.OrdinalIgnoreCase));
+            previewWindow.SetTime(noClock ? 0 : chart.FirstNoteTime + 30000);
+            await Task.Delay(noClock ? 3400 : 1000);
+
+            AppLog.Info($"预览窗：{previewWindow.Describe()}");
+            AppLog.Info($"信息窗高度：{mapInfoWindow?.ActualHeight:0.0}（预览窗 {previewWindow.ActualHeight:0.0}）");
+            RenderDiagnostics.CaptureWindow(previewWindow, path);
+            if (mapInfoWindow is not null)
+                RenderDiagnostics.CaptureWindow(mapInfoWindow, Path.Combine(
+                    Path.GetDirectoryName(path) ?? ".", $"{Path.GetFileNameWithoutExtension(path)}-info.png"));
             Close();
             return;
         }
@@ -1610,13 +1676,9 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
         try
         {
             if (mapInfoWindow is null)
-            {
-                mapInfoWindow = new MapInfoWindow();
-                mapInfoWindow.Closed += (_, _) => mapInfoWindow = null;
-                mapInfoWindow.DockTo(this);
-            }
+                ensureMapInfoWindow();
 
-            mapInfoWindow.ShowFor(item);
+            mapInfoWindow!.ShowFor(item);
             tosuNoticeKey = null;
         }
         catch (Exception exception)
@@ -2056,6 +2118,7 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
             rememberLayout();
             restoreHistoryAfterPlay = historyWindow?.IsVisible == true;
             dismissMapInfo();
+            dismissPreview();
             historyWindow?.Hide();
             fadeOutThenHide();
             return;
@@ -2406,6 +2469,7 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
         AutoImportCheck.IsChecked = settings.AutoImport;
         EmbeddedFontCheck.IsChecked = settings.UseEmbeddedFont;
         MapInfoCheck.IsChecked = settings.ShowMapInfo;
+        PreviewCheck.IsChecked = settings.ShowPreview;
         TagSubmitCheck.IsChecked = settings.TagSubmitEnabled;
         foreach ((CheckBox? box, string name) in patternBoxes())
         {
@@ -2631,13 +2695,9 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
         try
         {
             if (mapInfoWindow is null)
-            {
-                mapInfoWindow = new MapInfoWindow();
-                mapInfoWindow.Closed += (_, _) => mapInfoWindow = null;
-                mapInfoWindow.DockTo(this);
-            }
+                ensureMapInfoWindow();
 
-            mapInfoWindow.ShowNotice(messageKey);
+            mapInfoWindow!.ShowNotice(messageKey);
         }
         catch (Exception exception)
         {
@@ -2739,6 +2799,162 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
             item.ApplyPattern(pattern);
     }
 
+    /// <summary>信息窗按需创建：谱面态和提示态共用，创建时挂好「跟着预览窗等高」的钩子。</summary>
+    private MapInfoWindow ensureMapInfoWindow()
+    {
+        if (mapInfoWindow is not null)
+            return mapInfoWindow;
+
+        mapInfoWindow = new MapInfoWindow();
+        mapInfoWindow.Closed += (_, _) =>
+        {
+            mapInfoWindow = null;
+            if (previewWindow is not null)
+                previewWindow.Anchor = null;
+        };
+        // 预览窗和信息窗等高：信息窗因为键型补图/换语言长高，这里跟着改。
+        mapInfoWindow.SizeChanged += (_, _) => syncPreviewGeometry();
+        mapInfoWindow.DockTo(this);
+        return mapInfoWindow;
+    }
+
+    /// <summary>把「信息窗现在多高、在哪」告诉预览窗——两者等高是设计要求。</summary>
+    private void syncPreviewGeometry()
+    {
+        if (previewWindow is null)
+            return;
+
+        previewWindow.Anchor = mapInfoWindow;
+        double height = mapInfoWindow?.IsVisible == true
+            ? mapInfoWindow.ActualHeight
+            : mapInfoWindow?.PreferredHeight ?? 0;
+        if (height > 1)
+            previewWindow.SetCardHeight(height);
+    }
+
+    /// <summary>
+    /// 选歌界面的谱面预览：跟着 tosu 报的预览音频位置滚当前谱面。
+    /// 只有换歌才重新取 <c>.osu</c>；同一首里只喂时间，别每帧都解析一遍。
+    /// </summary>
+    private void updatePreview(TosuSnapshot snapshot)
+    {
+        if (!settings.ShowPreview)
+        {
+            dismissPreview();
+            return;
+        }
+
+        bool selectPlay = string.Equals(snapshot.StateName, "selectPlay", StringComparison.OrdinalIgnoreCase);
+        if (!selectPlay || snapshot.BeatmapId <= 0)
+        {
+            dismissPreview();
+            return;
+        }
+
+        string key = $"{snapshot.BeatmapId}|{snapshot.DifficultyName}";
+        if (!string.Equals(key, previewKey, StringComparison.Ordinal))
+        {
+            previewKey = key;
+            previewChart = null;
+            _ = loadPreviewChartAsync(snapshot, key);
+            return;
+        }
+
+        if (previewChart is null)
+            return;
+
+        previewWindow?.SetTime(snapshot.PreviewTime);
+    }
+
+    /// <summary>取当前谱面的 <c>.osu</c> 并解析成预览用的物件表（后台线程，别卡选歌）。</summary>
+    private async Task loadPreviewChartAsync(TosuSnapshot snapshot, string key)
+    {
+        try
+        {
+            await loadPreviewChartCoreAsync(snapshot, key);
+        }
+        catch (Exception exception)
+        {
+            AppLog.Error($"谱面预览：加载 {snapshot.BeatmapId} 失败", exception);
+        }
+    }
+
+    private async Task loadPreviewChartCoreAsync(TosuSnapshot snapshot, string key)
+    {
+        int beatmapId = snapshot.BeatmapId;
+        if (!previewCharts.TryGetValue(beatmapId, out ManiaPreviewChart? chart))
+        {
+            string? osuText = await tosuFiles.TryGetBeatmapFileAsync(beatmapId, CancellationToken.None);
+            if (osuText is null)
+            {
+                // 选歌时按住方向键，tosu 的「当前谱面」可能还停在上一首：等一下再要一次。
+                await Task.Delay(120);
+                osuText = await tosuFiles.TryGetBeatmapFileAsync(beatmapId, CancellationToken.None);
+            }
+
+            if (!string.Equals(previewKey, key, StringComparison.Ordinal))
+                return;
+
+            if (osuText is null)
+            {
+                AppLog.Info($"谱面预览：拿不到 {beatmapId} 的 .osu");
+                return;
+            }
+
+            chart = await Task.Run(() => ManiaPreviewChart.Parse(osuText));
+            if (chart is null)
+            {
+                // 非 mania（或没有物件）：预览只对 mania 有意义，别的模式什么都不弹。
+                AppLog.Info($"谱面预览：{beatmapId} 不是 mania 谱面，不显示");
+                return;
+            }
+
+            if (previewCharts.Count > 32)
+                previewCharts.Clear();
+            previewCharts[beatmapId] = chart;
+        }
+
+        if (!string.Equals(previewKey, key, StringComparison.Ordinal))
+            return;
+
+        previewChart = chart;
+        showPreviewFor(chart, snapshot);
+    }
+
+    private void showPreviewFor(ManiaPreviewChart chart, TosuSnapshot snapshot)
+    {
+        try
+        {
+            if (previewWindow is null)
+            {
+                previewWindow = new PreviewWindow();
+                previewWindow.Closed += (_, _) => previewWindow = null;
+                previewWindow.DockTo(this);
+            }
+
+            syncPreviewGeometry();
+            List<string> meta = [$"{chart.KeyCount}K"];
+            if (!string.IsNullOrWhiteSpace(snapshot.Mapper))
+                meta.Add(snapshot.Mapper);
+            if (!string.IsNullOrWhiteSpace(snapshot.DifficultyName))
+                meta.Add(snapshot.DifficultyName);
+            previewWindow.ShowChart(chart, snapshot.Title, string.Join(" · ", meta));
+            syncPreviewGeometry();
+        }
+        catch (Exception exception)
+        {
+            AppLog.Error("显示谱面预览失败", exception);
+        }
+    }
+
+    /// <summary>收起预览窗，并把「当前是哪首」清掉：回到同一首时重新走一遍取谱面。</summary>
+    private void dismissPreview()
+    {
+        previewWindow?.Dismiss();
+        previewKey = string.Empty;
+        previewChart = null;
+    }
+
     /// <summary>勾选键型：多选，勾中的核心型用强权重参与排序（不硬筛）。</summary>
     private async void PatternCheck_Click(object sender, RoutedEventArgs e)
     {
@@ -2821,6 +3037,23 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
         catch (Exception exception)
         {
             AppLog.Error("保存谱面信息窗设置失败", exception);
+        }
+    }
+
+    private async void PreviewCheck_Click(object sender, RoutedEventArgs e)
+    {
+        if (!settingsControlsReady)
+            return;
+        settings.ShowPreview = PreviewCheck.IsChecked == true;
+        if (!settings.ShowPreview)
+            dismissPreview();
+        try
+        {
+            await settingsStore.SaveAsync(settings);
+        }
+        catch (Exception exception)
+        {
+            AppLog.Error("保存谱面预览设置失败", exception);
         }
     }
 

@@ -81,6 +81,8 @@ public sealed class AppSettings
     public bool ShowMapInfo { get; set; } = true;
     /// <summary>信息栏显示哪张谱面：import = 本次导入的（默认），ingame = osu! 里当前选中的。</summary>
     public string MapInfoSource { get; set; } = MapInfoSources.Imported;
+    /// <summary>选歌界面里再开一个谱面预览窗，跟着游戏里的预览音频滚 mania 谱面。</summary>
+    public bool ShowPreview { get; set; } = true;
     public bool ExcludeRecentlyPlayed { get; set; } = true;
     /// <summary>扫描 osu! 谱面目录，已经装在机器上的难度不再推荐（同曲其他难度仍可推荐）。</summary>
     public bool ExcludeInstalledBeatmaps { get; set; } = true;

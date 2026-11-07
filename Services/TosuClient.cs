@@ -22,7 +22,14 @@ public sealed record TosuSnapshot(
     double Stars = 0,
     double LengthSeconds = 0,
     /// <summary>当前游玩进度（毫秒）。加载阶段是 0；暂停时停在某个正数上。</summary>
-    double LiveTime = 0);
+    double LiveTime = 0,
+    /// <summary>
+    /// 选歌界面里预览音频的播放位置（毫秒，和谱面物件同一条时间轴）。
+    /// 优先取 gosumemory 兼容段的 <c>menu.bm.time.current</c>，没有就退回 <c>beatmap.time.live</c>
+    /// —— tosu 的 v2 里两者是同一个值，分开读只是为了兼容不同版本的 payload。
+    /// 0 表示 tosu 没读到这个位置（lazer 下常见）。
+    /// </summary>
+    double PreviewTime = 0);
 
 public sealed class TosuClient : IAsyncDisposable
 {
@@ -132,6 +139,8 @@ public sealed class TosuClient : IAsyncDisposable
             bool failed = readBool(root, "play", "failed");
             string resultRank = readString(root, "resultsScreen", "rank");
             long resultScore = readLong(root, "resultsScreen", "score");
+            double previewTime = readNumber(root, "menu", "bm", "time", "current");
+            if (previewTime <= 0) previewTime = readNumber(root, "beatmap", "time", "live");
             TosuSnapshot snapshot = new(state, beatmapId, beatmapsetId, profile, paused, failed, resultRank, resultScore,
                 readString(root, "beatmap", "artist"),
                 readString(root, "beatmap", "title"),
@@ -139,7 +148,8 @@ public sealed class TosuClient : IAsyncDisposable
                 readString(root, "beatmap", "mapper"),
                 readNumber(root, "beatmap", "stats", "stars", "total"),
                 lengthSecondsOf(root),
-                readNumber(root, "beatmap", "time", "live"));
+                readNumber(root, "beatmap", "time", "live"),
+                previewTime);
             SnapshotReceived?.Invoke(snapshot);
 
             if (state == "play" && beatmapId > 0)

@@ -114,6 +114,13 @@ testOsuCommandLineParsing();
 testOsuStorageIniParsing();
 testOsuBeatmapRootsFollowInstallLocation();
 testTosuMemoryFailureDetection();
+testPreviewChartParsesColumnsAndHolds();
+testPreviewChartRejectsOtherModes();
+testPreviewChartFindsVisibleRange();
+testPreviewClockFollowsSource();
+testPreviewClockFreezesWhenSourceStops();
+testPreviewClockSnapsOnJump();
+testTosuSnapshotCarriesPreviewTime();
 Console.WriteLine("All state transition, recommendation, mode profile, and tosu integration tests passed.");
 return 0;
 
@@ -3362,3 +3369,228 @@ static void testReconcileRefreshesFallbackFlagOnReusedCard()
     assertTrue(next.Any(item => item.BeatmapsetId == 3201 && item.IsFallback), "3201 这次是补位，标记要打上");
     assertTrue(ReferenceEquals(next[0], fallbackCard), "复用原实例（封面等不重载）");
 }
+
+/// <summary>
+/// 谱面预览只认 mania 的圈和长条：列号按 floor(x * keys / 512) 换算，
+/// 长条读第 6 段的 endTime，滑条/转盘（转换谱面的残留）要丢掉。
+/// </summary>
+static void testPreviewChartParsesColumnsAndHolds()
+{
+    const string osu = """
+    osu file format v14
+
+    [General]
+    Mode:3
+
+    [Difficulty]
+    CircleSize:4
+    OverallDifficulty:8
+
+    [HitObjects]
+    64,192,1000,1,0,0:0:0:0:
+    192,192,2000,128,0,2600:0:0:0:0:
+    448,192,4000,1,0,0:0:0:0:
+    511,192,5000,1,0,0:0:0:0:
+    100,192,6000,2,0,B|200:200|300:300,1,50
+    """;
+
+    ManiaPreviewChart? chart = ManiaPreviewChart.Parse(osu);
+    if (chart is null)
+        throw new InvalidOperationException("4K mania 谱面应能解析出预览物件");
+
+    assertEqual(4, chart.KeyCount, "键数取 Difficulty.CircleSize");
+    assertEqual(4, chart.Notes.Count, "滑条/转盘不算物件");
+    assertEqual(0, chart.Notes[0].Column, "x=64 → 第 0 列");
+    assertEqual(1, chart.Notes[1].Column, "x=192 → 第 1 列");
+    assertEqual(3, chart.Notes[2].Column, "x=448 → 第 3 列");
+    assertEqual(3, chart.Notes[3].Column, "x=511 会算到 4，要夹到最后一列");
+    assertTrue(chart.Notes[1].IsHold, "type 128 是长条");
+    assertNear(2600, chart.Notes[1].End, "长条结束时间取第 6 段的 endTime");
+    assertNear(600, chart.Notes[1].Length, "长条长度 = endTime - start");
+    assertNear(1000, chart.FirstNoteTime, "第一个物件时间");
+    assertNear(5000, chart.LastNoteTime, "最后一个物件结束时间");
+    assertNear(600, chart.LongestHold, "最长的长条（二分查找要往前让出的时间）");
+
+    // 列换算本身也单独钉一下：0/512 的边界最容易算错一列。
+    assertEqual(1, ManiaPreviewChart.ColumnOf(255, 4), "255*4/512 = 1.99 → 第 1 列");
+    assertEqual(2, ManiaPreviewChart.ColumnOf(256, 4), "256*4/512 = 2 → 第 2 列");
+    assertEqual(6, ManiaPreviewChart.ColumnOf(512, 7), "x 超界时夹到最后一列");
+}
+
+/// <summary>预览是 mania 专属的：别的模式宁可不显示，也不要把 std 的滑条画成方块。</summary>
+static void testPreviewChartRejectsOtherModes()
+{
+    const string standard = """
+    osu file format v14
+
+    [General]
+    Mode:0
+
+    [Difficulty]
+    CircleSize:4
+
+    [HitObjects]
+    64,192,1000,1,0,0:0:0:0:
+    """;
+
+    if (ManiaPreviewChart.Parse(standard) is not null)
+        throw new InvalidOperationException("osu!standard 谱面不该解析出预览物件");
+
+    const string empty = """
+    osu file format v14
+
+    [General]
+    Mode:3
+
+    [Difficulty]
+    CircleSize:4
+    """;
+
+    if (ManiaPreviewChart.Parse(empty) is not null)
+        throw new InvalidOperationException("没有物件的 mania 谱面不该出预览");
+    if (ManiaPreviewChart.Parse(null) is not null)
+        throw new InvalidOperationException("空文本不该出预览");
+}
+
+/// <summary>
+/// 二分查找用「当前时间 - 最长长条」去查，保证还在屏幕上的长条不会被跳过，
+/// 同时又不会从头遍历整张谱（两万物件的话每帧都会卡）。
+/// </summary>
+static void testPreviewChartFindsVisibleRange()
+{
+    const string osu = """
+    osu file format v14
+
+    [General]
+    Mode:3
+
+    [Difficulty]
+    CircleSize:4
+
+    [HitObjects]
+    64,192,1000,1,0,0:0:0:0:
+    192,192,2000,128,0,4200:0:0:0:0:
+    448,192,4000,1,0,0:0:0:0:
+    511,192,8000,1,0,0:0:0:0:
+    """;
+
+    ManiaPreviewChart? chart = ManiaPreviewChart.Parse(osu);
+    if (chart is null)
+        throw new InvalidOperationException("测试谱面应能解析");
+
+    assertEqual(0, chart.FirstIndexAt(0), "还没开始：从第一个物件画起");
+    assertEqual(0, chart.FirstIndexAt(1000), "正好落在第一个物件上，要包含它");
+    assertEqual(1, chart.FirstIndexAt(1001), "过了第一个物件就从第二个开始");
+    assertEqual(3, chart.FirstIndexAt(5000), "跳过已经不露头的物件");
+    assertEqual(4, chart.FirstIndexAt(9000), "全都在后面：返回物件数");
+    // 当前 4000、最长长条 2200：起点 1800 的长条还在画面上，不能被二分跳过。
+    assertEqual(1, chart.FirstIndexAt(4000 - chart.LongestHold - 1), "长条不能因为起点早被跳过");
+}
+
+/// <summary>
+/// 预览时钟：tosu 每 ~100ms 报一次，本地每 16ms 推进一帧。
+/// 一秒下来本地时间要跟得上（差不到两帧），且不能因为纠偏往回缩。
+/// </summary>
+static void testPreviewClockFollowsSource()
+{
+    PreviewClock clock = new();
+    clock.Sync(10000, 0);
+    assertNear(10000, clock.Time, "第一条直接对齐");
+
+    double now = 0;
+    double reported = 10000;
+    for (int frame = 1; frame <= 62; frame++)
+    {
+        now += 16;
+        if (frame % 6 == 0)
+        {
+            reported += 96;
+            clock.Sync(reported, now);
+        }
+        clock.Advance(now, 16);
+    }
+
+    // 62 帧 ≈ 992ms：理想位置 = 10000 + 10×96 + 32 = 10992
+    assertTrue(Math.Abs(clock.Time - 10992) < 40,
+        $"一秒后本地时间应跟上预览位置，实际 {clock.Time:0}");
+}
+
+/// <summary>预览音频暂停 / tosu 断流：画面必须停在原地，不能自己往前跑。</summary>
+static void testPreviewClockFreezesWhenSourceStops()
+{
+    PreviewClock clock = new();
+    clock.Sync(5000, 0);
+    double now = 0;
+    // 先跑过「停更判定」的门槛（200ms），再取样；之前那段本来还该往前走。
+    for (int frame = 0; frame < 20; frame++)
+    {
+        now += 16;
+        clock.Advance(now, 16);
+    }
+
+    double frozen = clock.Time;
+    for (int frame = 0; frame < 60; frame++)
+    {
+        now += 16;
+        clock.Advance(now, 16);
+    }
+
+    assertTrue(Math.Abs(clock.Time - frozen) < 0.001, $"停更后不该再前进，从 {frozen:0} 变成 {clock.Time:0}");
+    assertTrue(clock.Time < 5000 + PreviewClock.StallThreshold + 40,
+        $"最多领先一个停更阈值，实际 {clock.Time:0}");
+}
+
+/// <summary>换歌 / 玩家把预览拖回去：差异大的时候直接对齐，别慢慢磨几秒。</summary>
+static void testPreviewClockSnapsOnJump()
+{
+    PreviewClock clock = new();
+    clock.Sync(20000, 0);
+    clock.Advance(16, 16);
+    assertTrue(clock.Time > 19990, "对齐后开始走");
+
+    clock.Sync(12000, 100);
+    clock.Advance(100, 16);
+    assertTrue(Math.Abs(clock.Time - 12000) < 40, $"跳变要直接对齐，实际 {clock.Time:0}");
+
+    // 换歌：Reset 之后的第一条必须精确落到该去的位置，不能从上一首滑过去。
+    clock.Reset();
+    clock.Sync(3000, 500);
+    assertNear(3000, clock.Time, "Reset 后第一条直接落到目标位置");
+}
+
+/// <summary>
+/// 预览窗的时钟来自 tosu：菜单段（gosumemory 兼容）优先，没有就退回 v2 的
+/// <c>beatmap.time.live</c>。两个都读不到时是 0，窗口会拿它判断「要不要提示没时间」。
+/// </summary>
+static void testTosuSnapshotCarriesPreviewTime()
+{
+    const string withMenu = """
+    {"state":{"name":"selectPlay"},
+     "menu":{"state":5,"bm":{"time":{"firstObj":11136,"current":80295,"full":278136,"mp3":281353}}},
+     "beatmap":{"id":5397245,"set":2322139,"time":{"live":80295,"firstObject":11136,"lastObject":278136,"mp3Length":281353}},
+     "profile":{"name":"tester"},"game":{"paused":false},"play":{"failed":false},
+     "resultsScreen":{"rank":"","score":0}}
+    """;
+
+    TosuSnapshot? captured = null;
+    TosuClient client = new();
+    client.SnapshotReceived += value => captured = value;
+    client.ProcessSnapshotJson(withMenu);
+    if (captured is null)
+        throw new InvalidOperationException("payload 没解析出快照");
+    assertNear(80295, captured.PreviewTime, "menu.bm.time.current 优先");
+
+    const string withoutMenu = """
+    {"state":{"name":"selectPlay"},
+     "beatmap":{"id":5397245,"set":2322139,"time":{"live":41234,"firstObject":2380,"lastObject":143811,"mp3Length":146235}},
+     "profile":{"name":"tester"},"game":{"paused":false},"play":{"failed":false},
+     "resultsScreen":{"rank":"","score":0}}
+    """;
+
+    captured = null;
+    client.ProcessSnapshotJson(withoutMenu);
+    if (captured is null)
+        throw new InvalidOperationException("payload 没解析出快照");
+    assertNear(41234, captured.PreviewTime, "没有 menu 段时退回 beatmap.time.live");
+}
+

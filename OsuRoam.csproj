@@ -8,10 +8,10 @@
     <AssemblyName>OsuRoam</AssemblyName>
     <RootNamespace>OsuRoam</RootNamespace>
     <LangVersion>latest</LangVersion>
-    <Version>1.5.4.0</Version>
-    <AssemblyVersion>1.5.4.0</AssemblyVersion>
-    <FileVersion>1.5.4.0</FileVersion>
-    <InformationalVersion>1.5.4-beta2</InformationalVersion>
+    <Version>1.5.5.0</Version>
+    <AssemblyVersion>1.5.5.0</AssemblyVersion>
+    <FileVersion>1.5.5.0</FileVersion>
+    <InformationalVersion>1.5.5</InformationalVersion>
     <ApplicationIcon>Assets\OsuRoam.ico</ApplicationIcon>
   </PropertyGroup>
   <!-- 英文版：dotnet publish -p:RoamFlavor=en。同一份源码，只换常量与默认值，

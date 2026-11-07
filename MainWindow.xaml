@@ -561,6 +561,10 @@
                                 <CheckBox x:Name="MapInfoCheck" Content="{DynamicResource L.check.mapinfo}" Click="MapInfoCheck_Click"
                                           ToolTip="{DynamicResource L.tip.mapinfo}" />
                             </WrapPanel>
+                            <WrapPanel Margin="0,0,0,9">
+                                <CheckBox x:Name="PreviewCheck" Content="{DynamicResource L.preview.check}" Click="PreviewCheck_Click"
+                                          ToolTip="{DynamicResource L.preview.tip}" />
+                            </WrapPanel>
                             <StackPanel Margin="0,0,0,9">
                                 <TextBlock Text="{DynamicResource L.label.infosource}" Foreground="{StaticResource MutedTextBrush}" FontSize="11" />
                                 <ComboBox x:Name="MapInfoSourceBox" SelectedIndex="0"
