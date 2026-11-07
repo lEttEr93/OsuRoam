@@ -147,6 +147,10 @@ public static class Loc
         T("skill.jackspeed"), T("skill.chordjack"), T("skill.technical")
     ];
 
+    /// <summary>信息窗 SV 小环的四个标签，顺序与 <see cref="Models.SvMetrics.DisplayValues"/> 一致。</summary>
+    public static IReadOnlyList<string> SvLabels() =>
+        [T("sv.isochrony"), T("sv.comfort"), T("sv.memorize"), T("sv.intensity")];
+
     private static ResourceDictionary buildDictionary(string code)
     {
         ResourceDictionary result = new();

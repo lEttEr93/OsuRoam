@@ -13,7 +13,7 @@ public static class ManiaPatternAnalyzer
     /// 分析口径的版本号。改了核心型判定 / 份额算法就 +1 —— 旧缓存会被当成过期，
     /// 预取时会重新解析（见 PatternLibrary.TryGetVerified）。
     /// </summary>
-    public const int Version = 3;
+    public const int Version = 4;
 
     // ---- 与 MMA patterns/config.js 对齐的阈值 ----
     private const double PatternStabilityThreshold = 5.0;
@@ -86,7 +86,8 @@ public static class ManiaPatternAnalyzer
             Category = buildCategory(coreShares, specificShares, matches),
             Source = PatternSource.Osu,
             AnalyzerVersion = Version,
-            RiceStarRating = ManiaStarRating.Compute(osuText, stripHolds: true) ?? 0
+            RiceStarRating = ManiaStarRating.Compute(osuText, stripHolds: true) ?? 0,
+            Sv = SvEvaluator.Compute(osuText)
         };
         pattern.SkillAxes = buildSkillAxes(pattern);
         SkillResult skills = computeSkills(chart, pattern);

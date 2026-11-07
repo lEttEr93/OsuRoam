@@ -75,6 +75,9 @@ testLnTriangleFillsCircleWhenBalancedAtFullLn();
 testLnTriangleScalesWithStarDelta();
 testManiaStarRatingHandlesHolds();
 testManiaStarRatingScalesWithDensity();
+testSvEvaluatorOnSteadyChartIsClean();
+testSvEvaluatorPunishesBaselineJumps();
+testSvEvaluatorExaggerationNeedsMidFlightChange();
 testSearchStatusFollowsWhitelist();
 testReconcileRefreshesFallbackFlagOnReusedCard();
 testPatternSearchHints();
@@ -3100,6 +3103,103 @@ static void testManiaStarRatingScalesWithDensity()
 
     assertTrue(slow > 0 && fast > slow, $"同样音符数下密度翻倍应加难度：{slow:0.000} → {fast:0.000}");
     assertTrue(fast < slow * 4, $"星数不应随密度线性膨胀：{slow:0.000} → {fast:0.000}");
+}
+
+/// <summary>匀速谱：四个量都该落在「稳」那一端。</summary>
+static void testSvEvaluatorOnSteadyChartIsClean()
+{
+    SvMetrics? steady = SvEvaluator.Compute(syntheticSvChart(bpm: 180, seconds: 30, sv: null));
+    assertTrue(steady is not null, "带时间点的合成谱应能算出 SV 指标");
+    assertTrue(steady!.Irregularity < 0.05, $"匀速谱的等时性应该接近满格：{steady.Irregularity:0.000}");
+    assertTrue(steady.Discomfort < 0.01, $"匀速谱不该有不适：{steady.Discomfort:0.000}");
+    assertTrue(steady.Exaggeration < 0.05, $"匀速谱不该有夸张：{steady.Exaggeration:0.000}");
+    assertTrue(steady.Memorization < 0.05, $"匀速谱不该背谱：{steady.Memorization:0.000}");
+    assertTrue(steady.Isochrony > 0.95 && steady.Comfort > 0.99, "界面量：等时性/舒适度都应接近 1");
+
+    assertTrue(SvEvaluator.Compute("") is null, "空文本不应给 SV 指标");
+    assertTrue(SvEvaluator.Compute(syntheticManiaChart(keys: 4, bpm: 180, notes: 400, everyNthIsHold: 0)) is null,
+        "没有 [TimingPoints] 的文本算不出 SV");
+}
+
+/// <summary>基线跳变：等时性掉下去、舒适度掉下去、背谱起来。</summary>
+static void testSvEvaluatorPunishesBaselineJumps()
+{
+    // 每 4 秒在 1.0 和 2.0 之间来回跳：中位飞行时长成段翻倍，属于典型「跳变型 SV」。
+    List<(double From, double To, double Sv)> sv = [];
+    for (int index = 0; index < 8; index++)
+        sv.Add((index * 4000, (index + 1) * 4000, index % 2 == 0 ? 1.0 : 2.0));
+
+    SvMetrics? jumpy = SvEvaluator.Compute(syntheticSvChart(bpm: 180, seconds: 34, sv: sv));
+    SvMetrics? steady = SvEvaluator.Compute(syntheticSvChart(bpm: 180, seconds: 34, sv: null));
+
+    assertTrue(jumpy is not null && steady is not null, "两张合成谱都应算得出来");
+    assertTrue(jumpy!.Irregularity > 0.3, $"来回跳变应判成结构不稳：{jumpy.Irregularity:0.000}");
+    assertTrue(jumpy.SwitchesPerMinute > 2, $"跳变次数应被识别：{jumpy.SwitchesPerMinute:0.0}/分");
+    assertTrue(jumpy.Discomfort > 0.3, $"跳变时屏幕上有音符，应扣不适：{jumpy.Discomfort:0.000}");
+    assertTrue(jumpy.Comfort < steady!.Comfort, "跳变谱的舒适度必须低于匀速谱");
+    assertTrue(jumpy.Memorization > steady.Memorization, "跳变谱的背谱度必须高于匀速谱");
+    assertTrue(jumpy.Isochrony < 0.8, $"跳变谱的等时性不该是满的：{jumpy.Isochrony:0.000}");
+}
+
+/// <summary>夸张只在「飞行途中速度变了」时出现：整整段匀速换速不算夸张。</summary>
+static void testSvEvaluatorExaggerationNeedsMidFlightChange()
+{
+    // 每拍前半拍 1.0、后半拍 2.0 —— 飞行时长 459ms，一张谱里几乎每个音符都会横跨一次变速。
+    List<(double From, double To, double Sv)> sv = [];
+    double beat = 60000.0 / 180.0;
+    for (int index = 0; index < 120; index++)
+    {
+        double from = 1000 + index * beat;
+        sv.Add((from, from + beat / 2, 1.0));
+        sv.Add((from + beat / 2, from + beat, 2.0));
+    }
+
+    SvMetrics? chopped = SvEvaluator.Compute(syntheticSvChart(bpm: 180, seconds: 42, sv: sv));
+    SvMetrics? steady = SvEvaluator.Compute(syntheticSvChart(bpm: 180, seconds: 42, sv: null));
+
+    assertTrue(chopped is not null && steady is not null, "两张合成谱都应算得出来");
+    assertTrue(chopped!.Exaggeration > 0.2, $"飞行途中反复变速应算夸张：{chopped.Exaggeration:0.000}");
+    assertTrue(chopped.Exaggeration > steady!.Exaggeration * 4, "夸张度必须明显高于匀速谱");
+    assertTrue(chopped.Intensity > 0.2, $"界面强度应被抬起来：{chopped.Intensity:0.000}");
+}
+
+/// <summary>
+/// 造一张带时间点的 4K mania 谱：固定 1/4 拍距，SV 由 <paramref name="sv"/> 指定的区间逐段给出
+/// （null = 全程 1.0）。区间以外的部分沿用最后一段的值。
+/// </summary>
+static string syntheticSvChart(double bpm, double seconds, IReadOnlyList<(double From, double To, double Sv)>? sv)
+{
+    StringBuilder builder = new();
+    double beatLength = 60000.0 / bpm;
+    builder.AppendLine("osu file format v14");
+    builder.AppendLine("[General]");
+    builder.AppendLine("Mode: 3");
+    builder.AppendLine("[Difficulty]");
+    builder.AppendLine("CircleSize:4");
+    builder.AppendLine("[TimingPoints]");
+    builder.AppendLine($"0,{beatLength.ToString("0.######", CultureInfo.InvariantCulture)},4,2,0,60,1,0");
+    if (sv is not null)
+    {
+        foreach ((double from, _, double value) in sv)
+        {
+            string line = $"{from.ToString("0.###", CultureInfo.InvariantCulture)},{-100.0 / Math.Clamp(value, 0.01, 10.0)}" +
+                          ",4,2,0,60,0,0";
+            builder.AppendLine(line);
+        }
+    }
+
+    builder.AppendLine("[HitObjects]");
+    double step = beatLength / 4.0;
+    int notes = (int)(seconds * 1000 / step);
+    for (int index = 0; index < notes; index++)
+    {
+        int column = index % 4;
+        int x = (int)((column + 0.5) * 512 / 4);
+        int time = (int)(index * step);
+        builder.AppendLine($"{x},192,{time},1,0,0:0:0:0:");
+    }
+
+    return builder.ToString();
 }
 
 /// <summary>造一张可解析的 4K mania 谱：固定 1/4 拍距，列循环，每隔 N 个出一个长条。</summary>

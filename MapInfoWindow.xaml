@@ -143,7 +143,11 @@
                                          LabelFontFamily="{DynamicResource UiFont}" />
                 </StackPanel>
 
-                <controls:PatternBars x:Name="Bars" Grid.Column="1" Margin="12,0,0,0" VerticalAlignment="Center" />
+                <!-- 右列：SV 四个小环（等时性 / 舒适度 / 背谱 / 强度）压在键型占比上面 -->
+                <StackPanel Grid.Column="1" Margin="12,0,0,0" VerticalAlignment="Center">
+                    <controls:SvRings x:Name="SvRingRow" Margin="0,0,0,8" Visibility="Collapsed" />
+                    <controls:PatternBars x:Name="Bars" />
+                </StackPanel>
             </Grid>
 
             <Border Grid.Row="4" Height="1" Background="#242A30" Margin="0,10,0,8" />

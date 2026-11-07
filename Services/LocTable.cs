@@ -121,6 +121,13 @@ public static class LocTable
         ["mapinfo.detail"] = "详情",
         ["mapinfo.detailpending"] = "导入后解析",
 
+        // SV 小环（信息窗）：前两个越高越好，后两个越高越差
+        ["sv.isochrony"] = "等时性",
+        ["sv.comfort"] = "舒适度",
+        ["sv.memorize"] = "背谱",
+        ["sv.intensity"] = "强度",
+        ["sv.tip"] = "等时性 {0} · 舒适度 {1} · 背谱 {2} · 强度 {3}\n较高更好：等时性、舒适度；较高更差：背谱、强度",
+
         // 卡片详情行
         ["detail.mapper"] = "谱师 {0}",
         ["detail.maniaonly"] = "详情仅对 mania 模式有效",
@@ -372,6 +379,13 @@ public static class LocTable
         ["mapinfo.objects"] = "Objects",
         ["mapinfo.detail"] = "Details",
         ["mapinfo.detailpending"] = "parsed on import",
+
+        // SV rings (info window): the first two are better high, the last two better low
+        ["sv.isochrony"] = "Isochrony",
+        ["sv.comfort"] = "Comfort",
+        ["sv.memorize"] = "Memorize",
+        ["sv.intensity"] = "Intensity",
+        ["sv.tip"] = "Isochrony {0} · Comfort {1} · Memorize {2} · Intensity {3}\nHigher is better: isochrony, comfort. Higher is worse: memorize, intensity.",
 
         // 卡片详情行
         ["detail.mapper"] = "Mapped by {0}",

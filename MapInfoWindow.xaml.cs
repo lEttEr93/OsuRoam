@@ -320,10 +320,14 @@ public partial class MapInfoWindow : Window
             Radar.OverlayLabels = null;
             Bars.Labels = null;
             Bars.Shares = null;
+            SvRingRow.Labels = null;
+            SvRingRow.Values = null;
+            SvRingRow.Visibility = Visibility.Collapsed;
             return;
         }
 
         buildRatioBar(pattern);
+        buildSvRings(pattern);
         PatternRow.Visibility = Visibility.Visible;
 
         // 7 轴技能强度：各轴独立，适合雷达图。
@@ -371,9 +375,32 @@ public partial class MapInfoWindow : Window
     }
 
     /// <summary>
-    /// LN 三轴三角的三个顶点长度（0–1，占雷达半径）。
-    /// 口径见 <see cref="LnRadarBuilder"/>：锚点是「LN 100% 且三项等分 ⇒ 贴满外接圆」。
+    /// SV 四个小环：等时性 / 舒适度（越高越好）、背谱 / 强度（越高越差）。
+    /// 口径见 <see cref="SvEvaluator"/>，确切数值走 tooltip —— 卡片里没地方写四位数。
     /// </summary>
+    private void buildSvRings(ManiaPattern pattern)
+    {
+        SvMetrics? sv = pattern.Sv;
+        if (sv is null || sv.Rows <= 0)
+        {
+            SvRingRow.Labels = null;
+            SvRingRow.Values = null;
+            SvRingRow.ToolTip = null;
+            SvRingRow.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        double[] values = sv.DisplayValues();
+        SvRingRow.Labels = Loc.SvLabels();
+        SvRingRow.Values = values;
+        SvRingRow.HigherIsWorse = SvMetrics.HigherIsWorse;
+        SvRingRow.ToolTip = Loc.F("sv.tip",
+            percent(values[0]), percent(values[1]), percent(values[2]), percent(values[3]));
+        SvRingRow.Visibility = Visibility.Visible;
+
+        static string percent(double value) =>
+            (Math.Clamp(value, 0, 1) * 100).ToString("0", System.Globalization.CultureInfo.CurrentCulture) + "%";
+    }
 
     private static string buildDetailLine(RecommendationItem item)
     {
