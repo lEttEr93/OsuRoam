@@ -1,4 +1,4 @@
-<#
+﻿<#
     保存即重启：盯着 .cs / .xaml / .csproj，改了就用增量编译重开一次 Roam。
 
     用法（一般通过 watch.cmd 启动）：
@@ -11,7 +11,8 @@ param([Parameter(ValueFromRemainingArguments = $true)][string[]]$AppArgs)
 
 $ErrorActionPreference = "Stop"
 
-$root = Split-Path -Parent $PSScriptRoot
+# watch.ps1 就放在仓库根目录，$PSScriptRoot 就是它。
+$root = $PSScriptRoot
 $project = Join-Path $root "OsuRoam.csproj"
 $exe = Join-Path $root "bin\Debug\net8.0-windows\OsuRoam.exe"
 
@@ -23,6 +24,13 @@ $candidates += (Get-Command dotnet -ErrorAction SilentlyContinue | Select-Object
 
 $dotnet = $candidates | Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1
 if (-not $dotnet) { throw "找不到 dotnet：装一个，或改 watch.ps1 里的候选路径" }
+
+# TMP/TEMP 指向 C:\Users\<user>\AppData\Local\Temp 时 MSBuild 写不进去（ACL），
+# 报出来只是一句 MSB1025 内部错误。给编译单独一个仓库内的临时目录。
+$tempDir = Join-Path $root "bin\tmp"
+New-Item -ItemType Directory -Force -Path $tempDir | Out-Null
+$env:TMP = $tempDir
+$env:TEMP = $tempDir
 
 # 根目录只看这一层（编译输出在 bin/obj 里，递归会把它们也算进来）；
 # 子目录按源码目录递归。
@@ -82,12 +90,17 @@ function Start-App {
         return
     }
 
+    # 用 ProcessStartInfo（UseShellExecute=false）而不是 Start-Process：
+    # 后者走 ShellExecute，在某些宿主里会卡住不返回；这条就是普通的 CreateProcess。
+    $info = [System.Diagnostics.ProcessStartInfo]::new($exe)
+    $info.UseShellExecute = $false
+    $info.WorkingDirectory = $root
     if ($AppArgs -and $AppArgs.Count -gt 0) {
-        $script:app = Start-Process -FilePath $exe -ArgumentList $AppArgs -PassThru
-    } else {
-        $script:app = Start-Process -FilePath $exe -PassThru
+        $info.Arguments = ($AppArgs | ForEach-Object { '"' + ($_ -replace '"', '\"') + '"' }) -join ' '
     }
-    Write-Host ("[{0}] 已启动（编译 {1:0.0}s）" -f (Get-Date -Format HH:mm:ss), $time.TotalSeconds) -ForegroundColor Green
+
+    $script:app = [System.Diagnostics.Process]::Start($info)
+    Write-Host ("[{0}] 已启动 pid={1}（编译 {2:0.0}s）" -f (Get-Date -Format HH:mm:ss), $script:app.Id, $time.TotalSeconds) -ForegroundColor Green
 }
 
 Write-Host "osu! Roam 开发模式：保存 .cs / .xaml 就重启，Ctrl+C 退出" -ForegroundColor Cyan

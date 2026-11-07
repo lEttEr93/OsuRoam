@@ -38,6 +38,14 @@ if /i "%ARGS:~0,9%"=="-nobuild " (
 :build
 if "%BUILD%"=="0" goto launch
 
+rem  TMP/TEMP point at C:\Users\<user>\AppData\Local\Temp here, and MSBuild
+rem  cannot write there (ACL) - that surfaces as a bare "MSB1025 internal
+rem  error". Give the build its own temp folder inside the repo.
+set "TMPDIR=%ROOT%bin\tmp"
+if not exist "%TMPDIR%" mkdir "%TMPDIR%"
+set "TMP=%TMPDIR%"
+set "TEMP=%TMPDIR%"
+
 rem  The dotnet on PATH may have no SDK installed (true on this machine), so
 rem  prefer the explicit locations first and fall back to PATH last.
 set "DOTNET=%DOTNET_ROOT%\dotnet.exe"
