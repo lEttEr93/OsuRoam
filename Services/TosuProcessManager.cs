@@ -17,6 +17,13 @@ public sealed class TosuProcessManager
 
     public event Action<string>? StatusChanged;
 
+    /// <summary>
+    /// tosu 读不到 osu! 的内存（日志里出现 <c>Couldn't read …</c>）。
+    /// 典型是 lazer 比 tosu 新：tosu 按进程找到了游戏，但结构体偏移全对不上，
+    /// 于是 WebSocket 一直连得上、数据却是空的 —— 信息栏拿不到谱面。
+    /// </summary>
+    public bool MemoryReadFailing { get; private set; }
+
     public async Task<TosuStartResult> EnsureReadyAsync(AppSettings settings, CancellationToken cancellationToken)
     {
         Uri endpoint = parseEndpoint(settings.TosuWebSocketUrl);
@@ -50,6 +57,7 @@ public sealed class TosuProcessManager
             await disableDashboardAsync(executablePath, cancellationToken);
             StatusChanged?.Invoke(Loc.T("tosu.starting"));
             AppLog.Info($"正在启动 tosu：{executablePath}");
+            MemoryReadFailing = false;
 
             Process process = new()
             {
@@ -225,9 +233,21 @@ public sealed class TosuProcessManager
         }
     }
 
-    private static void logProcessLine(string source, string? line)
+    private void logProcessLine(string source, string? line)
     {
-        if (!string.IsNullOrWhiteSpace(line))
-            AppLog.Info($"{source}: {line}");
+        if (string.IsNullOrWhiteSpace(line))
+            return;
+
+        AppLog.Info($"{source}: {line}");
+
+        if (!MemoryReadFailing && IsMemoryReadFailure(line))
+        {
+            MemoryReadFailing = true;
+            AppLog.Info("tosu 读不到 osu! 的内存：信息栏将拿不到游戏内谱面（多半是 lazer 版本比 tosu 新）");
+        }
     }
+
+    /// <summary>tosu 读内存失败时的日志特征：<c>… updatePreciseState Couldn't read long at 418</c>。</summary>
+    internal static bool IsMemoryReadFailure(string? line) =>
+        !string.IsNullOrWhiteSpace(line) && line.Contains("Couldn't read", StringComparison.OrdinalIgnoreCase);
 }

@@ -89,7 +89,7 @@
                     <ColumnDefinition Width="*" />
                 </Grid.ColumnDefinitions>
 
-                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                <StackPanel Orientation="Horizontal" VerticalAlignment="Center" x:Name="StarPanel">
                     <TextBlock x:Name="StarValue" FontSize="26" FontWeight="SemiBold" />
                     <TextBlock x:Name="StarGlyph" Text="★" FontSize="10" Margin="3,0,0,3" VerticalAlignment="Bottom" />
                 </StackPanel>
@@ -130,6 +130,14 @@
                 </Border>
             </Grid>
 
+            <!-- tosu 读不到 osu! 时的提示：和星级/胶囊同一行，同一时刻只显示一组 -->
+            <StackPanel x:Name="NoticePanel" Grid.Row="1" Margin="0,10,0,0" Visibility="Collapsed">
+                <TextBlock x:Name="NoticeReason" FontSize="11" TextWrapping="Wrap"
+                           Foreground="{StaticResource WarningBrush}" />
+                <TextBlock x:Name="NoticeHint" FontSize="10" Margin="0,5,0,0" TextWrapping="Wrap"
+                           Foreground="{StaticResource MutedTextBrush}" />
+            </StackPanel>
+
             <!-- 雷达 + 键型占比 -->
             <Grid x:Name="PatternRow" Grid.Row="3" Margin="0,9,0,0">
                 <Grid.ColumnDefinitions>
@@ -150,7 +158,7 @@
                 </StackPanel>
             </Grid>
 
-            <Border Grid.Row="4" Height="1" Background="#242A30" Margin="0,10,0,8" />
+            <Border x:Name="Separator" Grid.Row="4" Height="1" Background="#242A30" Margin="0,10,0,8" />
 
             <TextBlock x:Name="DetailText" Grid.Row="5" Margin="0,0,0,0" FontSize="10"
                        TextWrapping="Wrap" Foreground="{StaticResource MutedTextBrush}" />

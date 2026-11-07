@@ -113,6 +113,7 @@ testOsuClientInference();
 testOsuCommandLineParsing();
 testOsuStorageIniParsing();
 testOsuBeatmapRootsFollowInstallLocation();
+testTosuMemoryFailureDetection();
 Console.WriteLine("All state transition, recommendation, mode profile, and tosu integration tests passed.");
 return 0;
 
@@ -1061,6 +1062,17 @@ static void testTosuExecutableResolution()
         Environment.GetFolderPath(Environment.SpecialFolder.UserProfile));
     if (File.Exists(expected) && !string.Equals(expected, resolved, StringComparison.OrdinalIgnoreCase))
         throw new InvalidOperationException("没有找到用户目录内的 tosu.exe。");
+}
+
+static void testTosuMemoryFailureDetection()
+{
+    assertTrue(TosuProcessManager.IsMemoryReadFailure("lazer 48796 global updatePreciseState Couldn't read long at 418"),
+        "tosu 读内存失败的那行日志要认得出来");
+    assertTrue(TosuProcessManager.IsMemoryReadFailure("couldn't READ long at 0"), "大小写不敏感");
+    assertTrue(!TosuProcessManager.IsMemoryReadFailure("lazer 48796 Searching for osu! process..."),
+        "正常日志不能误判");
+    assertTrue(!TosuProcessManager.IsMemoryReadFailure(null), "null 不算");
+    assertTrue(!TosuProcessManager.IsMemoryReadFailure("   "), "空白不算");
 }
 
 static void testOsuExecutableCandidatesSupportStable()

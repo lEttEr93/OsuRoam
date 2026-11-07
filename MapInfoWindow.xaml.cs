@@ -35,6 +35,9 @@ public partial class MapInfoWindow : Window
     private RecommendationItem? currentItem;
     private bool exiting;
 
+    /// <summary>非 null 时窗口处于「提示」状态（比如 tosu 没读到 osu!），不再显示谱面数据。</summary>
+    private string? noticeKey;
+
     public MapInfoWindow()
     {
         InitializeComponent();
@@ -59,6 +62,13 @@ public partial class MapInfoWindow : Window
     /// <summary>显示（或更新）某个条目的信息；已经可见时只刷新内容。</summary>
     public void ShowFor(RecommendationItem item)
     {
+        // 从提示态回到谱面态：把提示时藏起来的部件放回来。
+        noticeKey = null;
+        StarPanel.Visibility = Visibility.Visible;
+        CapsulePanel.Visibility = Visibility.Visible;
+        NoticePanel.Visibility = Visibility.Collapsed;
+        Separator.Visibility = Visibility.Visible;
+
         if (!ReferenceEquals(currentItem, item))
         {
             if (currentItem is not null)
@@ -77,6 +87,64 @@ public partial class MapInfoWindow : Window
         exiting = false;
         Show();
         PlayEntrance();
+    }
+
+    /// <summary>
+    /// 提示模式：tosu 没读到 osu! 时代替谱面内容显示一句原因 + 一句怎么办。
+    /// 不画星级/胶囊/键型 —— 那些数据本来就没有，画成空壳比直接说清楚更让人困惑。
+    /// </summary>
+    /// <param name="messageKey">原因文案的 Loc 键（<c>mapinfo.tosu.*</c>）。</param>
+    public void ShowNotice(string messageKey)
+    {
+        noticeKey = messageKey;
+
+        if (currentItem is not null)
+        {
+            currentItem.PropertyChanged -= itemChanged;
+            currentItem = null;
+        }
+
+        DataContext = null;
+        applyNotice();
+        reposition();
+
+        if (IsVisible)
+            return;
+
+        exiting = false;
+        Show();
+        PlayEntrance();
+    }
+
+    private void applyNotice()
+    {
+        TrackTitle.Text = Loc.T("mapinfo.tosu.title");
+        TrackDifficulty.Text = string.Empty;
+        TrackMeta.Text = string.Empty;
+
+        StarPanel.Visibility = Visibility.Collapsed;
+        CapsulePanel.Visibility = Visibility.Collapsed;
+        RatioRow.Visibility = Visibility.Collapsed;
+        PatternRow.Visibility = Visibility.Collapsed;
+        Separator.Visibility = Visibility.Collapsed;
+        Radar.Labels = null;
+        Radar.Values = null;
+        Radar.OverlayValues = null;
+        Radar.OverlayLabels = null;
+        Bars.Labels = null;
+        Bars.Shares = null;
+        SvRingRow.Labels = null;
+        SvRingRow.Values = null;
+        SvRingRow.Visibility = Visibility.Collapsed;
+
+        DetailText.Text = string.Empty;
+        DetailText.Visibility = Visibility.Collapsed;
+        ReasonText.Text = string.Empty;
+        ReasonText.Visibility = Visibility.Collapsed;
+
+        NoticeReason.Text = Loc.T(noticeKey ?? "mapinfo.tosu.nobeatmap");
+        NoticeHint.Text = Loc.T("mapinfo.tosu.hint");
+        NoticePanel.Visibility = Visibility.Visible;
     }
 
     /// <summary>收起（开局 / 手动关闭）。下次导入时会重新出现。</summary>
@@ -213,6 +281,13 @@ public partial class MapInfoWindow : Window
 
     private void refresh()
     {
+        // 提示态没有条目可刷，换语言时重画一次文案就够了。
+        if (noticeKey is not null)
+        {
+            applyNotice();
+            return;
+        }
+
         RecommendationItem? item = currentItem;
         if (item is null)
             return;

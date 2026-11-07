@@ -25,6 +25,10 @@ public partial class MainWindow : Window
     private readonly TosuProcessManager tosuProcess = new();
     private readonly TosuFileClient tosuFiles = new();
     private string? ingameInfoKey;
+    /// <summary>当前信息窗显示的是哪条 tosu 提示（避免同一句反复弹）。</summary>
+    private string? tosuNoticeKey;
+    /// <summary>「tosu 读不到 osu!」的顶栏提示只报一次。</summary>
+    private bool tosuUnreadableNoticeShown;
     private RecommendationItem? ingameInfoItem;
     /// <summary>窗口整体的淡入淡出位移，运行时创建（模板里的 Freezable 会被冻结）。</summary>
     private readonly TranslateTransform rootSlide = new();
@@ -319,6 +323,18 @@ public partial class MainWindow : Window
         if (Environment.GetCommandLineArgs().Any(arg => arg == "--with-info"))
         {
             await runInfoSnapshotAsync(path);
+            return;
+        }
+
+        // 开发用：--notice 截「tosu 没读到 osu!」的提示态（--notice=memory 换原因）
+        if (Environment.GetCommandLineArgs().FirstOrDefault(arg => arg.StartsWith("--notice", StringComparison.OrdinalIgnoreCase)) is { } noticeArg)
+        {
+            string reason = noticeArg.Contains('=') ? noticeArg[(noticeArg.IndexOf('=') + 1)..] : "memory";
+            showTosuNotice(reason == "nobeatmap" ? "mapinfo.tosu.nobeatmap" : "mapinfo.tosu.memory");
+            await Task.Delay(900);
+            if (mapInfoWindow is not null)
+                RenderDiagnostics.CaptureWindow(mapInfoWindow, path);
+            Close();
             return;
         }
 
@@ -1576,6 +1592,7 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
             }
 
             mapInfoWindow.ShowFor(item);
+            tosuNoticeKey = null;
         }
         catch (Exception exception)
         {
@@ -1597,6 +1614,13 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
             : currentRoamItem;
         if (target is null)
         {
+            // 用户主动点「i」：这时候必须给个交代，别只丢一句「还没有导入谱面」。
+            if (settings.MapInfoSource == MapInfoSources.InGame)
+            {
+                showTosuNotice(tosuProcess.MemoryReadFailing ? "mapinfo.tosu.memory" : "mapinfo.tosu.nobeatmap", force: true);
+                return;
+            }
+
             setStatus("status.nothingimported");
             return;
         }
@@ -1973,7 +1997,16 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
         if (!string.IsNullOrWhiteSpace(snapshot.ProfileName) && profile is null)
             ProfileText.Text = snapshot.ProfileName;
         lastSnapshot = snapshot;
-        ConnectionText.Text = connectionTextFor(snapshot);
+
+        // tosu 连上了但读不到内存：顶栏换个说法，状态栏只提示一次。
+        bool unreadable = tosuProcess.MemoryReadFailing;
+        ConnectionText.Text = unreadable ? Loc.T("tosu.ready.unreadable") : connectionTextFor(snapshot);
+        if (unreadable && !tosuUnreadableNoticeShown)
+        {
+            tosuUnreadableNoticeShown = true;
+            setStatus("status.tosu.unreadable");
+        }
+
         updatePlayVisibility(snapshot);
     }
 
@@ -2524,7 +2557,22 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
     {
         if (settings.MapInfoSource != MapInfoSources.InGame || !settings.ShowMapInfo)
             return;
-        if (snapshot.BeatmapId <= 0 || !string.Equals(snapshot.StateName, "selectPlay", StringComparison.OrdinalIgnoreCase))
+
+        bool selectPlay = string.Equals(snapshot.StateName, "selectPlay", StringComparison.OrdinalIgnoreCase);
+
+        if (snapshot.BeatmapId <= 0)
+        {
+            // 选歌界面里明确有歌、tosu 却报不出 ID，才值得提示；
+            // 主菜单同理但只在「已经知道 tosu 读不到内存」时提示一次，否则每次回菜单都弹。
+            if (selectPlay || (tosuProcess.MemoryReadFailing &&
+                               string.Equals(snapshot.StateName, "menu", StringComparison.OrdinalIgnoreCase)))
+            {
+                showTosuNotice(tosuProcess.MemoryReadFailing ? "mapinfo.tosu.memory" : "mapinfo.tosu.nobeatmap");
+            }
+            return;
+        }
+
+        if (!selectPlay)
             return;
 
         string key = $"{snapshot.BeatmapId}|{snapshot.DifficultyName}";
@@ -2537,6 +2585,38 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
         {
             ingameInfoItem = item;
             showMapInfoFor(item);
+            return;
+        }
+
+        // ID 有、.osu 取不到：tosu 那边活着但给不出文件。
+        showTosuNotice("mapinfo.tosu.nofile");
+    }
+
+    /// <summary>
+    /// tosu 没读到 osu! 时，信息窗直接说清楚，而不是什么都不显示。
+    /// 同一个原因只弹一次（用户自己点「i」除外）；拿到真谱面后 <see cref="tosuNoticeKey"/> 会清空。
+    /// </summary>
+    private void showTosuNotice(string messageKey, bool force = false)
+    {
+        if (!force && string.Equals(messageKey, tosuNoticeKey, StringComparison.Ordinal))
+            return;
+
+        tosuNoticeKey = messageKey;
+        AppLog.Info($"信息栏：tosu 没读到 osu!（{messageKey}）");
+        try
+        {
+            if (mapInfoWindow is null)
+            {
+                mapInfoWindow = new MapInfoWindow();
+                mapInfoWindow.Closed += (_, _) => mapInfoWindow = null;
+                mapInfoWindow.DockTo(this);
+            }
+
+            mapInfoWindow.ShowNotice(messageKey);
+        }
+        catch (Exception exception)
+        {
+            AppLog.Error("显示 tosu 提示失败", exception);
         }
     }
 

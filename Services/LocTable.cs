@@ -125,6 +125,12 @@ public static class LocTable
         ["mapinfo.objects"] = "物件",
         ["mapinfo.detail"] = "详情",
         ["mapinfo.detailpending"] = "导入后解析",
+        // tosu 没读到 osu!（信息栏 = 游戏内谱面时）
+        ["mapinfo.tosu.title"] = "tosu 没读到 osu!",
+        ["mapinfo.tosu.nobeatmap"] = "tosu 连上了，但没报出当前谱面：游戏可能没开，或者它读不到这个客户端。",
+        ["mapinfo.tosu.memory"] = "tosu 读不到 osu! 的内存（多半是 lazer 版本比 tosu 新），拿不到游戏内的谱面。",
+        ["mapinfo.tosu.nofile"] = "拿到了谱面 ID，但 tosu 取不到对应的 .osu 文件。",
+        ["mapinfo.tosu.hint"] = "把「信息栏显示」切到「导入的谱面」，可以看 Roam 自己下载的那张。",
 
         // SV 小环（信息窗）：前两个越高越好，后两个越高越差
         ["sv.isochrony"] = "等时性",
@@ -236,6 +242,8 @@ public static class LocTable
         ["tosu.disconnected"] = "tosu 已断开",
         ["tosu.unreadable"] = "tosu 数据格式暂不可读",
         ["tosu.ready"] = "tosu 已就绪（由 Roam 管理）",
+        ["tosu.ready.unreadable"] = "tosu 已就绪（读不到 osu!）",
+        ["status.tosu.unreadable"] = "tosu 读不到 osu! 的内存，信息栏拿不到游戏内谱面",
         ["tosu.alreadyrunning"] = "tosu 已在运行",
         ["tosu.manual"] = "等待手动启动 tosu",
         ["tosu.missing"] = "未找到 tosu.exe，请在高级设置中填写路径。",
@@ -390,6 +398,12 @@ public static class LocTable
         ["mapinfo.objects"] = "Objects",
         ["mapinfo.detail"] = "Details",
         ["mapinfo.detailpending"] = "parsed on import",
+        // tosu could not read osu! (info panel = in-game beatmap)
+        ["mapinfo.tosu.title"] = "tosu can't read osu!",
+        ["mapinfo.tosu.nobeatmap"] = "tosu is connected but reports no beatmap: the game may not be running, or tosu can't read this client.",
+        ["mapinfo.tosu.memory"] = "tosu can't read osu!'s memory (usually a lazer newer than tosu), so there is no in-game beatmap to show.",
+        ["mapinfo.tosu.nofile"] = "Got the beatmap ID, but tosu can't serve the matching .osu file.",
+        ["mapinfo.tosu.hint"] = "Switch \"Info panel shows\" to \"Imported beatmap\" to see the one Roam downloaded.",
 
         // SV rings (info window): the first two are better high, the last two better low
         ["sv.isochrony"] = "Isochrony",
@@ -501,6 +515,8 @@ public static class LocTable
         ["tosu.disconnected"] = "tosu disconnected",
         ["tosu.unreadable"] = "tosu data is not readable yet",
         ["tosu.ready"] = "tosu ready (managed by Roam)",
+        ["tosu.ready.unreadable"] = "tosu ready (can't read osu!)",
+        ["status.tosu.unreadable"] = "tosu can't read osu!'s memory, so the info panel can't show the in-game beatmap",
         ["tosu.alreadyrunning"] = "tosu is already running",
         ["tosu.manual"] = "Waiting for tosu to be started manually",
         ["tosu.missing"] = "tosu.exe not found — set the path in the advanced settings.",
