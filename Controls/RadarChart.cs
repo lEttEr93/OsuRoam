@@ -370,6 +370,10 @@ public sealed class RadarChart : FrameworkElement
 
         if (HasOverlay)
         {
+            // 叠加层的三条轴是「正下 / 右上 / 左上」，不是七边形的顶点方向。
+            // 直接按外接圆半径画，正下那个顶点会戳到七边形的边外面（视觉上像画崩了），
+            // 所以乘上七边形的内切圆系数 cos(π/n)：满格时正好贴住格线。
+            double overlayRadius = radius * Math.Cos(Math.PI / count);
             StreamGeometry overlayShape = new();
             using (StreamGeometryContext geometry = overlayShape.Open())
             {
@@ -377,7 +381,7 @@ public sealed class RadarChart : FrameworkElement
                 {
                     double value = OverlayValues![index];
                     double scaled = double.IsFinite(value) ? Math.Clamp(value, 0, 1) : 0;
-                    Point vertex = pointAt(center, radius * scaled, OverlayAngles[index] * Math.PI / 180);
+                    Point vertex = pointAt(center, overlayRadius * scaled, OverlayAngles[index] * Math.PI / 180);
                     if (index == 0)
                         geometry.BeginFigure(vertex, true, true);
                     else
@@ -391,8 +395,9 @@ public sealed class RadarChart : FrameworkElement
         if (ShowOverlayLabels)
         {
             FormattedText[] overlayTexts = resolveOverlayTexts(pixelsPerDip);
+            double overlayLabelRadius = radius * Math.Cos(Math.PI / count) + LabelGap;
             for (int index = 0; index < overlayTexts.Length; index++)
-                placeLabel(context, overlayTexts[index], center, radius + LabelGap, OverlayAngles[index] * Math.PI / 180);
+                placeLabel(context, overlayTexts[index], center, overlayLabelRadius, OverlayAngles[index] * Math.PI / 180);
         }
         else
         {
