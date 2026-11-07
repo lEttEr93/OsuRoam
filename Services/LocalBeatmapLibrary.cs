@@ -37,20 +37,14 @@ public static class LocalBeatmapLibrary
 
     public static bool HasData => installedBeatmapIds.Count > 0;
 
-    /// <summary>所有存在的谱面目录（stable 的 Songs、lazer 的 files）。</summary>
-    public static IReadOnlyList<string> ResolveRoots()
-    {
-        string localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-        string roaming = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
-
-        string[] candidates =
-        [
-            Path.Combine(localAppData, "osu!", "Songs"),
-            Path.Combine(roaming, "osu", "files")
-        ];
-
-        return candidates.Where(Directory.Exists).ToList();
-    }
+    /// <summary>
+    /// 所有存在的谱面目录（stable 的 Songs、lazer 的 files）。
+    /// 路径由 <see cref="OsuLocator"/> 给：装在别的盘、便携 lazer（storage.ini）也能认出来。
+    /// </summary>
+    public static IReadOnlyList<string> ResolveRoots() =>
+        OsuLocator.BeatmapRoots(
+            OsuLocator.DetectByKind(OsuClientKind.Stable),
+            OsuLocator.DetectByKind(OsuClientKind.Lazer));
 
     /// <summary>扫所有目录并取并集；失败不抛，保持上一次的结果。</summary>
     public static async Task RefreshAsync(string? cacheDirectory = null, CancellationToken cancellationToken = default)
@@ -58,7 +52,9 @@ public static class LocalBeatmapLibrary
         IReadOnlyList<string> roots = ResolveRoots();
         if (roots.Count == 0)
         {
-            note = "没找到 osu! 谱面目录（Songs / files 都不存在）";
+            // 别只说「没找到」：这两种情况用户能自己修，把线索给出来。
+            note = "没找到 osu! 谱面目录（stable 的 Songs / lazer 的 files 都不存在）。" +
+                   "如果 osu! 装在别的盘或用了便携版，去「下载与高级设置」点「重新检测」，或直接填 osu!.exe 路径。";
             return;
         }
 

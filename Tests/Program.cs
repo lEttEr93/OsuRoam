@@ -109,6 +109,10 @@ testPlayVisibilityPredicate();
 testTosuDashboardConfigIsDisabled();
 testTosuExecutableResolution();
 testOsuExecutableCandidatesSupportStable();
+testOsuClientInference();
+testOsuCommandLineParsing();
+testOsuStorageIniParsing();
+testOsuBeatmapRootsFollowInstallLocation();
 Console.WriteLine("All state transition, recommendation, mode profile, and tosu integration tests passed.");
 return 0;
 
@@ -1061,8 +1065,8 @@ static void testTosuExecutableResolution()
 
 static void testOsuExecutableCandidatesSupportStable()
 {
-    IReadOnlyList<string> stable = BeatmapDownloadService.GetOsuExecutableCandidates(
-        "stable", @"C:\Local", @"C:\Program Files (x86)", @"C:\Program Files");
+    IReadOnlyList<string> stable = OsuLocator.CommonExecutables(
+        OsuClientKind.Stable, @"C:\Local", @"C:\Program Files", @"C:\Program Files (x86)");
     assertSequenceStrings(
         [
             @"C:\Local\osu!\osu!.exe",
@@ -1072,15 +1076,91 @@ static void testOsuExecutableCandidatesSupportStable()
         stable,
         "stable should be resolved from its standard installation locations");
 
-    IReadOnlyList<string> lazer = BeatmapDownloadService.GetOsuExecutableCandidates(
-        "lazer", @"C:\Local", @"C:\Program Files (x86)", @"C:\Program Files");
+    IReadOnlyList<string> lazer = OsuLocator.CommonExecutables(
+        OsuClientKind.Lazer, @"C:\Local", @"C:\Program Files", @"C:\Program Files (x86)");
     assertSequenceStrings(
         [
             @"C:\Local\osulazer\osu!.exe",
-            @"C:\Local\Programs\osu!\osu!.exe"
+            @"C:\Local\osulazer\current\osu!.exe",
+            @"C:\Local\Programs\osu!\osu!.exe",
+            @"C:\Local\osu\osu!.exe"
         ],
         lazer,
-        "lazer candidate order must remain unchanged");
+        "lazer candidates must include the Velopack 'current' folder and keep the order stable");
+}
+
+static void testOsuClientInference()
+{
+    assertTrue(OsuLocator.InferClient(@"C:\Users\me\AppData\Local\osulazer\osu!.exe") == OsuClientKind.Lazer,
+        "osulazer 目录应判为 lazer");
+    assertTrue(OsuLocator.InferClient(@"C:\Users\me\AppData\Local\osulazer\current\osu!.exe") == OsuClientKind.Lazer,
+        "Velopack 的 current 目录应判为 lazer");
+    assertTrue(OsuLocator.InferClient(@"D:\Games\osu!\osu!.exe") == OsuClientKind.Stable,
+        "装在别的盘的 stable 应判为 stable");
+    assertTrue(OsuLocator.InferClient(@"C:\Program Files (x86)\osu!\osu!.exe") == OsuClientKind.Stable,
+        "Program Files 下的 stable 应判为 stable");
+
+    assertText("auto", OsuLocator.NormalizeClient(null), "空设置必须归一成自动 —— 旧配置就是这么坏的");
+    assertText("auto", OsuLocator.NormalizeClient("  "), "空白归一成自动");
+    assertText("lazer", OsuLocator.NormalizeClient("osu!lazer"), "别名识别");
+    assertText("stable", OsuLocator.NormalizeClient("STABLE"), "大小写不敏感");
+}
+
+static void testOsuCommandLineParsing()
+{
+    assertText(@"C:\Program Files\osu!\osu!.exe",
+        OsuLocator.ParseCommandLinePath("\"C:\\Program Files\\osu!\\osu!.exe\" \"%1\"") ?? "<null>",
+        "带引号的注册表命令行要能拆出 exe");
+    assertText(@"C:\osu!\osu!.exe",
+        OsuLocator.ParseCommandLinePath(@"C:\osu!\osu!.exe %1") ?? "<null>",
+        "不带引号时按 .exe 截断，不能被路径里的空格骗到");
+    assertTrue(OsuLocator.ParseCommandLinePath(null) is null, "空命令行返回 null");
+    assertTrue(OsuLocator.ParseCommandLinePath("  ") is null, "空白命令行返回 null");
+}
+
+static void testOsuStorageIniParsing()
+{
+    assertText(@"D:\osu-data",
+        OsuLocator.ParseStorageIniPath("[Storage]\nFullPath=D:\\osu-data\n") ?? "<null>",
+        "lazer 便携版的 storage.ini 要能读出来");
+    assertTrue(OsuLocator.ParseStorageIniPath("[Other]\nFullPath=D:\\nope\n") is null,
+        "别的段里的 FullPath 不算");
+    assertTrue(OsuLocator.ParseStorageIniPath("[Storage]\nFullPath=\n") is null,
+        "空值当作没配");
+    assertTrue(OsuLocator.ParseStorageIniPath("") is null, "空文件返回 null");
+}
+
+static void testOsuBeatmapRootsFollowInstallLocation()
+{
+    string sandbox = Path.Combine(Path.GetTempPath(), "osuroam-roots-" + Guid.NewGuid().ToString("N"));
+    try
+    {
+        string localAppData = Path.Combine(sandbox, "Local");
+        string roaming = Path.Combine(sandbox, "Roaming");
+        string stableDirectory = Path.Combine(sandbox, "Games", "osu!");
+        string lazerDirectory = Path.Combine(localAppData, "osulazer");
+        string portableStorage = Path.Combine(sandbox, "portable-data");
+
+        Directory.CreateDirectory(Path.Combine(stableDirectory, "Songs"));
+        Directory.CreateDirectory(Path.Combine(roaming, "osu", "files"));
+        Directory.CreateDirectory(Path.Combine(portableStorage, "files"));
+        Directory.CreateDirectory(lazerDirectory);
+        File.WriteAllText(Path.Combine(lazerDirectory, "storage.ini"), $"[Storage]\nFullPath={portableStorage}\n");
+
+        IReadOnlyList<string> roots = OsuLocator.BeatmapRoots(localAppData, roaming, stableDirectory, lazerDirectory);
+
+        assertTrue(roots.Any(root => root.EndsWith(Path.Combine("osu!", "Songs"), StringComparison.OrdinalIgnoreCase)),
+            $"stable 装在别的盘时也要算上 exe 同级的 Songs：{string.Join(" | ", roots)}");
+        assertTrue(roots.Any(root => root.EndsWith(Path.Combine("osu", "files"), StringComparison.OrdinalIgnoreCase)),
+            "lazer 默认的 roaming\\osu\\files 要保留");
+        assertTrue(roots.Any(root => root.EndsWith(Path.Combine("portable-data", "files"), StringComparison.OrdinalIgnoreCase)),
+            $"便携 lazer 的 storage.ini 指向的仓库也要扫：{string.Join(" | ", roots)}");
+        assertTrue(roots.Count == roots.Distinct(StringComparer.OrdinalIgnoreCase).Count(), "谱面目录不能重复");
+    }
+    finally
+    {
+        try { Directory.Delete(sandbox, true); } catch { }
+    }
 }
 
 static OsuBeatmapset maniaSet(int setId, int beatmapId, int keys) => new()

@@ -2316,7 +2316,7 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
         value.ShowMapInfo = MapInfoCheck.IsChecked == true;
         value.MapInfoSource = (MapInfoSourceBox.SelectedItem as ComboBoxItem)?.Tag?.ToString() ?? MapInfoSources.Imported;
         value.Language = (LanguageBox.SelectedItem as ComboBoxItem)?.Tag?.ToString() ?? Loc.AutoTag;
-        value.OsuClient = (OsuClientBox.SelectedItem as ComboBoxItem)?.Tag?.ToString() ?? "lazer";
+        value.OsuClient = OsuLocator.NormalizeClient((OsuClientBox.SelectedItem as ComboBoxItem)?.Tag?.ToString());
         value.OsuExecutablePath = BeatmapDownloadService.NormalizeExecutablePath(OsuPathBox.Text);
         value.DownloadMirrorTemplates = DownloadTemplateBox.Text.Trim();
         value.DownloadUrlTemplate = value.DownloadMirrorTemplates.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries).FirstOrDefault()?.Trim()
@@ -2360,9 +2360,10 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
         tosuFiles.Configure(settings.TosuWebSocketUrl);
         applyFontSetting();
         OsuPathBox.Text = BeatmapDownloadService.NormalizeExecutablePath(settings.OsuExecutablePath);
-        string osuClient = string.Equals(settings.OsuClient, "stable", StringComparison.OrdinalIgnoreCase) ? "stable" : "lazer";
+        string osuClient = OsuLocator.NormalizeClient(settings.OsuClient);
         foreach (ComboBoxItem item in OsuClientBox.Items)
             if (Equals(item.Tag?.ToString(), osuClient)) OsuClientBox.SelectedItem = item;
+        refreshOsuDetection();
         DownloadTemplateBox.Text = string.IsNullOrWhiteSpace(settings.DownloadMirrorTemplates)
             ? settings.DownloadUrlTemplate
             : settings.DownloadMirrorTemplates;
@@ -3022,9 +3023,49 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
         ? Math.Clamp(keys, 1, 10)
         : 4;
 
-    private string osuClientDisplayName() => string.Equals(settings.OsuClient, "stable", StringComparison.OrdinalIgnoreCase)
-        ? "osu!stable"
-        : "osu!lazer";
+    private string osuClientDisplayName()
+    {
+        OsuInstallation? installation = OsuLocator.Detect(settings.OsuClient, settings.OsuExecutablePath);
+        return installation?.ClientName ?? Loc.T("osu.unknown");
+    }
+
+    private void OsuClientBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (!settingsControlsReady)
+            return;
+        refreshOsuDetection();
+    }
+
+    private void RedetectOsuButton_Click(object sender, RoutedEventArgs e)
+    {
+        OsuLocator.Invalidate();
+        refreshOsuDetection(logToFile: true);
+    }
+
+    /// <summary>
+    /// 把「检测到哪个 osu!」摆到界面上。导入失败最常见的原因就是这里什么都没检测到，
+    /// 而旧版本界面上什么都不说 —— 用户只会看到「点了导入没反应」。
+    /// </summary>
+    private void refreshOsuDetection(bool logToFile = false)
+    {
+        string client = OsuLocator.NormalizeClient((OsuClientBox.SelectedItem as ComboBoxItem)?.Tag?.ToString());
+        string configured = BeatmapDownloadService.NormalizeExecutablePath(OsuPathBox.Text);
+        OsuInstallation? installation = OsuLocator.Detect(client, configured);
+
+        if (installation is null)
+        {
+            OsuDetectText.Text = Loc.T("osu.notfound");
+            OsuDetectText.Foreground = (Brush)FindResource("WarningBrush");
+            if (logToFile)
+                AppLog.Info("重新检测 osu!：没找到（设置 / 进程 / 注册表 / 常见目录都没命中）");
+            return;
+        }
+
+        OsuDetectText.Text = Loc.F("osu.detected", installation.ClientName, installation.Executable);
+        OsuDetectText.Foreground = (Brush)FindResource("MutedTextBrush");
+        if (logToFile)
+            AppLog.Info($"重新检测 osu!：{installation.ClientName} → {installation.Executable}（来源：{installation.Source}）");
+    }
 
     private string difficultyProfileLabel() => settings.Mode switch
     {

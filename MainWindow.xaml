@@ -572,10 +572,17 @@
                             </StackPanel>
                             <TextBlock Text="{DynamicResource L.label.client}" Foreground="{StaticResource MutedTextBrush}" FontSize="11" />
                             <ComboBox x:Name="OsuClientBox" SelectedIndex="0"
+                                      SelectionChanged="OsuClientBox_SelectionChanged"
                                       DropDownOpened="ComboBox_DropDownOpened" DropDownClosed="ComboBox_DropDownClosed">
+                                <ComboBoxItem Content="{DynamicResource L.osuclient.auto}" Tag="auto" />
                                 <ComboBoxItem Content="osu!lazer" Tag="lazer" />
                                 <ComboBoxItem Content="osu!stable" Tag="stable" />
                             </ComboBox>
+                            <!-- 检测结果单独一行：路径很长，和按钮挤一行会溢出/重叠 -->
+                            <Button x:Name="RedetectOsuButton" Content="{DynamicResource L.btn.redetect}"
+                                    HorizontalAlignment="Left" Margin="0,6,0,0" Click="RedetectOsuButton_Click" />
+                            <TextBlock x:Name="OsuDetectText" FontSize="10" Margin="0,4,0,6"
+                                       TextWrapping="Wrap" Foreground="{StaticResource MutedTextBrush}" />
                             <TextBlock Text="{DynamicResource L.label.poolsize}" Foreground="{StaticResource MutedTextBrush}" FontSize="11" />
                             <ComboBox x:Name="PoolSizeBox" SelectedIndex="2"
                                       DropDownOpened="ComboBox_DropDownOpened" DropDownClosed="ComboBox_DropDownClosed">

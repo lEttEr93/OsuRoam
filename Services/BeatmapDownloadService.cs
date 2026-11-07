@@ -107,7 +107,7 @@ public sealed class BeatmapDownloadService : IDisposable
             if (!File.Exists(path) || new FileInfo(path).Length < 1024)
                 throw new FileNotFoundException(Loc.T("download.missing"), path);
             await validateOszAsync(path, cancellationToken);
-            import(item, path, settings.OsuExecutablePath, settings.OsuClient);
+            import(item, path, settings);
             // osu! receives the path asynchronously. Keep the file in place after
             // Process.Start so lazer can finish reading the archive before cleanup.
             AppLog.Info($"已触发导入，保留缓存等待 osu! 读取：{item.DisplayTitle} ({item.BeatmapsetId})");
@@ -219,31 +219,43 @@ public sealed class BeatmapDownloadService : IDisposable
             throw new InvalidDataException(Loc.T("download.badosz"));
     }
 
-    private static void import(RecommendationItem item, string path, string configuredExecutable, string osuClient)
+    private static void import(RecommendationItem item, string path, AppSettings settings)
     {
-        importCore(item, path, configuredExecutable, osuClient);
+        importCore(item, path, settings);
     }
 
-    private static void importCore(RecommendationItem item, string path, string configuredExecutable, string osuClient)
+    private static void importCore(RecommendationItem item, string path, AppSettings settings)
     {
         item.DownloadState = DownloadState.Importing;
-        string? executable = resolveOsuExecutable(configuredExecutable, osuClient);
-        ProcessStartInfo startInfo;
-        if (executable is null)
+
+        // 找不到 exe 时**不能**默默退化成「交给系统关联」：`.osz` 没有默认打开方式时
+        // 那句 Process.Start 什么都不会发生，用户看到的就是「点了导入没反应」。
+        OsuInstallation? installation = OsuLocator.Detect(settings.OsuClient, settings.OsuExecutablePath);
+        if (installation is null)
         {
-            startInfo = new ProcessStartInfo(path) { UseShellExecute = true };
+            AppLog.Info("导入失败：没有定位到 osu!（设置里的路径为空或不存在，注册表/进程/常见目录都没命中）");
+            throw new InvalidOperationException(Loc.T("download.noosu"));
         }
-        else
+
+        ProcessStartInfo startInfo = new(installation.Executable) { UseShellExecute = true };
+        startInfo.ArgumentList.Add(path);
+
+        Process? started;
+        try
         {
-            startInfo = new ProcessStartInfo(executable) { UseShellExecute = true };
-            startInfo.ArgumentList.Add(path);
+            started = Process.Start(startInfo);
         }
-        Process? started = Process.Start(startInfo);
+        catch (Exception exception) when (exception is System.ComponentModel.Win32Exception or InvalidOperationException)
+        {
+            AppLog.Error($"启动 osu! 失败：{installation.Executable}", exception);
+            throw new InvalidOperationException(Loc.F("download.nostart", installation.Executable));
+        }
+
         if (started is null)
-            throw new InvalidOperationException(Loc.T("download.nostart"));
-        AppLog.Info(executable is null
-            ? $"导入：没有找到 osu 可执行文件，交给系统关联打开 {Path.GetFileName(path)}"
-            : $"导入：启动 {executable}，参数 {path}，PID={started.Id}");
+            throw new InvalidOperationException(Loc.F("download.nostart", installation.Executable));
+
+        AppLog.Info($"导入：启动 {installation.Executable}（{installation.ClientName}，来源：{installation.Source}），" +
+                    $"参数 {path}，PID={started.Id}");
         item.DownloadState = DownloadState.Imported;
     }
 
@@ -270,50 +282,6 @@ public sealed class BeatmapDownloadService : IDisposable
         }
 
         return value.Trim().Trim('"', '\'', ' ');
-    }
-
-    private static string? resolveOsuExecutable(string configured, string osuClient)
-    {
-        string normalized = NormalizeExecutablePath(configured);
-        if (normalized.Length > 0)
-        {
-            if (File.Exists(normalized))
-                return normalized;
-
-            // 不能直接抛：配置里可能是旧版本写进去的脏路径，或者用户挪了安装目录。
-            // 抛异常会让之后每一次导入都失败，回退到自动探测更安全。
-            AppLog.Info($"设置里的 osu! 路径不可用，改用自动探测：{normalized}");
-        }
-
-        return GetOsuExecutableCandidates(
-                osuClient,
-                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86),
-                Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles))
-            .FirstOrDefault(File.Exists);
-    }
-
-    internal static IReadOnlyList<string> GetOsuExecutableCandidates(
-        string osuClient,
-        string localApplicationData,
-        string programFilesX86,
-        string programFiles)
-    {
-        if (string.Equals(osuClient, "stable", StringComparison.OrdinalIgnoreCase))
-        {
-            return
-            [
-                Path.Combine(localApplicationData, "osu!", "osu!.exe"),
-                Path.Combine(programFilesX86, "osu!", "osu!.exe"),
-                Path.Combine(programFiles, "osu!", "osu!.exe")
-            ];
-        }
-
-        return
-        [
-            Path.Combine(localApplicationData, "osulazer", "osu!.exe"),
-            Path.Combine(localApplicationData, "Programs", "osu!", "osu!.exe")
-        ];
     }
 
     public void Dispose()

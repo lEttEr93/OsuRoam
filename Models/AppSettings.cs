@@ -96,7 +96,11 @@ public sealed class AppSettings
     public string OsuExecutablePath { get; set; } = string.Empty;
     /// <summary>谱面缓存上限（MB），只裁剪 Beatmaps 里的 .osz，其他数据不动。</summary>
     public int CacheLimitMegabytes { get; set; } = 1024;
-    public string OsuClient { get; set; } = "lazer";
+    /// <summary>
+    /// 客户端：<c>auto</c> / <c>lazer</c> / <c>stable</c>。默认自动 —— 旧版本默认写死 lazer，
+    /// 配置被清过（或只装了另一种客户端）就找不到可执行文件，导入直接没反应。
+    /// </summary>
+    public string OsuClient { get; set; } = "auto";
     public string TosuWebSocketUrl { get; set; } = "ws://127.0.0.1:24050/websocket/v2";
     public string TosuExecutablePath { get; set; } = string.Empty;
     public bool AutoStartTosu { get; set; } = true;
