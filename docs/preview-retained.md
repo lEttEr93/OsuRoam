@@ -11,7 +11,9 @@ Set-ExecutionPolicy -Scope Process Bypass -Force
 & D:\AI\repos\osu-roam\Tools\measure-preview.ps1
 ```
 
-输出默认在 `D:\AI\runs\osu-roam-preview\presentmon`，包含原始 CSV、测试报告和 summary.json。脚本语法已检查，完整管理员采样尚未运行。保留模式没有逐帧 Present；DWM 输出节拍也不能单独证明每一帧预览内容均上屏，须按进程、交换链及显示器区分分析。
+输出默认在 `D:\AI\runs\osu-roam-preview\presentmon-<timestamp>`，包含原始 CSV、目标 PID、测试报告和 summary.json。第一次管理员采样暴露了目标参数错误：重复 `--process_id` 会覆盖前值，导致只采到 DWM。现已改为支持重复的 `--process_name` 并按 PID 筛选；交换链路径缺少应用事件时直接报采样不完整。修正脚本语法检查通过，待重新管理员采样。
+
+第一次采样的透明保留路径 DWM 显示间隔 P50/P95/P99 为 4.173/12.459/16.688ms，透明 blt 路径为 4.168/4.655/12.509ms。这些数据说明捕获到的 DWM 输出间隔不均匀，不能直接定位 note 的显示问题。不透明 flip 路径可能独立显示，DWM 的低更新率不能替代应用帧数据。保留模式没有逐帧 Present；DWM 输出节拍也不能单独证明每一帧预览内容均上屏，须按进程、交换链及显示器区分分析。
 
 本次范围仅为谱面预览，不包含其他功能更新，也不修改正式版本号。
 

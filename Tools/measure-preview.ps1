@@ -1,4 +1,4 @@
-param([string]$OutputDirectory = 'D:\AI\runs\osu-roam-preview\presentmon')
+param([string]$OutputDirectory = ('D:\AI\runs\osu-roam-preview\presentmon-' + (Get-Date -Format 'yyyyMMdd-HHmmss')))
 $ErrorActionPreference = 'Stop'
 $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
 $principal = New-Object Security.Principal.WindowsPrincipal $identity
@@ -39,12 +39,15 @@ foreach ($case in @(
     $previewHandle = $preview.Handle
     try {
         $csv = Join-Path $OutputDirectory "$name.csv"
-        $captureArgs = @('--process_id', $preview.Id, '--output_file', $csv,
+        # --process_id is a scalar in PresentMon: repeating it silently replaces the target.
+        # --process_name explicitly supports multiple targets. Filter other dotnet hosts below.
+        $captureArgs = @('--process_name', 'dotnet.exe', '--process_name', 'dwm.exe', '--output_file', $csv,
+            '--delay', '2',
             '--timed', '15', '--terminate_after_timed', '--no_console_stats', '--v1_metrics',
             '--session_name', "OsuRoamPreview-$name-$PID")
-        foreach ($compositor in @(Get-Process dwm -ErrorAction Stop)) {
-            $captureArgs += @('--process_id', $compositor.Id)
-        }
+        $dwmIds = @((Get-Process dwm -ErrorAction Stop).Id)
+        [ordered]@{ PreviewPid=$preview.Id; DwmPids=$dwmIds; Arguments=$captureArgs } |
+            ConvertTo-Json -Depth 4 | Set-Content (Join-Path $OutputDirectory "$name-targets.json") -Encoding UTF8
         & $presentmon @captureArgs 2>&1 | Out-File (Join-Path $OutputDirectory "$name-capture.txt")
         if ($LASTEXITCODE -ne 0) { throw "PresentMon failed for $name; see capture log" }
         if (!$preview.WaitForExit(45000)) { throw "Preview timed out for $name" }
@@ -52,7 +55,17 @@ foreach ($case in @(
             throw "Graphics check failed for $name"
         }
         $culture = [Globalization.CultureInfo]::InvariantCulture
-        $rows = @(Import-Csv $csv | Where-Object { [double]::Parse($_.TimeInSeconds, $culture) -ge 2 })
+        $rows = @(Import-Csv $csv | Where-Object {
+            ($_.ProcessID -eq [string]$preview.Id -or $dwmIds -contains [int]$_.ProcessID) -and
+            [double]::Parse($_.TimeInSeconds, $culture) -ge 2
+        })
+        $previewRows = @($rows | Where-Object { $_.ProcessID -eq [string]$preview.Id })
+        if ($name -ne 'transparent-retained' -and $previewRows.Count -lt 100) {
+            throw "Missing preview Present events for $name. Capture is incomplete; see $name-targets.json and CSV."
+        }
+        if ($name -eq 'transparent-retained' -and $previewRows.Count -eq 0) {
+            Write-Host 'Retained mode has no application Present events; this is expected. DWM cadence alone cannot establish preview delivery.'
+        }
         foreach ($group in @($rows | Group-Object ProcessID,SwapChainAddress,PresentMode)) {
             $displayed = @($group.Group | Where-Object { $_.Dropped -eq '0' })
             $displayIntervals = @($displayed | ForEach-Object {
@@ -67,6 +80,8 @@ foreach ($case in @(
                 PresentP50 = Percentile $presentIntervals 0.5; PresentP95 = Percentile $presentIntervals 0.95
                 DisplayP50 = Percentile $displayIntervals 0.5; DisplayP95 = Percentile $displayIntervals 0.95
                 DisplayP99 = Percentile $displayIntervals 0.99
+                DisplayOver6_25ms = @($displayIntervals | Where-Object { $_ -gt 6.25 }).Count
+                DisplaySamples = $displayIntervals.Count
             }
         }
     }
@@ -76,5 +91,6 @@ foreach ($case in @(
     }
 }
 $summary | ConvertTo-Json -Depth 4 | Set-Content (Join-Path $OutputDirectory 'summary.json') -Encoding UTF8
-$summary | Format-Table -AutoSize
+$summary | Format-Table Case,Role,Rows,Dropped,DisplayP50,DisplayP95,DisplayP99 -AutoSize
+Write-Host "Raw CSV, stream details and full statistics: $OutputDirectory"
 Write-Host 'Retained DComp animations do not Present every frame. DWM rows describe compositor output, not proof that each preview update reached the display. Compare streams separately; different monitors can have different cadence.'
