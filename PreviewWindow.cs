@@ -23,6 +23,7 @@ public sealed class PreviewWindow : IDisposable
     private readonly PreviewOverlay overlay = new();
     private System.Windows.Threading.DispatcherTimer? followTimer;
     private Window? anchor;
+    private ManiaPreviewChart? pendingChart;
 
     public PreviewWindow(bool layered = false)
     {
@@ -38,11 +39,28 @@ public sealed class PreviewWindow : IDisposable
         get => anchor;
         set
         {
+            if (ReferenceEquals(anchor, value))
+            {
+                tryShow();
+                return;
+            }
+
+            if (anchor is not null)
+            {
+                anchor.IsVisibleChanged -= onAnchorVisibleChanged;
+                anchor.LocationChanged -= onAnchorChanged;
+                anchor.SizeChanged -= onAnchorChanged;
+            }
+
             anchor = value;
-            if (value is null)
-                dismiss();
-            else
-                applyBounds();
+            if (value is not null)
+            {
+                value.IsVisibleChanged += onAnchorVisibleChanged;
+                value.LocationChanged += onAnchorChanged;
+                value.SizeChanged += onAnchorChanged;
+            }
+
+            tryShow();
         }
     }
 
@@ -86,15 +104,31 @@ public sealed class PreviewWindow : IDisposable
         // 标题/作者/时间戳都不要了：画面上只有音符本身。
         _ = title;
         _ = meta;
-        if (anchor is null)
+        pendingChart = chart;
+        tryShow();
+    }
+
+    /// <summary>
+    /// 只有「信息窗存在且可见」时才显示面板。信息窗被收起（进游戏那类）就先隐藏，
+    /// 等它重新可见再摆位 + 显示 —— 之前少了这一条，面板会留在屏幕别处。
+    /// </summary>
+    private void tryShow()
+    {
+        if (anchor is null || pendingChart is null)
         {
-            AppLog.Info("预览：没有信息窗，不显示（它是信息窗的子页面）");
+            overlay.Hide();
+            return;
+        }
+
+        if (!anchor.IsVisible)
+        {
+            overlay.Hide();
             return;
         }
 
         applyBounds();
         overlay.SetOwner(new WindowInteropHelper(anchor).Handle);
-        overlay.Show(chart);
+        overlay.Show(pendingChart);
         startFollowing();
     }
 
@@ -177,8 +211,13 @@ public sealed class PreviewWindow : IDisposable
         followTimer.Start();
     }
 
+    private void onAnchorChanged(object? sender, EventArgs e) => tryShow();
+
+    private void onAnchorVisibleChanged(object sender, System.Windows.DependencyPropertyChangedEventArgs e) => tryShow();
+
     private void dismiss()
     {
+        pendingChart = null;
         followTimer?.Stop();
         overlay.Hide();
     }
@@ -189,9 +228,7 @@ public sealed class PreviewWindow : IDisposable
     /// </summary>
     private void applyBounds()
     {
-        // 不要要求 anchor 可见：进游戏时信息窗会被收起，回来时仍是同一个窗口对象，
-        // 之前在这里直接 return，面板就停在上一次（甚至 0×0）的尺寸上，看起来就是不渲染。
-        if (anchor is null)
+        if (anchor is null || !anchor.IsVisible)
             return;
 
         IntPtr hwnd = new WindowInteropHelper(anchor).Handle;
