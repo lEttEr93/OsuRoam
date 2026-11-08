@@ -283,8 +283,15 @@ public sealed partial class PreviewOverlay : IDisposable
     /// <summary>喂 tosu 报的预览音频位置（毫秒）。</summary>
     public void Sync(double milliseconds)
     {
+        string? stats;
         lock (gate)
+        {
             clock.Sync(milliseconds, now.Elapsed.TotalMilliseconds);
+            stats = clock.DescribeSamples();
+        }
+
+        if (stats is not null)
+            AppLog.Info($"预览时钟：{stats}");
     }
 
     public void ResetFrameStats()
