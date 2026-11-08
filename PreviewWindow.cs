@@ -202,13 +202,16 @@ public sealed class PreviewWindow : IDisposable
         if (Height <= 1)
             height = anchorRect.Bottom - anchorRect.Top;
 
+        // 嵌进信息窗底部（卡片里那块区域），不再是浮在旁边的独立窗口：
+        // 左右各留一点内边距，高度约占卡片的下 1/3。
         int gap = (int)Math.Round(GapDip * dpi);
-        int left = anchorRect.Right + gap;
-        int screenWidth = GetSystemMetrics(0);
-        if (left + width > screenWidth)
-            left = anchorRect.Left - gap - width;
-
-        overlay.SetBounds(left, anchorRect.Top, width, height);
+        int anchorWidth = anchorRect.Right - anchorRect.Left;
+        int anchorHeight = anchorRect.Bottom - anchorRect.Top;
+        int panelWidth = Math.Max(80, anchorWidth - gap * 2);
+        int panelHeight = Math.Max(60, (int)(anchorHeight * 0.30));
+        int left = anchorRect.Left + gap;
+        int top = anchorRect.Bottom - panelHeight - gap;
+        overlay.SetBounds(left, top, panelWidth, panelHeight);
     }
 
     private static double dpiOf(IntPtr hwnd)

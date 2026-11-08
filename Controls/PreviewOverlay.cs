@@ -165,7 +165,11 @@ public sealed partial class PreviewOverlay : IDisposable
     public static bool LegacyMode { get; set; } = true;
     /// <summary>诊断用：单次匀速动画，不接受音频校正。</summary>
     public static bool UncorrectedMotionProbe { get; set; }
-    public static bool OpaqueMode { get; set; }
+    /// <summary>
+    /// 不透明呈现（普通窗口 + hwnd 交换链）。默认打开：透明必须走 DWM 合成，
+    /// 帧时间上限就是那样；改成不透明后有机会拿到独立翻转，而且画面上它就是卡片里的一块面板。
+    /// </summary>
+    public static bool OpaqueMode { get; set; } = true;
     public static bool TransparentHwndMode { get; set; }
     public static bool NoteVisualMode { get; set; }
 
@@ -407,6 +411,7 @@ public sealed partial class PreviewOverlay : IDisposable
 
     private void renderLoop(CancellationToken token)
     {
+        AppLog.Info($"预览覆盖层：OpaqueMode={OpaqueMode} useOpaque={useOpaque} hwndAlpha={useHwndAlpha}");
         RendererDescription = useOpaque ? (useHwndAlpha ? "transparent HWND flip swap chain" : "opaque flip swap chain") : "legacy swap chain (application cadence)";
         UsesRetainedRenderer = false;
         ID3D11Device? device = null;
