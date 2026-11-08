@@ -8,8 +8,15 @@ public partial class App : Application
 {
     private const string SingleInstanceMutexName = "OsuRoam.SingleInstance";
 
+    /// <summary>「把已经在跑的那个窗口叫到前面」用的命名事件。</summary>
+    private const string ActivateEventName = "OsuRoam.Activate";
+
     private Mutex? singleInstance;
     private bool ownsSingleInstance;
+    private EventWaitHandle? activateEvent;
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern bool AllowSetForegroundWindow(int processId);
 
     protected override void OnStartup(StartupEventArgs e)
     {
@@ -36,12 +43,14 @@ public partial class App : Application
         AppLog.Info($"单实例锁：{(createdNew ? "获得" : "已被占用")}（{mutexName}）");
         if (!createdNew)
         {
-            AppLog.Info("另一个实例在运行，本次启动退出");
-            MessageBox.Show(Loc.T("dialog.alreadyrunning"), "osu! Roam",
-                MessageBoxButton.OK, MessageBoxImage.Information);
+            // 双击第二次不该被弹窗拦住：把已经在跑的那个窗口叫到前面，然后自己安静退出。
+            AppLog.Info("另一个实例在运行，唤起它");
+            wakeRunningInstance();
             Shutdown();
             return;
         }
+
+        startActivationListener();
 
         // 任何漏网的 UI 线程异常至少要先落盘再退出：
         // 1.3.0 的模板动画崩溃当时只留下一条 Event Log，日志里什么都没有。
@@ -56,6 +65,74 @@ public partial class App : Application
         base.OnStartup(e);
     }
 
+    /// <summary>第二个实例：把前台权限交给已经在跑的那个，然后敲一下事件。</summary>
+    private static void wakeRunningInstance()
+    {
+        try
+        {
+            // 第二个实例是用户刚点起来的，握着前台权限；转交给第一个，Activate 才会生在顶上
+            // 而不是只在任务栏闪一下。
+            _ = AllowSetForegroundWindow(-1 /* ASFW_ANY */);
+            if (EventWaitHandle.TryOpenExisting(ActivateEventName, out EventWaitHandle? existing))
+            {
+                using (existing)
+                    existing.Set();
+            }
+        }
+        catch (Exception exception)
+        {
+            AppLog.Error("唤起已有实例失败", exception);
+        }
+    }
+
+    /// <summary>第一个实例：后台等「唤起」事件，收到就把主窗口叫到前面。</summary>
+    private void startActivationListener()
+    {
+        try
+        {
+            activateEvent = new EventWaitHandle(false, EventResetMode.AutoReset, ActivateEventName);
+            Thread thread = new(() =>
+            {
+                while (true)
+                {
+                    activateEvent.WaitOne();
+                    Dispatcher.BeginInvoke(new Action(activateMainWindow));
+                }
+            })
+            {
+                IsBackground = true,
+                Name = "RoamActivate"
+            };
+            thread.Start();
+        }
+        catch (Exception exception)
+        {
+            AppLog.Error("创建唤起监听失败", exception);
+        }
+    }
+
+    private void activateMainWindow()
+    {
+        Window? window = MainWindow;
+        if (window is null)
+            return;
+
+        try
+        {
+            if (!window.IsVisible)
+                window.Show();
+            if (window.WindowState == WindowState.Minimized)
+                window.WindowState = WindowState.Normal;
+            window.Activate();
+            window.Focus();
+            AppLog.Info("已唤起已有实例");
+        }
+        catch (Exception exception)
+        {
+            AppLog.Error("唤起窗口失败", exception);
+        }
+    }
+
     protected override void OnExit(ExitEventArgs e)
     {
         // 只有本线程真的持有了锁才能 Release，否则这里会在退出时抛
@@ -67,6 +144,8 @@ public partial class App : Application
         }
         singleInstance?.Dispose();
         singleInstance = null;
+        activateEvent?.Dispose();
+        activateEvent = null;
         base.OnExit(e);
     }
 }
