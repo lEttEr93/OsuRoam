@@ -19,7 +19,7 @@ rem ============================================================================
 setlocal
 set "ROOT=%~dp0"
 set "TARGET=%~1"
-if not defined TARGET set "TARGET=D:\osu-roam-1.5.5-local"
+if not defined TARGET set "TARGET=D:\osu-roam-1.5.6-local"
 set "STAGE=%ROOT%bin\local-publish"
 set "LOG=%ROOT%bin\pack.log"
 
@@ -65,6 +65,10 @@ if not exist "%STAGE%\tosu.exe" for /d %%D in ("%ROOT%bin\v*") do (
 if not exist "%STAGE%\Fonts" mkdir "%STAGE%\Fonts"
 if exist "%ROOT%Fonts\ATTRIBUTION.md" copy /y "%ROOT%Fonts\ATTRIBUTION.md" "%STAGE%\Fonts\" >nul
 if exist "%ROOT%Fonts\OFL-Outfit.txt" copy /y "%ROOT%Fonts\OFL-Outfit.txt" "%STAGE%\Fonts\" >nul
+if exist "%ROOT%Assets\Preview" (
+    if not exist "%STAGE%\Assets\Preview" mkdir "%STAGE%\Assets\Preview" >nul
+    copy /y "%ROOT%Assets\Preview\*.png" "%STAGE%\Assets\Preview\" >nul
+)
 
 echo [3/4] copying to the target...
 if exist "%TARGET%" rmdir /s /q "%TARGET%" 2>nul
