@@ -239,6 +239,8 @@ public sealed partial class PreviewOverlay
             motion.Update((double)qpc / Stopwatch.Frequency, time, rate, remaining, seek);
             time = motion.Position;
             long first = (long)Math.Floor(time / span);
+            bool windowChanged = seek || first != lastTileWindow;
+            lastTileWindow = first;
             int updates = 0;
             // Large positions lose subpixel precision in floats; keep offsets near the viewport.
             if (seek || Math.Abs(time - origin) > span * 32)
@@ -255,6 +257,11 @@ public sealed partial class PreviewOverlay
                 PaintTile(tile, index);
                 updates++;
             }
+            // 关键：只有**换图块**时才重新摆位并重新挂动画。
+            // 以前每次快照（约 30ms）都重挂一次，误差不断累积 → 周期性抖动。
+            if (!windowChanged)
+                return updates;
+
             foreach (Tile tile in tiles)
             {
                 float offset = (float)(height + (origin - (tile.Index + 1) * span) * pixelsPerMs);
@@ -310,6 +317,7 @@ public sealed partial class PreviewOverlay
 
         private PreviewSkin? skin;
         private bool loggedFirstTile;
+        private long lastTileWindow = long.MinValue;
 
         private PreviewSkin loadSkin(ID2D1RenderTarget target)
         {
