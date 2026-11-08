@@ -307,6 +307,35 @@ public sealed partial class PreviewOverlay
             return Own(surface);
         }
 
+
+        private PreviewSkin? skin;
+
+        private PreviewSkin loadSkin(ID2D1RenderTarget target)
+        {
+            PreviewSkin loaded = new();
+            loaded.Load(target, PreviewSkin.ResolveDirectory(null));
+            return loaded;
+        }
+
+        private ID2D1BitmapBrush? createBodyBrush(ID2D1RenderTarget target)
+        {
+            if (skin?.HoldBody is null)
+                return null;
+
+            // 横向拉伸（左右描边不糊），纵向平铺 —— 长条怎么拉长都保持图案密度。
+            using ID2D1BitmapBrush brush = target.CreateBitmapBrush(skin.HoldBody,
+                new Vortice.Direct2D1.BitmapBrushProperties(ExtendMode.Clamp, ExtendMode.Wrap,
+                    Vortice.Direct2D1.BitmapInterpolationMode.Linear));
+            return brush;
+        }
+
+        private static void drawBitmap(ID2D1RenderTarget target, ID2D1Bitmap bitmap,
+            double x, double y, double width, double height)
+        {
+            target.DrawBitmap(bitmap, rect(x, y, width, height), 1f,
+                Vortice.Direct2D1.BitmapInterpolationMode.Linear, rect(0, 0, width, height));
+        }
+
         private Tile CreateTile(long index)
         {
             Tile tile = new() { Surface = CreateSurface(width, height) };
@@ -331,6 +360,10 @@ public sealed partial class PreviewOverlay
             int count = 0;
             Paint(tile.Surface, width, height, target =>
             {
+                // 贴图优先：skin 里取得到就用皮肤的图，取不到才退回纯色块。
+                // （lazer 皮肤在 realm 里读不到，这里走「内置贴图 / stable 明文皮肤目录」）
+                skin ??= loadSkin(target);
+                using ID2D1BitmapBrush? bodyBrush = createBodyBrush(target);
                 using ID2D1SolidColorBrush tap = target.CreateSolidColorBrush(new Color4(0.961f, 0.976f, 0.984f, 1));
                 using ID2D1SolidColorBrush hold = target.CreateSolidColorBrush(new Color4(0.882f, 0.318f, 0.482f, 1));
                 using ID2D1SolidColorBrush head = target.CreateSolidColorBrush(new Color4(0.984f, 0.949f, 0.961f, 1));
@@ -347,11 +380,24 @@ public sealed partial class PreviewOverlay
                     double noteWidth = Math.Max(2, lane - 6);
                     if (note.IsHold)
                     {
-                        target.FillRectangle(rect(x, tail, noteWidth, y - tail), hold);
-                        target.FillRectangle(rect(x, y, noteWidth, noteHeight), head);
+                        if (bodyBrush is not null && skin?.HoldBody is not null)
+                            target.FillRectangle(rect(x, tail, noteWidth, y - tail), bodyBrush);
+                        else
+                            target.FillRectangle(rect(x, tail, noteWidth, y - tail), hold);
+
+                        if (skin?.HoldHead is not null)
+                            drawBitmap(target, skin.HoldHead, x, y, noteWidth, noteHeight);
+                        else
+                            target.FillRectangle(rect(x, y, noteWidth, noteHeight), head);
+                    }
+                    else if (skin?.Note is not null)
+                    {
+                        drawBitmap(target, skin.Note, x, y, noteWidth, noteHeight);
                     }
                     else
+                    {
                         target.FillRectangle(rect(x, y, noteWidth, noteHeight), tap);
+                    }
                     count++;
                 }
             });
