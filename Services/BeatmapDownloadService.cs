@@ -244,18 +244,10 @@ public sealed class BeatmapDownloadService : IDisposable
         // 现场「手动双击游戏正常、从 Roam 带文件启动 7 秒后崩在 AuthNative.dll」，
         // 而同样的命令行从 cmd 里跑是好的。两者唯一的区别就是走 ShellExecute 还是
         // CreateProcess，所以这里改成和 cmd 一样的那条路。
-        ProcessStartInfo startInfo = new(installation.Executable)
-        {
-            UseShellExecute = false,
-            // 工作目录跟资源管理器双击时一致（游戏自己目录）。
-            WorkingDirectory = Path.GetDirectoryName(installation.Executable) ?? string.Empty
-        };
-        startInfo.ArgumentList.Add(path);
-
         Process? started;
         try
         {
-            started = Process.Start(startInfo);
+            started = startClient(installation, path);
         }
         catch (Exception exception) when (exception is System.ComponentModel.Win32Exception or InvalidOperationException)
         {
@@ -269,7 +261,103 @@ public sealed class BeatmapDownloadService : IDisposable
         AppLog.Info($"导入：启动 {installation.Executable}（{installation.ClientName}，来源：{installation.Source}），" +
                     $"参数 {path}，PID={started.Id}");
         item.DownloadState = DownloadState.Imported;
-        watchLaunch(started);
+        watchLaunch(started, installation, path);
+    }
+
+    /// <summary>按「exe + 可选谱面路径」拉起游戏，返回进程句柄（失败抛 Win32Exception）。</summary>
+    private static Process? startClient(OsuInstallation installation, string? beatmapPath)
+    {
+        ProcessStartInfo startInfo = new(installation.Executable)
+        {
+            UseShellExecute = false,
+            // 工作目录跟资源管理器双击时一致（游戏自己目录）。
+            WorkingDirectory = Path.GetDirectoryName(installation.Executable) ?? string.Empty
+        };
+        if (beatmapPath is not null)
+            startInfo.ArgumentList.Add(beatmapPath);
+
+        return Process.Start(startInfo);
+    }
+
+    /// <summary>游戏进程在不在（按 exe 名字匹配，lazer / stable 都是 <c>osu!</c>）。</summary>
+    private static bool isClientRunning(OsuInstallation installation)
+    {
+        string name = Path.GetFileNameWithoutExtension(installation.Executable);
+        try
+        {
+            return Process.GetProcessesByName(name).Length > 0;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    /// <summary>等游戏把主窗口开出来（再留一点余量让它的导入/认证初始化跑完）。</summary>
+    private static async Task<bool> waitForClientReadyAsync(OsuInstallation installation, TimeSpan timeout)
+    {
+        string name = Path.GetFileNameWithoutExtension(installation.Executable);
+        DateTimeOffset deadline = DateTimeOffset.UtcNow + timeout;
+        while (DateTimeOffset.UtcNow < deadline)
+        {
+            try
+            {
+                foreach (Process process in Process.GetProcessesByName(name))
+                {
+                    if (process.MainWindowHandle == IntPtr.Zero)
+                        continue;
+
+                    AppLog.Info($"游戏窗口已出现（PID={process.Id}），再等 2.5 秒让它稳定");
+                    await Task.Delay(TimeSpan.FromMilliseconds(2500));
+                    return true;
+                }
+            }
+            catch (Exception exception)
+            {
+                AppLog.Error("等待 osu! 窗口失败", exception);
+                return false;
+            }
+
+            await Task.Delay(500);
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// 退路：先**不带参数**把游戏拉起来，等它初始化完，再把谱面交过去。
+    /// 现场那台机器上「冷启动 + 带谱面参数」会让 lazer 在 AuthNative.dll 里崩掉
+    /// （7 秒左右，0xC0000409），而游戏已经在跑时把文件交过去是好的 —— 也就是
+    /// 正常漫游时走的那条路。所以退路就是先造出「游戏已经在跑」这个前提。
+    /// </summary>
+    private async Task warmRetryAsync(OsuInstallation installation, string path)
+    {
+        try
+        {
+            Notice?.Invoke(Loc.T("import.retrywarm"));
+            AppLog.Info("导入退路：先不带参数启动游戏，就绪后再传入谱面");
+
+            if (!isClientRunning(installation))
+            {
+                startClient(installation, null);
+                if (!await waitForClientReadyAsync(installation, TimeSpan.FromSeconds(30)))
+                {
+                    string message = Loc.T("import.retrytimeout");
+                    AppLog.Error(message);
+                    Notice?.Invoke(message);
+                    return;
+                }
+            }
+
+            Process? handoff = startClient(installation, path);
+            AppLog.Info($"导入退路：把谱面交给已在运行的游戏，PID={handoff?.Id}");
+            Notice?.Invoke(Loc.T("import.retryok"));
+        }
+        catch (Exception exception)
+        {
+            AppLog.Error("导入退路失败", exception);
+            Notice?.Invoke(Loc.T("import.retrytimeout"));
+        }
     }
 
     /// <summary>
@@ -277,7 +365,7 @@ public sealed class BeatmapDownloadService : IDisposable
     /// 而且原因在游戏那边（比如崩溃），不是 Roam 没触发 —— 以前这种情况界面上一片安静，
     /// 只看到「tosu 已连接」但什么都不会发生。
     /// </summary>
-    private void watchLaunch(Process process)
+    private void watchLaunch(Process process, OsuInstallation installation, string path)
     {
         try
         {
@@ -302,6 +390,7 @@ public sealed class BeatmapDownloadService : IDisposable
                             $"USERPROFILE={Environment.GetEnvironmentVariable("USERPROFILE")}｜" +
                             $"cwd={Environment.CurrentDirectory}");
                 Notice?.Invoke(message);
+                _ = warmRetryAsync(installation, path);
             };
         }
         catch (Exception exception)

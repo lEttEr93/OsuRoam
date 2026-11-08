@@ -280,6 +280,9 @@ public static class LocTable
         ["download.badosz"] = "镜像返回的不是有效 OSZ 文件。",
         ["download.nostart"] = "启动 {0} 失败，谱面没能导入。",
         ["import.gamequit"] = "osu! 启动后 {0} 秒就退出了（退出码 {1}）：导入没生效，先手动开一次游戏看看能不能起来",
+        ["import.retrywarm"] = "osu! 启动时崩了：改成「先启动游戏、再把谱面交过去」重试一次…",
+        ["import.retryok"] = "已把谱面交给运行中的 osu!（换成这种导入方式后就正常了）",
+        ["import.retrytimeout"] = "重试也没成功：osu! 起不来，先手动打开游戏再点一次导入",
         ["download.noosu"] = "没找到 osu!，谱面没法导入：到「下载与高级设置」点「重新检测」，或填写 osu!.exe 路径。",
         ["download.allfailed"] = "所有下载源均失败。最后错误：{0}",
 
@@ -559,6 +562,9 @@ public static class LocTable
         ["download.badosz"] = "The mirror did not return a valid OSZ file.",
         ["download.nostart"] = "Could not start {0}, so the beatmap was not imported.",
         ["import.gamequit"] = "osu! exited {0} s after it was launched (code {1}): the import did not take effect - try starting the game by hand",
+        ["import.retrywarm"] = "osu! crashed on startup: retrying by starting the game first and handing the beatmap over",
+        ["import.retryok"] = "Handed the beatmap to the running osu!",
+        ["import.retrytimeout"] = "The retry failed too: start osu! by hand, then import again",
         ["download.noosu"] = "osu! not found, so the beatmap cannot be imported: open \"Downloads & advanced\", click \"Detect again\", or fill in the osu!.exe path.",
         ["download.allfailed"] = "Every download source failed. Last error: {0}",
 
