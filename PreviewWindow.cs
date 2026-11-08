@@ -209,10 +209,10 @@ public sealed class PreviewWindow : IDisposable
         int gap = (int)Math.Round(GapDip * dpi);
         int anchorWidth = anchorRect.Right - anchorRect.Left;
         int anchorHeight = anchorRect.Bottom - anchorRect.Top;
-        // 面板和「五行详情文字」同一行：高度就取那块的高度（约 96 DIP），
-        // 宽高比 1:0.62（宽 : 高），所以宽 = 高 / 0.62 ≈ 155 DIP。
+        // 面板和「五行详情文字」同一行：高度取那块的高度（96 DIP）。
+        // 高宽比 1 : 0.62（高比宽长），所以 宽 = 高 × 0.62 ≈ 60 DIP。
         int panelHeight = Math.Max(60, (int)Math.Round(96 * dpi));
-        int panelWidth2 = Math.Max(60, (int)Math.Round(panelHeight / 0.62));
+        int panelWidth2 = Math.Max(24, (int)Math.Round(panelHeight * 0.62));
         int left = anchorRect.Right - gap - panelWidth2;
         int top = anchorRect.Bottom - gap - panelHeight;
         overlay.SetBounds(left, top, panelWidth2, panelHeight);
