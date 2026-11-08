@@ -635,8 +635,9 @@ public sealed partial class PreviewOverlay : IDisposable
 
                 LastDrawMilliseconds = drawMs;
                 double presentStart = frameClock.Elapsed.TotalMilliseconds;
-                // 限到 120Hz：同步间隔 2 表示每两个刷新周期上屏一次（240Hz 屏 → 120fps）。
-                swapChain.Present(PaceMode == 3 ? 0u : (useOpaque ? 2u : 1u), PresentFlags.None);
+                // 同步间隔先用 1：SyncInterval=2 在 hwnd 翻转交换链上可能把「上一块空缓冲」留在屏上，
+                // 现场表现就是「黑底在、音符画了但看不见」。限帧改成软件限（下面按时间跳过）。
+                swapChain.Present(PaceMode == 3 ? 0u : 1u, PresentFlags.None);
                 double presentMs = frameClock.Elapsed.TotalMilliseconds - presentStart;
 
                 if (PaceMode == 3)
