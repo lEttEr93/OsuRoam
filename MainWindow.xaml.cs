@@ -3061,10 +3061,16 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
             return mapInfoWindow;
 
         mapInfoWindow = new MapInfoWindow();
-        mapInfoWindow.Closed += (_, _) =>
+        MapInfoWindow closing = mapInfoWindow;
+        closing.Closed += (_, _) =>
         {
-            mapInfoWindow = null;
-            if (previewWindow is not null)
+            // 只在「关掉的正是当前这个信息窗」时才清空，并且只清掉指向它的锚点。
+            // 之前这里无条件 mapInfoWindow = null / Anchor = null —— 若此时已经换了新的
+            // 信息窗（游玩回来重建的那种），旧窗口延迟触发的 Closed 会把新锚点一起打掉，
+            // 表现就是「回到选歌后面板一直判定 anchor=空、永远不显示」。
+            if (ReferenceEquals(mapInfoWindow, closing))
+                mapInfoWindow = null;
+            if (previewWindow is not null && ReferenceEquals(previewWindow.Anchor, closing))
                 previewWindow.Anchor = null;
         };
         // 预览窗和信息窗等高：信息窗因为键型补图/换语言长高，这里跟着改；
