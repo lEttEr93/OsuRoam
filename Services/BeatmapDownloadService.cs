@@ -11,11 +11,11 @@ public sealed class BeatmapDownloadService : IDisposable
     public event Action<string>? Notice;
 
     /// <summary>
-    /// 开发用开关：恢复 1.5.5 原来那套「把谱面交给 osu!」的方式
-    /// （ShellExecute、不设工作目录、失败不自动重试）。用来二分定位
-    /// 「发布包能导入、本地新构建一导入就把游戏搞崩」到底是哪一步造成的。
+    /// 把谱面交给 osu! 的方式。<b>默认就是发布包 1.5.5 用的那条</b>（ShellExecute、
+    /// 不设工作目录）—— 那是唯一被实际使用验证过的配置，别拿它做实验。
+    /// 设成 false 会改用 CreateProcess + 游戏目录启动（本地试验用，未证明更好）。
     /// </summary>
-    public static bool ClassicLaunch { get; set; }
+    public static bool ClassicLaunch { get; set; } = true;
 
     private readonly HttpClient http = new(new SocketsHttpHandler
     {
