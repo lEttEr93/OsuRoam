@@ -300,11 +300,6 @@ public sealed partial class PreviewOverlay : IDisposable
         string? stats;
         lock (gate)
         {
-            // tosu 回到选歌后会报一个很小的位置（现场实测 135ms），而谱面音符在几十秒后，
-            // 于是可视窗口里一个音符都没有 —— 面板只剩黑底。这里把它夹到「第一个音符之前」。
-            if (chart is not null && milliseconds < chart.FirstNoteTime - 1000)
-                milliseconds = Math.Max(1, chart.FirstNoteTime - 200);
-
             clock.Sync(milliseconds, now.Elapsed.TotalMilliseconds);
             stats = clock.DescribeSamples();
         }

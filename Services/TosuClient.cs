@@ -148,8 +148,12 @@ public sealed class TosuClient : IAsyncDisposable
             bool failed = readBool(root, "play", "failed");
             string resultRank = readString(root, "resultsScreen", "rank");
             long resultScore = readLong(root, "resultsScreen", "score");
-            double previewTime = readNumber(root, "menu", "bm", "time", "current");
-            if (previewTime <= 0) previewTime = readNumber(root, "beatmap", "time", "live");
+            double menuTime = readNumber(root, "menu", "bm", "time", "current");
+            double liveTime = readNumber(root, "beatmap", "time", "live");
+            double previewTime = menuTime > 0 ? menuTime : liveTime;
+            if (Math.Abs(menuTime - liveTime) > 500)
+                AppLog.Info($"tosu 时间源不一致：menu.bm.time.current={menuTime:0} " +
+                            $"beatmap.time.live={liveTime:0}（取 {(menuTime > 0 ? "menu" : "live")}）");
             TosuSnapshot snapshot = new(state, beatmapId, beatmapsetId, profile, paused, failed, resultRank, resultScore,
                 readString(root, "beatmap", "artist"),
                 readString(root, "beatmap", "title"),
