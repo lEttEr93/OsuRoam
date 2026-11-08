@@ -289,6 +289,12 @@ public sealed class BeatmapDownloadService : IDisposable
 
                 string message = Loc.F("import.gamequit", seconds.ToString("0.0"), $"0x{code:X8}");
                 AppLog.Error(message);
+                // 游戏是我们拉起来的，会继承当前进程的环境。崩的时候把可疑的几项记下来，
+                // 免得下次还要靠猜（现场：手动双击游戏正常、从 Roam 拉起就崩）。
+                AppLog.Info($"导入环境：TMP={Environment.GetEnvironmentVariable("TMP")}｜" +
+                            $"TEMP={Environment.GetEnvironmentVariable("TEMP")}｜" +
+                            $"USERPROFILE={Environment.GetEnvironmentVariable("USERPROFILE")}｜" +
+                            $"cwd={Environment.CurrentDirectory}");
                 Notice?.Invoke(message);
             };
         }
