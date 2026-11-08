@@ -38,6 +38,8 @@ public sealed class PreviewOverlay : IDisposable
     private readonly List<double> waitSamples = [];
     private readonly List<double> drawSamples = [];
     private readonly List<double> presentSamples = [];
+    private readonly List<double> contentSamples = [];
+    private int contentBackwards;
     private readonly ManualResetEventSlim resizeSignal = new(false);
 
     private ManiaPreviewChart? chart;
@@ -98,6 +100,19 @@ public sealed class PreviewOverlay : IDisposable
     }
 
     public double LastDrawMilliseconds { get; private set; }
+
+    /// <summary>
+    /// 相邻两帧**画面内容时间**的差值（毫秒）。这是「内容侧是否匀速」的直接证据：
+    /// 若它们都稳定在刷新周期附近且没有回退，抖动只可能来自显示侧（合成/上屏）。
+    /// </summary>
+    public (double[] Deltas, int Backwards) ContentCadence
+    {
+        get
+        {
+            lock (gate)
+                return (contentSamples.ToArray(), contentBackwards);
+        }
+    }
 
     /// <summary>等待节拍 / 绘制 / Present 三段耗时（毫秒，已跳过预热帧）。</summary>
     public (double[] Wait, double[] Draw, double[] Present) PhaseSamples
@@ -203,11 +218,15 @@ public sealed class PreviewOverlay : IDisposable
             waitSamples.Clear();
             drawSamples.Clear();
             presentSamples.Clear();
+            contentSamples.Clear();
+            contentBackwards = 0;
+            lastContentTime = double.NaN;
             warmupFrames = WarmupFrames;
         }
     }
 
     /// <summary>清空后先跳过这么多帧再采样（首帧要建资源，混进去会让 p99 失真）。</summary>
+    private double lastContentTime = double.NaN;
     private int warmupFrames = WarmupFrames;
     private const int WarmupFrames = 90;
 
@@ -371,12 +390,15 @@ public sealed class PreviewOverlay : IDisposable
             {
                 using IDXGISwapChain2 latencyChain = swapChain.QueryInterface<IDXGISwapChain2>();
                 latencyChain.MaximumFrameLatency = (uint)(PaceMode == 2 ? 2 : 1);
-                frameLatency = PaceMode == 1 ? IntPtr.Zero : latencyChain.FrameLatencyWaitableObject;
+                frameLatency = PaceMode is 1 or 3 ? IntPtr.Zero : latencyChain.FrameLatencyWaitableObject;
             }
             catch (Exception exception)
             {
                 AppLog.Error("预览覆盖层：拿不到帧延迟等待对象，退回 Present 自身节拍", exception);
             }
+            if (PaceMode == 3)
+                timeBeginPeriod(1);   // 让 Sleep(1) 真的睡 1ms，而不是 15.6ms
+
             d2dFactory = D2D1.D2D1CreateFactory<ID2D1Factory1>(Vortice.Direct2D1.FactoryType.SingleThreaded);
             AppLog.Info($"预览覆盖层：D3D11 + DirectComposition 就绪，{width}x{height}");
 
@@ -458,8 +480,11 @@ public sealed class PreviewOverlay : IDisposable
 
                 LastDrawMilliseconds = drawMs;
                 double presentStart = frameClock.Elapsed.TotalMilliseconds;
-                swapChain.Present(1, PresentFlags.None);
+                swapChain.Present(PaceMode == 3 ? 0u : 1u, PresentFlags.None);
                 double presentMs = frameClock.Elapsed.TotalMilliseconds - presentStart;
+
+                if (PaceMode == 3)
+                    Thread.Sleep(1);   // 提交得比屏幕快一点：每个 vblank 都能采到新帧
 
                 double interval = nowMs - lastFrame;
                 lastFrame = nowMs;
@@ -474,6 +499,15 @@ public sealed class PreviewOverlay : IDisposable
                     else if (interval > 0)
                     {
                         frames.Add(interval);
+                        if (!double.IsNaN(lastContentTime))
+                        {
+                            double contentDelta = timeMs - lastContentTime;
+                            if (contentDelta <= 0)
+                                contentBackwards++;
+                            else
+                                contentSamples.Add(contentDelta);
+                        }
+                        lastContentTime = timeMs;
                         waitSamples.Add(waitMs);
                         drawSamples.Add(drawMs);
                         presentSamples.Add(presentMs);
@@ -784,6 +818,12 @@ public sealed class PreviewOverlay : IDisposable
 
     [DllImport("user32.dll")]
     private static extern bool ShowWindow(IntPtr hwnd, ShowWindowCommand command);
+
+    [DllImport("winmm.dll")]
+    private static extern uint timeBeginPeriod(uint milliseconds);
+
+    [DllImport("winmm.dll")]
+    private static extern uint timeEndPeriod(uint milliseconds);
 
     [DllImport("dwmapi.dll")]
     private static extern int DwmFlush();

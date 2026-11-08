@@ -100,6 +100,7 @@ def main():
         print(row(label, collect(path)))
 
     print()
+    print("pace=3 是「比屏幕更快地提交」：不做同步等待，用 1ms 定时器把提交钉在 ~500Hz 以上。")
     print("看的是「显示 p95」：≈4.2ms（一个刷新周期）表示每帧都准时上屏；")
     print("≈8.4ms 表示约 5% 的画面被多留了一个周期；越接近 4.2 越好。")
     return 0

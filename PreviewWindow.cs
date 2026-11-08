@@ -116,6 +116,10 @@ public sealed class PreviewWindow : IDisposable
             return $"样本太少（{frames.Count} 帧），渲染线程可能还没起来";
 
         (double[] waits, double[] draws, double[] presents) = overlay.PhaseSamples;
+        (double[] contentDeltas, int contentBackwards) = overlay.ContentCadence;
+        string content = contentDeltas.Length == 0
+            ? "（无）"
+            : $"{percentile(contentDeltas, 0.5):0.00}/{percentile(contentDeltas, 0.95):0.00}ms 回退{contentBackwards}次";
         string phases = $"{percentile(waits, 0.5):0.00}/{percentile(waits, 0.95):0.00}（等待） " +
                         $"{percentile(draws, 0.5):0.00}/{percentile(draws, 0.95):0.00}（绘制） " +
                         $"{percentile(presents, 0.5):0.00}/{percentile(presents, 0.95):0.00}（Present）ms";
@@ -129,7 +133,7 @@ public sealed class PreviewWindow : IDisposable
         return string.Create(System.Globalization.CultureInfo.InvariantCulture,
             $"{frames.Count} 帧｜p50={p50:0.0} p90={p90:0.0} p95={p95:0.0} p99={p99:0.0} max={frames[^1]:0.0}ms " +
             $"≈{1000 / p50:0}fps｜>20ms {slow} 帧｜p50/p95 {phases}｜" +
-            $"窗口 {Width:0}x{Height:0} DIP｜流速 {overlay.VisibleSeconds:0.00}s/屏");
+            $"窗口 {Width:0}x{Height:0} DIP｜内容 Δ {content}｜流速 {overlay.VisibleSeconds:0.00}s/屏");
     }
 
     private static double percentile(double[] values, double q)

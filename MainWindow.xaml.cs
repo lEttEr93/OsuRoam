@@ -280,7 +280,7 @@ public partial class MainWindow : Window
             .FirstOrDefault(argument => argument.StartsWith("--preview-pace=", StringComparison.OrdinalIgnoreCase));
         if (paceArg is not null && int.TryParse(paceArg["--preview-pace=".Length..], out int pace))
         {
-            Controls.PreviewOverlay.PaceMode = Math.Clamp(pace, 0, 2);
+            Controls.PreviewOverlay.PaceMode = Math.Clamp(pace, 0, 3);
             AppLog.Info($"预览提交节拍模式：{Controls.PreviewOverlay.PaceMode}");
         }
 

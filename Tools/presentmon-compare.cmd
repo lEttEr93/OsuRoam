@@ -14,7 +14,7 @@ if not defined SECONDS set "SECONDS=10"
 set "HERE=%~dp0"
 set "NOPAUSE=1"
 
-for %%P in (0 1 2) do (
+for %%P in (0 1 2 3) do (
     echo ============================================================
     echo  variant --preview-pace=%%P
     echo ============================================================
