@@ -204,13 +204,15 @@ public sealed class PreviewWindow : IDisposable
 
         // 嵌进信息窗底部（卡片里那块区域），不再是浮在旁边的独立窗口：
         // 左右各留一点内边距，高度约占卡片的下 1/3。
+        // 信息卡**右下角**那块几乎没有元素的区域（不是整条底边）：
+        // 宽约卡片 30%、高约 18%，离右边和下边各留一点边距。
         int gap = (int)Math.Round(GapDip * dpi);
         int anchorWidth = anchorRect.Right - anchorRect.Left;
         int anchorHeight = anchorRect.Bottom - anchorRect.Top;
-        int panelWidth = Math.Max(80, anchorWidth - gap * 2);
-        int panelHeight = Math.Max(60, (int)(anchorHeight * 0.30));
-        int left = anchorRect.Left + gap;
-        int top = anchorRect.Bottom - panelHeight - gap;
+        int panelWidth = Math.Max(80, (int)(anchorWidth * 0.30));
+        int panelHeight = Math.Max(60, (int)(anchorHeight * 0.18));
+        int left = anchorRect.Right - gap - panelWidth;
+        int top = anchorRect.Bottom - gap - panelHeight;
         overlay.SetBounds(left, top, panelWidth, panelHeight);
     }
 
