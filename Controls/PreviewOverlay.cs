@@ -191,7 +191,11 @@ public sealed partial class PreviewOverlay : IDisposable
         if (hwnd == owner || window == IntPtr.Zero)
             return;
         owner = hwnd;
-        SetWindowLongPtr(window, GwlpHwndParent, hwnd);
+        // 旧版（实测 p95 4.3ms、0 帧超 20ms）用的是**子窗口**：CreateWindowEx(WS_CHILD) 挂在
+        // 宿主窗口里，而不是顶层弹窗。这里照它做 —— SetParent + WS_CHILD。
+        SetParent(window, hwnd);
+        long style = GetWindowLongPtr64(window, GwlStyle).ToInt64();
+        SetWindowLongPtr64(window, GwlStyle, new IntPtr(style | WsChild));
         // 设 owner 会把 TOPMOST 丢掉（窗口变成「归属」于一个非置顶窗口），
         // 之后它就会藏在浏览器后面 —— 明确重新置顶一次。
         SetWindowPos(window, new IntPtr(-1), 0, 0, 0, 0,
@@ -217,8 +221,21 @@ public sealed partial class PreviewOverlay : IDisposable
         pixelWidth = width;
         pixelHeight = height;
 
-        SetWindowPos(window, new IntPtr(-1), left, top, width, height,
-            SetWindowPosFlags.SWP_NOACTIVATE);
+        // 子窗口的位置是**父窗口客户区坐标**：把屏幕坐标减掉父窗口客户区原点。
+        int localX = left;
+        int localY = top;
+        if (owner != IntPtr.Zero && GetClientRect(owner, out WindowRect client))
+        {
+            NativePoint origin = new() { X = 0, Y = 0 };
+            if (ClientToScreen(owner, ref origin))
+            {
+                localX = left - origin.X;
+                localY = top - origin.Y;
+            }
+        }
+
+        SetWindowPos(window, IntPtr.Zero, localX, localY, width, height,
+            SetWindowPosFlags.SWP_NOZORDER | SetWindowPosFlags.SWP_NOACTIVATE);
         if (sizeChanged)
             resizeSignal.Set();
     }
@@ -1088,6 +1105,31 @@ public sealed partial class PreviewOverlay : IDisposable
 
     [DllImport("dwmapi.dll")]
     private static extern int DwmFlush();
+
+    private const int GwlStyle = -16;
+    private const long WsChild = 0x40000000L;
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct NativePoint
+    {
+        public int X;
+        public int Y;
+    }
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern IntPtr SetParent(IntPtr child, IntPtr parent);
+
+    [DllImport("user32.dll", SetLastError = true, EntryPoint = "GetWindowLongPtrW")]
+    private static extern IntPtr GetWindowLongPtr64(IntPtr hwnd, int index);
+
+    [DllImport("user32.dll", SetLastError = true, EntryPoint = "SetWindowLongPtrW")]
+    private static extern IntPtr SetWindowLongPtr64(IntPtr hwnd, int index, IntPtr value);
+
+    [DllImport("user32.dll")]
+    private static extern bool GetClientRect(IntPtr hwnd, out WindowRect rect);
+
+    [DllImport("user32.dll")]
+    private static extern bool ClientToScreen(IntPtr hwnd, ref NativePoint point);
 
     [DllImport("user32.dll", SetLastError = true, EntryPoint = "SetWindowLongPtrW")]
     private static extern IntPtr SetWindowLongPtr(IntPtr hwnd, int index, IntPtr value);
