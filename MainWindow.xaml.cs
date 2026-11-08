@@ -150,6 +150,9 @@ public partial class MainWindow : Window
     private string? statusRaw;
     private TosuSnapshot? lastSnapshot;
     private bool hiddenForPlay;
+    /// <summary>tosu 连续连不上几次了；每 4 次试着重拉一次。</summary>
+    private int tosuConnectFailures;
+    private int tosuRestartAttempts;
     private bool restoreHistoryAfterPlay;
 
     public MainWindow()
@@ -181,10 +184,13 @@ public partial class MainWindow : Window
         };
         tosu.SnapshotReceived += snapshot => Dispatcher.BeginInvoke(() =>
         {
+            tosuConnectFailures = 0;
+            tosuRestartAttempts = 0;
             updateGameState(snapshot);
             updateInGameInfo(snapshot);
             updatePreview(snapshot);
         });
+        tosu.ConnectFailed += () => Dispatcher.BeginInvoke(noteTosuConnectFailure);
         tosu.PlayStarted += snapshot => Dispatcher.BeginInvoke(async () => await handlePlayStartedAsync(snapshot));
         tosu.PlaySucceeded += snapshot => Dispatcher.BeginInvoke(async () => await handlePlaySucceededAsync(snapshot));
         previewPlayer.PlaybackStopped += (_, _) =>
@@ -238,6 +244,11 @@ public partial class MainWindow : Window
         updatePoolVisibility();
         if (settings.AutoStartTosu)
             await ensureTosuReadyAsync(sessionCancellation.Token);
+
+        // 谱面预览和「信息栏显示游戏内选中的谱面」都只靠 WebSocket 快照，
+        // 所以打开 Roam 就连上，不要等到点了「开始漫游」才连 —— 否则用户在选歌
+        // 界面等半天也没有预览（那正是这两个功能的主场）。
+        tosu.Start(settings.TosuWebSocketUrl);
 
         if (Environment.GetCommandLineArgs().Any(arg => arg == "--diagnose"))
             await runDiagnosticsAsync();
@@ -2451,6 +2462,41 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
             ConnectionText.Text = Loc.T("tosu.startfail");
             setStatus("status.tosufail", conciseMessage(exception));
             return false;
+        }
+    }
+
+    /// <summary>
+    /// tosu 掉线不会自己回来：启动时如果发现「已经有一个 tosu 在跑」就不归我们管，
+    /// 那个进程之后死掉的话，Roam 只会一直重连、什么都不发生 —— 现场看到的就是
+    /// 「tosu 不启动」。所以连续失败几次就再走一遍「确保 tosu 在跑」，最多三次，
+    /// 收到快照（说明真的连上了）再清零。
+    /// </summary>
+    private void noteTosuConnectFailure()
+    {
+        if (!settings.AutoStartTosu)
+            return;
+
+        tosuConnectFailures++;
+        if (tosuConnectFailures % 4 != 0 || tosuRestartAttempts >= 3)
+            return;
+
+        tosuRestartAttempts++;
+        AppLog.Info($"tosu 连不上（连续 {tosuConnectFailures} 次），第 {tosuRestartAttempts} 次尝试重新拉起");
+        _ = retryTosuAsync();
+    }
+
+    private async Task retryTosuAsync()
+    {
+        try
+        {
+            await ensureTosuReadyAsync(sessionCancellation.Token);
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception exception)
+        {
+            AppLog.Error("重新拉起 tosu 失败", exception);
         }
     }
 

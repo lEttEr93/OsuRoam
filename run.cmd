@@ -52,6 +52,11 @@ set "DOTNET=%DOTNET_ROOT%\dotnet.exe"
 if not exist "%DOTNET%" set "DOTNET=D:\AI\tools\dotnet\dotnet.exe"
 if not exist "%DOTNET%" set "DOTNET=dotnet"
 
+rem  Close the dev instance we probably left running: the build cannot overwrite
+rem  a running exe, and "run it again to see the change" is the whole point.
+rem  Only the Debug build is touched - a released copy is also OsuRoam.exe.
+powershell -NoProfile -Command "Get-Process OsuRoam -ErrorAction SilentlyContinue | Where-Object { $_.Path -like '*\bin\Debug\net8.0-windows\OsuRoam.exe' } | ForEach-Object { $_.Kill() }" >nul 2>nul
+
 echo [run] building...
 "%DOTNET%" build "%ROOT%OsuRoam.csproj" -c Debug -v q --nologo > "%ROOT%bin\run-build.log" 2>&1
 if errorlevel 1 (
@@ -66,9 +71,32 @@ if not exist "%OUT%\OsuRoam.exe" (
     echo [run] not built yet: drop -nobuild and run again.
     exit /b 1
 )
+
+rem  Give the dev build its own tosu next to the exe: Roam looks for tosu.exe in
+rem  its own folder first, so the dev instance stops depending on whatever stale
+rem  copy the old settings point at. Hard link, so this is instant and free.
+if not exist "%OUT%\tosu.exe" call :link_tosu
+
 if defined ARGS (
     start "" "%OUT%\OsuRoam.exe" %ARGS%
 ) else (
     start "" "%OUT%\OsuRoam.exe"
 )
+exit /b 0
+
+:link_tosu
+for %%D in ("%ROOT%bin\v1.5.5-zh" "%ROOT%bin\v1.5.5-en") do (
+    if exist "%%~D\tosu.exe" if not exist "%OUT%\tosu.exe" call :do_link "%%~D\tosu.exe"
+)
+if exist "%OUT%\tosu.exe" exit /b 0
+for /d %%D in ("%ROOT%bin\v*") do (
+    if exist "%%~D\tosu.exe" if not exist "%OUT%\tosu.exe" call :do_link "%%~D\tosu.exe"
+)
+if not exist "%OUT%\tosu.exe" echo [run] no tosu.exe found under bin\ - set the tosu path in the app
+exit /b 0
+
+:do_link
+mklink /h "%OUT%\tosu.exe" %1 >nul 2>nul
+if not exist "%OUT%\tosu.exe" copy /y %1 "%OUT%\tosu.exe" >nul
+echo [run] tosu.exe <- %~1
 exit /b 0

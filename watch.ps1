@@ -58,7 +58,35 @@ function Get-SourceStamp {
 
 $script:app = $null
 
+# 让开发版有自己的 tosu：Roam 先找自己目录下的 tosu.exe，这样就不再依赖设置里
+# 那条可能已经失效的旧路径。硬链接，瞬间完成、不占额外空间。
+function Ensure-DevTosu {
+    $target = Join-Path $root "bin\Debug\net8.0-windows\tosu.exe"
+    if (Test-Path $target) { return }
+
+    $bins = Join-Path $root "bin"
+    if (-not (Test-Path $bins)) { return }
+    $candidate = Get-ChildItem -Path $bins -Filter "tosu.exe" -Recurse -Depth 2 -ErrorAction SilentlyContinue |
+        Where-Object { $_.FullName -ne $target } |
+        Sort-Object LastWriteTime -Descending |
+        Select-Object -First 1
+    if (-not $candidate) { return }
+
+    try {
+        New-Item -ItemType HardLink -Path $target -Value $candidate.FullName -ErrorAction Stop | Out-Null
+    } catch {
+        Copy-Item $candidate.FullName $target -Force
+    }
+    Write-Host "tosu.exe <- $($candidate.FullName)" -ForegroundColor DarkGray
+}
+
 function Stop-App {
+    # 除了自己启动的那个，也顺手关掉任何还开着的 Debug 版实例：
+    # 编译要覆盖 exe，占着文件就编不过去。发布版同名，所以只认这个路径。
+    Get-Process OsuRoam -ErrorAction SilentlyContinue |
+        Where-Object { $_.Path -like "*\bin\Debug\net8.0-windows\OsuRoam.exe" } |
+        ForEach-Object { try { $_.Kill() } catch { } }
+
     if (-not $script:app) { return }
     $process = $script:app
     $script:app = $null
@@ -73,6 +101,7 @@ function Stop-App {
 
 function Start-App {
     Stop-App
+    Ensure-DevTosu
     $time = Measure-Command {
         $log = & $dotnet build $project -c Debug -v q --nologo 2>&1
         $script:buildLog = $log

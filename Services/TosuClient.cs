@@ -46,6 +46,8 @@ public sealed class TosuClient : IAsyncDisposable
     private string lastResultsSignature = string.Empty;
 
     public event Action<string>? StatusChanged;
+    /// <summary>连不上（或连上又断）时触发一次，一个重连周期一次。主窗口拿它决定要不要重新拉起 tosu。</summary>
+    public event Action? ConnectFailed;
     public event Action<TosuSnapshot>? SnapshotReceived;
     public event Action<TosuSnapshot>? PlayStarted;
     public event Action<TosuSnapshot>? PlaySucceeded;
@@ -93,6 +95,7 @@ public sealed class TosuClient : IAsyncDisposable
             {
                 AppLog.Error("tosu 连接或读取失败", exception);
                 StatusChanged?.Invoke(Loc.T("tosu.waiting"));
+                ConnectFailed?.Invoke();
                 try { await Task.Delay(TimeSpan.FromSeconds(3), cancellationToken); }
                 catch (OperationCanceledException) { break; }
             }
