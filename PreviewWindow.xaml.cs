@@ -42,7 +42,6 @@ public partial class PreviewWindow : Window
     private double zeroClockSince = -1;
     private double probeWarmup;
     private double dpiScale = 1;
-    private bool freezeRendering;
     private readonly bool layeredWindow;
 
     private int shownSecond = -1;
@@ -50,7 +49,9 @@ public partial class PreviewWindow : Window
     private string? shownSpan;
 
     /// <summary>开发用：帧率探针的帧间隔采样，null = 没在采样。</summary>
-    private List<double>? probeFrames;
+    private System.Windows.Threading.DispatcherTimer? ticker;
+    private double lastTick;
+    private int tickCounter;
 
     /// <param name="layered">
     /// 是否用分层窗口（<c>AllowsTransparency=True</c>）。默认不用 —— 分层窗口在 WPF 里
@@ -81,9 +82,9 @@ public partial class PreviewWindow : Window
         IsVisibleChanged += (_, _) =>
         {
             if (IsVisible)
-                startFrames();
+                startTicker();
             else
-                stopFrames();
+                stopTicker();
         };
         Loc.Changed += onLanguageChanged;
         Closed += (_, _) => Loc.Changed -= onLanguageChanged;
@@ -103,7 +104,7 @@ public partial class PreviewWindow : Window
     public void ShowChart(ManiaPreviewChart preview, string title, string meta)
     {
         chart = preview;
-        Field.Chart = preview;
+        Field.SetChart(preview);
         TrackTitle.Text = title;
         TrackMeta.Text = meta;
 
@@ -115,7 +116,7 @@ public partial class PreviewWindow : Window
 
         if (IsVisible)
         {
-            startFrames();
+            startTicker();
             return;
         }
 
@@ -125,8 +126,11 @@ public partial class PreviewWindow : Window
     }
 
     /// <summary>灌 tosu 的预览音频位置（毫秒）。</summary>
-    public void SetTime(double milliseconds) =>
+    public void SetTime(double milliseconds)
+    {
         previewClock.Sync(milliseconds, clock.Elapsed.TotalMilliseconds);
+        Field.Sync(milliseconds);
+    }
 
     /// <summary>信息窗量完高度以后告诉这里一声（两者等高是设计要求）。</summary>
     public void SetCardHeight(double height)
@@ -245,50 +249,41 @@ public partial class PreviewWindow : Window
 
     // ---- 时钟 ----
 
-    private void startFrames()
+    private void startTicker()
     {
-        if (running)
+        if (ticker is not null)
             return;
 
-        running = true;
-        lastFrame = clock.Elapsed.TotalMilliseconds;
-        lastHousekeeping = lastFrame - 400;
-        CompositionTarget.Rendering += onRendering;
+        lastTick = clock.Elapsed.TotalMilliseconds;
+        ticker = new System.Windows.Threading.DispatcherTimer(
+            TimeSpan.FromMilliseconds(100), System.Windows.Threading.DispatcherPriority.Background,
+            (_, _) => onTick(), Dispatcher);
+        ticker.Start();
     }
 
-    private void stopFrames()
+    private void stopTicker()
     {
-        if (!running)
-            return;
-
-        running = false;
-        CompositionTarget.Rendering -= onRendering;
+        ticker?.Stop();
+        ticker = null;
     }
 
-    private void onRendering(object? sender, EventArgs e)
+    /// <summary>
+    /// 界面上的读数（时间、进度条）和窗口摆位：100ms 一次就够，画面本身由
+    /// <see cref="PreviewSurface"/> 的渲染线程负责，不再占用 UI 线程的每一帧。
+    /// </summary>
+    private void onTick()
     {
         double now = clock.Elapsed.TotalMilliseconds;
-        double delta = Math.Clamp(now - lastFrame, 0, 120);
-        lastFrame = now;
-
-        if (probeFrames is not null && now > probeWarmup)
-            probeFrames.Add(delta);
+        double delta = Math.Clamp(now - lastTick, 0, 500);
+        lastTick = now;
 
         previewClock.Advance(now, delta);
-
-        Field.Time = previewClock.Time;
-        if (!freezeRendering)
-            Field.Redraw();
-
-        if (now - lastHousekeeping < 300)
-            return;
-
-        lastHousekeeping = now;
         updateReadouts(now);
-        reposition();
+
+        if (++tickCounter % 3 == 0)
+            reposition();
     }
 
-    /// <summary>推进一步：平时按墙上时间走，被 tosu 的值轻轻拉住；停更或跳变时单独处理。</summary>
     private void updateReadouts(double now)
     {
         int second = (int)Math.Floor(previewClock.Time / 1000);
@@ -435,19 +430,21 @@ public partial class PreviewWindow : Window
         $"time={previewClock.Time:0}ms source={previewClock.SourceTime:0}ms notes={Field.DrawnNotes}");
 
     /// <summary>开发用：开始采样帧间隔（前 600ms 丢掉，避开窗口刚弹出的抖动）。</summary>
-    internal void BeginFpsProbe(bool freeze = false)
+    /// <summary>开发用：把渲染线程画出来的那一帧读回来存 PNG（抓屏看翻转交换链是黑的）。</summary>
+    internal void CaptureSurface(string path) => Field.CaptureFrame(path);
+
+    internal void BeginFpsProbe()
     {
-        freezeRendering = freeze;
+        Field.ResetFrameStats();
         probeWarmup = clock.Elapsed.TotalMilliseconds + 600;
-        probeFrames = [];
     }
 
-    /// <summary>开发用：帧间隔 + 控件自身绘制耗时的统计。</summary>
+    /// <summary>开发用：渲染线程的帧间隔统计（这才是画面真正的节奏）。</summary>
     internal string DescribeFps()
     {
-        List<double> frames = probeFrames ?? [];
+        List<double> frames = [.. Field.FrameIntervals];
         if (frames.Count < 10)
-            return $"样本太少（{frames.Count} 帧），窗口可能没在渲染";
+            return $"样本太少（{frames.Count} 帧），渲染线程可能还没起来";
 
         frames.Sort();
         double p50 = frames[frames.Count / 2];
@@ -455,11 +452,9 @@ public partial class PreviewWindow : Window
         double p95 = frames[Math.Min(frames.Count - 1, (int)(frames.Count * 0.95))];
         double p99 = frames[Math.Min(frames.Count - 1, (int)(frames.Count * 0.99))];
         int slow = frames.Count(value => value > 20);
-        double average = frames.Sum() / frames.Count;
         return string.Create(System.Globalization.CultureInfo.InvariantCulture,
             $"{frames.Count} 帧｜p50={p50:0.0} p90={p90:0.0} p95={p95:0.0} p99={p99:0.0} max={frames[^1]:0.0}ms " +
-            $"平均={average:0.0}ms ≈{1000 / p50:0}fps｜>20ms {slow} 帧｜控件 OnRender 平均={Field.AverageRenderMilliseconds:0.00}ms " +
-            $"（{Field.RenderSamples} 次）｜逻辑 {ActualWidth:0}x{ActualHeight:0}｜" +
+            $"≈{1000 / p50:0}fps｜>20ms {slow} 帧｜绘制 {Field.LastDrawMilliseconds:0.00}ms｜逻辑 {ActualWidth:0}x{ActualHeight:0}｜" +
             $"物理 {(int)Math.Round(ActualWidth * dpiScale)}x{(int)Math.Round(ActualHeight * dpiScale)}@{dpiScale:0.##}x");
     }
 

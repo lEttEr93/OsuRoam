@@ -34,6 +34,8 @@
   <ItemGroup>
     <PackageReference Include="NAudio" Version="2.2.1" />
     <PackageReference Include="NAudio.Vorbis" Version="1.5.0" />
+    <PackageReference Include="Vortice.Direct2D1" Version="3.6.2" />
+    <PackageReference Include="Vortice.Direct3D11" Version="3.6.2" />
     <PackageReference Include="Wasmtime" Version="48.0.2" />
   </ItemGroup>
   <ItemGroup>
@@ -45,7 +47,6 @@
     <EmbeddedResource Include="data\tag-pool.json" LogicalName="OsuRoam.Resources.tag-pool.json" />
     <!-- 待审 tag 的提交凭据（细粒度 PAT，只给该仓库 issues:write）。
          这个文件在 .gitignore 里，不进仓库；没有它时自动提交功能关闭，其它功能不受影响。 -->
-    <EmbeddedResource Include="data\tag-submit-token.txt" LogicalName="OsuRoam.Resources.tag-submit-token.txt"
-                      Condition="Exists('data\tag-submit-token.txt')" />
+    <EmbeddedResource Include="data\tag-submit-token.txt" LogicalName="OsuRoam.Resources.tag-submit-token.txt" Condition="Exists('data\tag-submit-token.txt')" />
   </ItemGroup>
 </Project>

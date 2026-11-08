@@ -432,7 +432,7 @@ public partial class MainWindow : Window
             string mode = previewArgument.Contains('=')
                 ? previewArgument[(previewArgument.IndexOf('=') + 1)..].Trim().ToLowerInvariant()
                 : string.Empty;
-            bool fpsProbe = mode is "fps" or "fps-layered" or "fps-static" or "fps-tiny" or "fps-floating" or "fps-pair";
+            bool fpsProbe = mode is "fps" or "fps-layered" or "fps-pair" or "fps-floating";
             bool layeredWindow = mode is "layered" or "fps-layered";
             bool standalone = mode == "fps-tiny";
 
@@ -496,7 +496,7 @@ public partial class MainWindow : Window
             {
                 // 先让启动期的后台活干完（扫已安装谱面、拉 tag 池），否则量到的是那些任务的占用。
                 await Task.Delay(5000);
-                previewWindow.BeginFpsProbe(freeze: mode == "fps-static");
+                previewWindow.BeginFpsProbe();
                 // 模拟 tosu：每 90ms 灌一条时间，持续 3 秒（窗口自己每帧外推补平）
                 System.Diagnostics.Stopwatch feed = System.Diagnostics.Stopwatch.StartNew();
                 double anchorTime = chart.FirstNoteTime + 20000;
@@ -512,7 +512,23 @@ public partial class MainWindow : Window
             }
 
             previewWindow.SetTime(mode == "noclock" ? 0 : chart.FirstNoteTime + 30000);
-            await Task.Delay(mode == "noclock" ? 3400 : 1000);
+            // --preview-hold=<毫秒>：让开发用的预览窗多停一会儿，方便抓屏看渲染结果。
+            int holdMs = mode == "noclock" ? 3400 : 1000;
+            string? holdArg = Environment.GetCommandLineArgs()
+                .FirstOrDefault(argument => argument.StartsWith("--preview-hold=", StringComparison.OrdinalIgnoreCase));
+            if (holdArg is not null && int.TryParse(holdArg["--preview-hold=".Length..], out int parsedHold))
+                holdMs = Math.Clamp(parsedHold, 200, 60000);
+            await Task.Delay(holdMs);
+
+            // --preview-shot=<png>：让渲染线程把当前帧从显存读回来，确认真的画对了。
+            string? shotPath = Environment.GetCommandLineArgs()
+                .FirstOrDefault(argument => argument.StartsWith("--preview-shot=", StringComparison.OrdinalIgnoreCase))?["--preview-shot=".Length..];
+            if (shotPath is not null)
+            {
+                await Task.Delay(1200);
+                previewWindow.CaptureSurface(shotPath);
+                await Task.Delay(800);
+            }
 
             AppLog.Info($"预览窗：{previewWindow.Describe()}");
             AppLog.Info($"信息窗高度：{mapInfoWindow?.ActualHeight:0.0}（预览窗 {previewWindow.ActualHeight:0.0}）");
