@@ -3052,7 +3052,13 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
         // 拖动时位置也要跟（LocationChanged），否则它会停在第一次算出来的地方。
         mapInfoWindow.SizeChanged += (_, _) => syncPreviewGeometry();
         mapInfoWindow.LocationChanged += (_, _) => syncPreviewGeometry();
-        mapInfoWindow.IsVisibleChanged += (_, _) => syncPreviewGeometry();
+        mapInfoWindow.IsVisibleChanged += (_, _) =>
+        {
+            // 信息窗被隐藏（或关闭）时，预览必须一起消失 —— 它是信息窗的子页面。
+            if (mapInfoWindow?.IsVisible != true)
+                previewWindow?.Dismiss();
+            syncPreviewGeometry();
+        };
         mapInfoWindow.DockTo(this);
         return mapInfoWindow;
     }

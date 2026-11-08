@@ -254,6 +254,11 @@ public sealed partial class PreviewOverlay : IDisposable
             chart = null;
             transparentFramePending = true;
         }
+
+        // 设备/交换链/线程都留着（重建代价太高），但**窗口本身必须真的隐藏** ——
+        // 预览是信息窗的子页面，信息窗没了它就不能还在屏幕上。
+        if (window != IntPtr.Zero)
+            ShowWindow(window, ShowWindowCommand.SW_HIDE);
     }
 
     private void hide()
