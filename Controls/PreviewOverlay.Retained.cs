@@ -333,8 +333,12 @@ public sealed partial class PreviewOverlay
         private static void drawBitmap(ID2D1RenderTarget target, ID2D1Bitmap bitmap,
             double x, double y, double width, double height)
         {
+            // 源矩形是**位图像素**，不是目标尺寸。之前这里传的是目标宽高，
+            // 等于只取了位图左上角一块 —— 表现就是“只有左半截”。
+            Vortice.Mathematics.SizeI size = bitmap.PixelSize;
             target.DrawBitmap(bitmap, rect(x, y, width, height), 1f,
-                Vortice.Direct2D1.BitmapInterpolationMode.Linear, rect(0, 0, width, height));
+                Vortice.Direct2D1.BitmapInterpolationMode.Linear,
+                rect(0, 0, size.Width, size.Height));
         }
 
         private Tile CreateTile(long index)
