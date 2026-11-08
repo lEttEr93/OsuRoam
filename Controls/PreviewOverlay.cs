@@ -257,12 +257,14 @@ public sealed class PreviewOverlay : IDisposable
         public required ID2D1SolidColorBrush Tap { get; init; }
         public required ID2D1SolidColorBrush Hold { get; init; }
         public required ID2D1SolidColorBrush HoldHead { get; init; }
+        public required ID2D1SolidColorBrush Judgement { get; init; }
 
         public void Dispose()
         {
             Tap.Dispose();
             Hold.Dispose();
             HoldHead.Dispose();
+            Judgement.Dispose();
             Target.Dispose();
             Surface.Dispose();
         }
@@ -406,6 +408,7 @@ public sealed class PreviewOverlay : IDisposable
 
                 double interval = nowMs - lastFrame;
                 lastFrame = nowMs;
+
                 lock (gate)
                 {
                     if (interval > 0)
@@ -452,7 +455,8 @@ public sealed class PreviewOverlay : IDisposable
             Target = target,
             Tap = target.CreateSolidColorBrush(new Color4(0xF5 / 255f, 0xF9 / 255f, 0xFB / 255f, 1f)),
             Hold = target.CreateSolidColorBrush(new Color4(0xE1 / 255f, 0x51 / 255f, 0x7B / 255f, 1f)),
-            HoldHead = target.CreateSolidColorBrush(new Color4(0xFB / 255f, 0xF2 / 255f, 0xF5 / 255f, 1f))
+            HoldHead = target.CreateSolidColorBrush(new Color4(0xFB / 255f, 0xF2 / 255f, 0xF5 / 255f, 1f)),
+            Judgement = target.CreateSolidColorBrush(new Color4(0x5A / 255f, 0x6A / 255f, 0x76 / 255f, 1f))
         };
     }
 
@@ -479,6 +483,8 @@ public sealed class PreviewOverlay : IDisposable
         double pixelsPerMs = height / Math.Max(0.25, visibleSeconds) / 1000.0;
         double noteHeight = Math.Clamp(laneWidth * 0.17, 6, 18);
         double noteWidth = Math.Max(2, laneWidth - 6);
+        // 顶部淡入：按**屏幕**位置算透明度（不是按谱面时间），所以音符进入画面时是渐显的。
+        double fadeHeight = Math.Max(24, height * 0.18);
 
         IReadOnlyList<PreviewNote> notes = chart.Notes;
         double visibleMs = visibleSeconds * 1000;
@@ -498,30 +504,75 @@ public sealed class PreviewOverlay : IDisposable
 
             if (note.IsHold && headY - tailY > 0.5)
             {
+                // 长条按像素分段淡入：顶端几乎透明，进入画面后才完全不透明。
+                // 整条共用一个透明度的话，长条要「完全出现」才会变实 —— 就是之前那个问题。
                 double bodyTop = Math.Max(tailY, 0);
                 double bodyBottom = Math.Min(headY, height);
                 if (bodyBottom - bodyTop > 0.5)
-                    target.FillRectangle(rect(x, bodyTop, noteWidth, bodyBottom - bodyTop), resources.Hold);
+                    fillFaded(target, resources.Hold, x, bodyTop, noteWidth, bodyBottom - bodyTop, fadeHeight);
 
                 if (headY >= 0 && headY < height)
-                    target.FillRectangle(rect(x, headY, noteWidth, Math.Min(noteHeight, height - headY)), resources.HoldHead);
+                    fillFaded(target, resources.HoldHead, x, headY, noteWidth, Math.Min(noteHeight, height - headY), fadeHeight);
             }
             else
             {
                 double y = Math.Max(headY, 0);
                 if (y >= height)
                     continue;
-                target.FillRectangle(rect(x, y, noteWidth, Math.Min(noteHeight, height - y)), resources.Tap);
+                fillFaded(target, resources.Tap, x, y, noteWidth, Math.Min(noteHeight, height - y), fadeHeight);
             }
 
             drawn++;
         }
 
         DrawnNotes = drawn;
+
+        // 底部判定线：位置固定，不随音符滚动。
+        resources.Judgement.Opacity = 1;
+        target.FillRectangle(rect(0, height - 2.5, width, 1.5), resources.Judgement);
+
         if (opacity < 0.999)
             target.EndDraw();
         else
             target.EndDraw(out _, out _);
+    }
+
+    /// <summary>
+    /// 画一块矩形，但按**屏幕位置**给它逐段透明度：顶部淡入区的上半部分几乎透明，
+    /// 越往下越实。长条因此是「从顶端慢慢显出来」，而不是整条一起跳。
+    /// </summary>
+    private static void fillFaded(ID2D1RenderTarget target, ID2D1SolidColorBrush brush,
+        double x, double top, double width, double height, double fadeHeight)
+    {
+        double bottom = top + height;
+        if (height <= 0 || bottom <= 0)
+            return;
+
+        top = Math.Max(top, 0);
+        if (top >= fadeHeight)
+        {
+            brush.Opacity = 1;
+            target.FillRectangle(rect(x, top, width, bottom - top), brush);
+            return;
+        }
+
+        // 淡入区里按 6px 切片（切太粗会有色带，切太细没必要）。
+        const double slice = 6;
+        double cursor = top;
+        double fadeEnd = Math.Min(bottom, fadeHeight);
+        while (cursor < fadeEnd)
+        {
+            double next = Math.Min(cursor + slice, fadeEnd);
+            brush.Opacity = (float)Math.Clamp(((cursor + next) * 0.5) / fadeHeight, 0.04, 1);
+            target.FillRectangle(rect(x, cursor, width, next - cursor), brush);
+            cursor = next;
+        }
+
+        if (bottom > fadeHeight)
+        {
+            brush.Opacity = 1;
+            target.FillRectangle(rect(x, fadeHeight, width, bottom - fadeHeight), brush);
+        }
     }
 
     private static void saveCurrentFrame(ID3D11Device device, IDXGISwapChain1 swapChain, int index, string path)
