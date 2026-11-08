@@ -535,12 +535,16 @@ public partial class MainWindow : Window
                 holdMs = Math.Clamp(parsedHold, 200, 60000);
             // 持续喂时间：预览时钟在「收不到新样本」时是会冻结的（那是给 tosu 断流用的保护），
             // 所以开发模式必须像 tosu 一样每 16ms 喂一次，否则画面只有开头动一下然后定住。
+            // 用后台定时器喂，而不是 UI 线程上的 await 循环：后者在 62Hz 上跟渲染抢 CPU，
+            // 会把「提交间隔」本身推高（实测 4.17ms → 5.6ms），让 PresentMon 对照失去意义。
             System.Diagnostics.Stopwatch feedClock = System.Diagnostics.Stopwatch.StartNew();
             double feedAnchor = mode == "noclock" ? 0 : chart.FirstNoteTime + 30000;
-            while (feedClock.ElapsedMilliseconds < holdMs)
+            PreviewWindow feeder = previewWindow;
+            using (System.Threading.Timer feedTimer = new(
+                       _ => feeder.SetTime(feedAnchor + feedClock.Elapsed.TotalMilliseconds),
+                       null, dueTime: 0, period: 4))
             {
-                previewWindow.SetTime(feedAnchor + feedClock.Elapsed.TotalMilliseconds);
-                await Task.Delay(16);
+                await Task.Delay(holdMs);
             }
 
             // --preview-shot=<png>：让渲染线程把当前帧从显存读回来，确认真的画对了。
