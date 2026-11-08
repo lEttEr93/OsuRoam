@@ -217,7 +217,8 @@ public sealed class PreviewWindow : IDisposable
 
     private void dismiss()
     {
-        pendingChart = null;
+        // 故意**不清空** pendingChart：收起只是「不显示」，不是「忘掉这首谱面」。
+        // 之前在这里把它置空，从游戏回来重新显示时就没有内容可画 —— 只剩黑底。
         followTimer?.Stop();
         overlay.Hide();
     }
