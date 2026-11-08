@@ -115,6 +115,11 @@ public sealed class PreviewWindow : IDisposable
         if (frames.Count < 10)
             return $"样本太少（{frames.Count} 帧），渲染线程可能还没起来";
 
+        (double[] waits, double[] draws, double[] presents) = overlay.PhaseSamples;
+        string phases = $"{percentile(waits, 0.5):0.00}/{percentile(waits, 0.95):0.00}（等待） " +
+                        $"{percentile(draws, 0.5):0.00}/{percentile(draws, 0.95):0.00}（绘制） " +
+                        $"{percentile(presents, 0.5):0.00}/{percentile(presents, 0.95):0.00}（Present）ms";
+
         frames.Sort();
         double p50 = frames[frames.Count / 2];
         double p90 = frames[Math.Min(frames.Count - 1, (int)(frames.Count * 0.90))];
@@ -123,8 +128,17 @@ public sealed class PreviewWindow : IDisposable
         int slow = frames.Count(value => value > 20);
         return string.Create(System.Globalization.CultureInfo.InvariantCulture,
             $"{frames.Count} 帧｜p50={p50:0.0} p90={p90:0.0} p95={p95:0.0} p99={p99:0.0} max={frames[^1]:0.0}ms " +
-            $"≈{1000 / p50:0}fps｜>20ms {slow} 帧｜绘制 {overlay.LastDrawMilliseconds:0.00}ms｜" +
+            $"≈{1000 / p50:0}fps｜>20ms {slow} 帧｜p50/p95 {phases}｜" +
             $"窗口 {Width:0}x{Height:0} DIP｜流速 {overlay.VisibleSeconds:0.00}s/屏");
+    }
+
+    private static double percentile(double[] values, double q)
+    {
+        if (values.Length == 0)
+            return 0;
+        double[] copy = [.. values];
+        Array.Sort(copy);
+        return copy[Math.Min(copy.Length - 1, (int)(copy.Length * q))];
     }
 
     public void Close()

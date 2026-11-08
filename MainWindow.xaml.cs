@@ -275,6 +275,14 @@ public partial class MainWindow : Window
             argument.Equals("--no-startup-ws", StringComparison.OrdinalIgnoreCase));
         if (!manageTosu)
             AppLog.Info("--no-tosu：这一轮不启动、也不连接 tosu");
+        // --gpu=<序号>：混合显卡笔记本上指定预览用哪块 GPU（见日志里的「可用适配器」）。
+        string? gpuArg = Environment.GetCommandLineArgs()
+            .FirstOrDefault(argument => argument.StartsWith("--gpu=", StringComparison.OrdinalIgnoreCase));
+        if (gpuArg is not null && int.TryParse(gpuArg["--gpu=".Length..], out int gpuIndex))
+        {
+            Controls.PreviewOverlay.AdapterIndex = gpuIndex;
+            AppLog.Info($"预览渲染指定适配器：--gpu={gpuIndex}");
+        }
         if (BeatmapDownloadService.ClassicLaunch)
             AppLog.Info($"导入启动方式：{(BeatmapDownloadService.ClassicLaunch ? "classic（发布包的行为）" : "direct（实验性）")}");
         if (!startupWebSocket)

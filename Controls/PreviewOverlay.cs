@@ -35,6 +35,9 @@ public sealed class PreviewOverlay : IDisposable
     private readonly object gate = new();
     private readonly Stopwatch now = Stopwatch.StartNew();
     private readonly List<double> frames = [];
+    private readonly List<double> waitSamples = [];
+    private readonly List<double> drawSamples = [];
+    private readonly List<double> presentSamples = [];
     private readonly ManualResetEventSlim resizeSignal = new(false);
 
     private ManiaPreviewChart? chart;
@@ -95,6 +98,19 @@ public sealed class PreviewOverlay : IDisposable
     }
 
     public double LastDrawMilliseconds { get; private set; }
+
+    /// <summary>等待节拍 / 绘制 / Present 三段耗时（毫秒，已跳过预热帧）。</summary>
+    public (double[] Wait, double[] Draw, double[] Present) PhaseSamples
+    {
+        get
+        {
+            lock (gate)
+                return (waitSamples.ToArray(), drawSamples.ToArray(), presentSamples.ToArray());
+        }
+    }
+
+    /// <summary>创建 D3D 设备用的适配器序号（-1 = 默认硬件适配器）。</summary>
+    public static int AdapterIndex { get; set; } = -1;
     public int DrawnNotes { get; private set; }
 
     /// <summary>把预览挂到信息窗下面：owner 关闭时它跟着消失，也不会跑到 owner 后面去。</summary>
@@ -175,8 +191,18 @@ public sealed class PreviewOverlay : IDisposable
     public void ResetFrameStats()
     {
         lock (gate)
+        {
             frames.Clear();
+            waitSamples.Clear();
+            drawSamples.Clear();
+            presentSamples.Clear();
+            warmupFrames = WarmupFrames;
+        }
     }
+
+    /// <summary>清空后先跳过这么多帧再采样（首帧要建资源，混进去会让 p99 失真）。</summary>
+    private int warmupFrames = WarmupFrames;
+    private const int WarmupFrames = 90;
 
     /// <summary>
     /// 开发用：把渲染线程画出来的这一帧从显存读回来存成 PNG。
@@ -286,11 +312,20 @@ public sealed class PreviewOverlay : IDisposable
 
         try
         {
-            D3D11.D3D11CreateDevice(null, DriverType.Hardware, DeviceCreationFlags.BgraSupport,
+            // 混合显卡笔记本：默认适配器可能和 DWM/屏幕输出不在同一块 GPU 上，
+            // 跨适配器传输是「抖动」的一种可能来源，所以这里把实际用到的适配器记下来，
+            // 并支持 --gpu=<序号> 指定。
+            IDXGIAdapter? chosenAdapter = pickAdapter();
+            // 指定了适配器时必须用 DriverType.Unknown（Hardware + 适配器 是非法组合，会返回 null 设备）。
+            D3D11.D3D11CreateDevice(chosenAdapter, chosenAdapter is null ? DriverType.Hardware : DriverType.Unknown,
+                DeviceCreationFlags.BgraSupport,
                 [Vortice.Direct3D.FeatureLevel.Level_11_0, Vortice.Direct3D.FeatureLevel.Level_10_1],
                 out device, out context);
+            chosenAdapter?.Dispose();
 
-            (width, height) = (pixelWidth, pixelHeight);
+            using (IDXGIDevice ownDevice = device.QueryInterface<IDXGIDevice>())
+            using (IDXGIAdapter ownAdapter = ownDevice.GetAdapter())
+                AppLog.Info($"预览覆盖层：渲染适配器 = {ownAdapter.Description.Description.Trim()}");
 
             using (IDXGIDevice dxgiDevice = device.QueryInterface<IDXGIDevice>())
             using (IDXGIFactory2 factory = dxgiDevice.GetAdapter().GetParent<IDXGIFactory2>())
@@ -356,7 +391,14 @@ public sealed class PreviewOverlay : IDisposable
                         width = pixelWidth;
                         height = pixelHeight;
                         if (width > 1 && height > 1)
-                            swapChain.ResizeBuffers(2, (uint)width, (uint)height, Format.B8G8R8A8_UNorm, SwapChainFlags.None);
+                        {
+                            // 创建时带了 FrameLatencyWaitableObject，ResizeBuffers 必须保留同一个标志，
+                            // 否则帧延迟句柄会失效（DXGI 的明确要求）。
+                            SharpGen.Runtime.Result resizeResult = swapChain.ResizeBuffers(2, (uint)width, (uint)height,
+                                Format.B8G8R8A8_UNorm, SwapChainFlags.FrameLatencyWaitableObject);
+                            if (resizeResult.Failure)
+                                AppLog.Info($"预览覆盖层：ResizeBuffers 失败 {resizeResult.Description}");
+                        }
                     }
                 }
 
@@ -366,11 +408,13 @@ public sealed class PreviewOverlay : IDisposable
                     continue;
                 }
 
+                double waitStart = frameClock.Elapsed.TotalMilliseconds;
                 if (frameLatency != IntPtr.Zero && WaitForSingleObject(frameLatency, 100) == WaitTimeout)
                 {
                     Thread.Sleep(4);
                     continue;
                 }
+                double waitMs = frameClock.Elapsed.TotalMilliseconds - waitStart;
 
                 int index = (int)swapChain3.CurrentBackBufferIndex;
                 resources[index] ??= createFrameResources(d2dFactory, swapChain, index);
@@ -392,7 +436,9 @@ public sealed class PreviewOverlay : IDisposable
                     snapshot = chart;
                 }
 
+                double drawStart = frameClock.Elapsed.TotalMilliseconds;
                 draw(resources[index]!, width, height, snapshot, timeMs, visibleSeconds, opacity);
+                double drawMs = frameClock.Elapsed.TotalMilliseconds - drawStart;
 
                 string? pendingCapture;
                 lock (gate)
@@ -403,18 +449,35 @@ public sealed class PreviewOverlay : IDisposable
                 if (pendingCapture is not null)
                     saveCurrentFrame(device, swapChain, index, pendingCapture);
 
-                LastDrawMilliseconds = frameClock.Elapsed.TotalMilliseconds - nowMs;
+                LastDrawMilliseconds = drawMs;
+                double presentStart = frameClock.Elapsed.TotalMilliseconds;
                 swapChain.Present(1, PresentFlags.None);
+                double presentMs = frameClock.Elapsed.TotalMilliseconds - presentStart;
 
                 double interval = nowMs - lastFrame;
                 lastFrame = nowMs;
 
                 lock (gate)
                 {
-                    if (interval > 0)
+                    // 预热帧（首帧建资源、读回截图、刚 Resize 过）不进样本，否则 p99 会被它们污染。
+                    if (warmupFrames > 0)
+                    {
+                        warmupFrames--;
+                    }
+                    else if (interval > 0)
+                    {
                         frames.Add(interval);
-                    if (frames.Count > 900)
-                        frames.RemoveRange(0, frames.Count - 900);
+                        waitSamples.Add(waitMs);
+                        drawSamples.Add(drawMs);
+                        presentSamples.Add(presentMs);
+                        if (frames.Count > 1800)
+                        {
+                            frames.RemoveRange(0, frames.Count - 1800);
+                            waitSamples.RemoveRange(0, waitSamples.Count - 1800);
+                            drawSamples.RemoveRange(0, drawSamples.Count - 1800);
+                            presentSamples.RemoveRange(0, presentSamples.Count - 1800);
+                        }
+                    }
                 }
 
                 _ = latency;
@@ -435,6 +498,46 @@ public sealed class PreviewOverlay : IDisposable
             swapChain?.Dispose();
             context?.Dispose();
             device?.Dispose();
+        }
+    }
+
+    /// <summary>按 --gpu 选择适配器；-1 表示用系统默认的那块。顺便把所有适配器记进日志。</summary>
+    private static IDXGIAdapter? pickAdapter()
+    {
+        try
+        {
+            using IDXGIFactory1 factory = DXGI.CreateDXGIFactory1<IDXGIFactory1>();
+            List<(int Index, string Name, IDXGIAdapter Adapter)> all = [];
+            for (uint index = 0; ; index++)
+            {
+                if (factory.EnumAdapters1(index, out IDXGIAdapter1? adapter).Failure || adapter is null)
+                    break;
+                all.Add(((int)index, adapter.Description.Description.Trim(), adapter));
+            }
+
+            if (all.Count > 0)
+                AppLog.Info($"预览覆盖层：可用适配器 {string.Join("｜", all.Select(a => $"[{a.Index}] {a.Name}"))}");
+
+            if (AdapterIndex >= 0)
+            {
+                (int Index, string Name, IDXGIAdapter Adapter) pick = all.FirstOrDefault(a => a.Index == AdapterIndex);
+                if (pick.Adapter is not null)
+                {
+                    AppLog.Info($"预览覆盖层：按 --gpu={AdapterIndex} 使用 {pick.Name}");
+                    return pick.Adapter;
+                }
+
+                AppLog.Info($"预览覆盖层：--gpu={AdapterIndex} 不存在，回退默认适配器");
+            }
+
+            foreach ((int Index, string Name, IDXGIAdapter Adapter) entry in all)
+                entry.Adapter.Dispose();
+            return null;
+        }
+        catch (Exception exception)
+        {
+            AppLog.Error("预览覆盖层：枚举适配器失败", exception);
+            return null;
         }
     }
 
