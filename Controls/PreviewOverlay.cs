@@ -641,6 +641,13 @@ public sealed partial class PreviewOverlay : IDisposable
                 if (PaceMode == 3)
                     Thread.Sleep(1);   // 提交得比屏幕快一点：每个 vblank 都能采到新帧
 
+                if (frameClock.Elapsed.TotalSeconds - lastStatusLog > 2)
+                {
+                    lastStatusLog = frameClock.Elapsed.TotalSeconds;
+                    AppLog.Info($"预览状态：time={timeMs:0}ms 画了={DrawnNotes} 物件={snapshot?.Notes.Count ?? 0} " +
+                                $"尺寸={width}x{height} 可见={VisibleSeconds:0.00}s");
+                }
+
                 double interval = nowMs - lastFrame;
                 lastFrame = nowMs;
 
