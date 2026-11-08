@@ -164,6 +164,7 @@ public partial class MainWindow : Window
         applyDiagnosticWindowMode();
         topmostKeeper = new TopmostKeeper(this);
         downloader = new BeatmapDownloadService(settingsStore.CacheDirectory);
+        downloader.Notice += message => Dispatcher.BeginInvoke(() => setStatusText(message));
         RecommendationList.ItemsSource = recommendations;
         TagListBox.ItemsSource = visibleTags;
         StatusFilterItems.ItemsSource = statusFilterOptions;

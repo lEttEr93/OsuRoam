@@ -7,6 +7,9 @@ namespace OsuRoam.Services;
 
 public sealed class BeatmapDownloadService : IDisposable
 {
+    /// <summary>需要让用户立刻看到的消息（比如「osu! 启动后秒退，导入没生效」）。</summary>
+    public event Action<string>? Notice;
+
     private readonly HttpClient http = new(new SocketsHttpHandler
     {
         AutomaticDecompression = System.Net.DecompressionMethods.All,
@@ -219,12 +222,12 @@ public sealed class BeatmapDownloadService : IDisposable
             throw new InvalidDataException(Loc.T("download.badosz"));
     }
 
-    private static void import(RecommendationItem item, string path, AppSettings settings)
+    private void import(RecommendationItem item, string path, AppSettings settings)
     {
         importCore(item, path, settings);
     }
 
-    private static void importCore(RecommendationItem item, string path, AppSettings settings)
+    private void importCore(RecommendationItem item, string path, AppSettings settings)
     {
         item.DownloadState = DownloadState.Importing;
 
@@ -238,6 +241,9 @@ public sealed class BeatmapDownloadService : IDisposable
         }
 
         ProcessStartInfo startInfo = new(installation.Executable) { UseShellExecute = true };
+        // 工作目录跟资源管理器双击时一致（游戏自己目录）：某些版本的原生库是按
+        // 当前目录找的，从 Roam 目录里启动会让游戏在启动阶段就崩掉。
+        startInfo.WorkingDirectory = Path.GetDirectoryName(installation.Executable) ?? string.Empty;
         startInfo.ArgumentList.Add(path);
 
         Process? started;
@@ -257,6 +263,39 @@ public sealed class BeatmapDownloadService : IDisposable
         AppLog.Info($"导入：启动 {installation.Executable}（{installation.ClientName}，来源：{installation.Source}），" +
                     $"参数 {path}，PID={started.Id}");
         item.DownloadState = DownloadState.Imported;
+        watchLaunch(started);
+    }
+
+    /// <summary>
+    /// 盯着刚拉起来的 osu! 进程一小会儿：几十秒内非正常退出就说明「导入没生效」，
+    /// 而且原因在游戏那边（比如崩溃），不是 Roam 没触发 —— 以前这种情况界面上一片安静，
+    /// 只看到「tosu 已连接」但什么都不会发生。
+    /// </summary>
+    private void watchLaunch(Process process)
+    {
+        try
+        {
+            DateTime startedAt = DateTime.UtcNow;
+            process.EnableRaisingEvents = true;
+            process.Exited += (_, _) =>
+            {
+                double seconds = (DateTime.UtcNow - startedAt).TotalSeconds;
+                int code;
+                try { code = process.ExitCode; } catch { return; }
+
+                // 唯一正常的情况：游戏本来就在跑，新进程把文件交过去后立即退出（码 0）。
+                if (code == 0 || seconds > 30)
+                    return;
+
+                string message = Loc.F("import.gamequit", seconds.ToString("0.0"), $"0x{code:X8}");
+                AppLog.Error(message);
+                Notice?.Invoke(message);
+            };
+        }
+        catch (Exception exception)
+        {
+            AppLog.Error("监听 osu! 启动进程失败", exception);
+        }
     }
 
     /// <summary>
