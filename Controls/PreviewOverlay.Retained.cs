@@ -217,7 +217,7 @@ public sealed partial class PreviewOverlay
                     tiles[i] = CreateTile(firstTile + i);
 
                 judgement = CreateSurface(width, 3);
-                Paint(judgement, width, 3, target =>
+                Paint(judgement, width, 3, null, target =>
                 {
                     using ID2D1SolidColorBrush brush = target.CreateSolidColorBrush(new Color4(0.353f, 0.416f, 0.463f, 1));
                     target.FillRectangle(rect(0, 0.5, width, 1.5), brush);
@@ -358,11 +358,11 @@ public sealed partial class PreviewOverlay
             double lane = (double)width / chart.KeyCount;
             double noteHeight = Math.Clamp(lane * 0.17, 6, 18);
             int count = 0;
-            Paint(tile.Surface, width, height, target =>
+            Paint(tile.Surface, width, height,
+                target => skin ??= loadSkin(target),
+                target =>
             {
                 // 贴图优先：skin 里取得到就用皮肤的图，取不到才退回纯色块。
-                // （lazer 皮肤在 realm 里读不到，这里走「内置贴图 / stable 明文皮肤目录」）
-                skin ??= loadSkin(target);
                 using ID2D1BitmapBrush? bodyBrush = createBodyBrush(target);
                 using ID2D1SolidColorBrush tap = target.CreateSolidColorBrush(new Color4(0.961f, 0.976f, 0.984f, 1));
                 using ID2D1SolidColorBrush hold = target.CreateSolidColorBrush(new Color4(0.882f, 0.318f, 0.482f, 1));
@@ -404,7 +404,8 @@ public sealed partial class PreviewOverlay
             tile.NoteCount = count;
         }
 
-        private void Paint(IDCompositionSurface surface, int w, int h, Action<ID2D1RenderTarget> draw)
+        private void Paint(IDCompositionSurface surface, int w, int h,
+            Action<ID2D1RenderTarget>? prepare, Action<ID2D1RenderTarget> draw)
         {
             using IDXGISurface dxgiSurface = surface.BeginDraw<IDXGISurface>(null,
                 out Vortice.Mathematics.Int2 offset);
@@ -414,6 +415,9 @@ public sealed partial class PreviewOverlay
                     new RenderTargetProperties(RenderTargetType.Default,
                         new Vortice.DCommon.PixelFormat(Format.B8G8R8A8_UNorm, Vortice.DCommon.AlphaMode.Premultiplied),
                         96, 96, RenderTargetUsage.None, Vortice.Direct2D1.FeatureLevel.Default));
+                // 皮肤位图必须在 BeginDraw **之前**创建：D2D 在绘制期间持有设备锁，
+                // 那时调 CreateBitmap 会直接死锁（现场：日志停在「预览贴图：… 载入 6 张」然后卡死）。
+                prepare?.Invoke(target);
                 target.BeginDraw();
                 target.Transform = Matrix3x2.CreateTranslation(offset.X, offset.Y);
                 target.AntialiasMode = AntialiasMode.Aliased;
