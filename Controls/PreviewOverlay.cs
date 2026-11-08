@@ -191,11 +191,7 @@ public sealed partial class PreviewOverlay : IDisposable
         if (hwnd == owner || window == IntPtr.Zero)
             return;
         owner = hwnd;
-        // 旧版（实测 p95 4.3ms、0 帧超 20ms）用的是**子窗口**：CreateWindowEx(WS_CHILD) 挂在
-        // 宿主窗口里，而不是顶层弹窗。这里照它做 —— SetParent + WS_CHILD。
-        SetParent(window, hwnd);
-        long style = GetWindowLongPtr64(window, GwlStyle).ToInt64();
-        SetWindowLongPtr64(window, GwlStyle, new IntPtr(style | WsChild));
+        SetWindowLongPtr64(window, GwlpHwndParent, hwnd);
         // 设 owner 会把 TOPMOST 丢掉（窗口变成「归属」于一个非置顶窗口），
         // 之后它就会藏在浏览器后面 —— 明确重新置顶一次。
         SetWindowPos(window, new IntPtr(-1), 0, 0, 0, 0,
@@ -221,20 +217,7 @@ public sealed partial class PreviewOverlay : IDisposable
         pixelWidth = width;
         pixelHeight = height;
 
-        // 子窗口的位置是**父窗口客户区坐标**：把屏幕坐标减掉父窗口客户区原点。
-        int localX = left;
-        int localY = top;
-        if (owner != IntPtr.Zero && GetClientRect(owner, out WindowRect client))
-        {
-            NativePoint origin = new() { X = 0, Y = 0 };
-            if (ClientToScreen(owner, ref origin))
-            {
-                localX = left - origin.X;
-                localY = top - origin.Y;
-            }
-        }
-
-        SetWindowPos(window, IntPtr.Zero, localX, localY, width, height,
+        SetWindowPos(window, IntPtr.Zero, left, top, width, height,
             SetWindowPosFlags.SWP_NOZORDER | SetWindowPosFlags.SWP_NOACTIVATE);
         if (sizeChanged)
             resizeSignal.Set();
@@ -646,7 +629,8 @@ public sealed partial class PreviewOverlay : IDisposable
 
                 LastDrawMilliseconds = drawMs;
                 double presentStart = frameClock.Elapsed.TotalMilliseconds;
-                swapChain.Present(PaceMode == 3 ? 0u : 1u, PresentFlags.None);
+                // 限到 120Hz：同步间隔 2 表示每两个刷新周期上屏一次（240Hz 屏 → 120fps）。
+                swapChain.Present(PaceMode == 3 ? 0u : (useOpaque ? 2u : 1u), PresentFlags.None);
                 double presentMs = frameClock.Elapsed.TotalMilliseconds - presentStart;
 
                 if (PaceMode == 3)
