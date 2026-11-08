@@ -3100,8 +3100,19 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
     /// 选歌界面的谱面预览：跟着 tosu 报的预览音频位置滚当前谱面。
     /// 只有换歌才重新取 <c>.osu</c>；同一首里只喂时间，别每帧都解析一遍。
     /// </summary>
+    private string previewLastState = string.Empty;
+
     private void updatePreview(TosuSnapshot snapshot)
     {
+        // 记录 tosu 上报的状态变化：回到选歌后预览不渲染时，先看它到底报了什么。
+        string stateKey = $"{snapshot.StateName}|{snapshot.BeatmapId}|{snapshot.DifficultyName}";
+        if (!string.Equals(stateKey, previewLastState, StringComparison.Ordinal))
+        {
+            previewLastState = stateKey;
+            AppLog.Info($"预览状态源：state={snapshot.StateName} id={snapshot.BeatmapId} " +
+                        $"diff={snapshot.DifficultyName} time={snapshot.PreviewTime:0} " +
+                        $"show={settings.ShowPreview}");
+        }
         if (!settings.ShowPreview)
         {
             dismissPreview();
