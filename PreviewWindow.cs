@@ -21,6 +21,7 @@ public sealed class PreviewWindow : IDisposable
     private const double GapDip = 10;
 
     private readonly PreviewOverlay overlay = new();
+    private System.Windows.Threading.DispatcherTimer? followTimer;
     private Window? anchor;
 
     public PreviewWindow(bool layered = false)
@@ -94,6 +95,7 @@ public sealed class PreviewWindow : IDisposable
         applyBounds();
         overlay.SetOwner(new WindowInteropHelper(anchor).Handle);
         overlay.Show(chart);
+        startFollowing();
     }
 
     public void SetTime(double milliseconds) => overlay.Sync(milliseconds);
@@ -137,8 +139,26 @@ public sealed class PreviewWindow : IDisposable
     /// <summary>收起画面（保留窗口，等着下一次换歌）。</summary>
     public void Dismiss() => dismiss();
 
+    /// <summary>
+    /// 每 200ms 重新读一次信息窗的窗口矩形。事件（移动/缩放）已经能覆盖大部分情况，
+    /// 但 DPI 切换、显示器热插拔、被系统挪动这些不一定发事件 —— 兜一层保险。
+    /// </summary>
+    private void startFollowing()
+    {
+        followTimer ??= new System.Windows.Threading.DispatcherTimer(
+            TimeSpan.FromMilliseconds(200), System.Windows.Threading.DispatcherPriority.Background,
+            (_, _) =>
+            {
+                if (anchor is { IsVisible: true } && overlay.IsVisible)
+                    applyBounds();
+            },
+            anchor!.Dispatcher);
+        followTimer.Start();
+    }
+
     private void dismiss()
     {
+        followTimer?.Stop();
         overlay.Hide();
     }
 

@@ -3008,8 +3008,11 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
             if (previewWindow is not null)
                 previewWindow.Anchor = null;
         };
-        // 预览窗和信息窗等高：信息窗因为键型补图/换语言长高，这里跟着改。
+        // 预览窗和信息窗等高：信息窗因为键型补图/换语言长高，这里跟着改；
+        // 拖动时位置也要跟（LocationChanged），否则它会停在第一次算出来的地方。
         mapInfoWindow.SizeChanged += (_, _) => syncPreviewGeometry();
+        mapInfoWindow.LocationChanged += (_, _) => syncPreviewGeometry();
+        mapInfoWindow.IsVisibleChanged += (_, _) => syncPreviewGeometry();
         mapInfoWindow.DockTo(this);
         return mapInfoWindow;
     }
@@ -3246,16 +3249,31 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
         }
     }
 
-    /// <summary>预览的两个手感参数（流速、延迟补偿）：失焦就立刻生效，不用重启。</summary>
-    private void PreviewTuning_LostFocus(object sender, RoutedEventArgs e)
+    /// <summary>
+    /// 预览的两个手感参数（流速、延迟补偿）：失焦就立刻生效**并写盘**。
+    /// 以前只改内存里的预览对象 —— 预览没开着时就完全没反应，重启又回到旧值，
+    /// 所以用户会觉得「有时候有效有时候无效」。
+    /// </summary>
+    private async void PreviewTuning_LostFocus(object sender, RoutedEventArgs e)
     {
-        if (!settingsControlsReady || previewWindow is null)
+        if (!settingsControlsReady)
             return;
 
         try
         {
-            previewWindow.VisibleSeconds = parseDouble(PreviewScrollBox, 0.4, 4.0);
-            previewWindow.LatencyMilliseconds = parseDouble(PreviewLatencyBox, 0, 300);
+            double seconds = parseDouble(PreviewScrollBox, 0.4, 4.0);
+            double latency = parseDouble(PreviewLatencyBox, 0, 300);
+            settings.PreviewScrollSeconds = seconds;
+            settings.PreviewLatencyMilliseconds = latency;
+
+            if (previewWindow is not null)
+            {
+                previewWindow.VisibleSeconds = seconds;
+                previewWindow.LatencyMilliseconds = latency;
+            }
+
+            await settingsStore.SaveAsync(settings);
+            AppLog.Info($"预览参数：流速 {seconds:0.0#} 秒/屏，延迟补偿 {latency:0}ms");
         }
         catch (Exception exception)
         {

@@ -624,6 +624,9 @@ public sealed class PreviewOverlay : IDisposable
     [DllImport("user32.dll")]
     private static extern bool ShowWindow(IntPtr hwnd, ShowWindowCommand command);
 
+    [DllImport("dwmapi.dll")]
+    private static extern int DwmFlush();
+
     [DllImport("user32.dll", SetLastError = true, EntryPoint = "SetWindowLongPtrW")]
     private static extern IntPtr SetWindowLongPtr(IntPtr hwnd, int index, IntPtr value);
 
