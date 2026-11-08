@@ -3101,6 +3101,7 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
     /// 只有换歌才重新取 <c>.osu</c>；同一首里只喂时间，别每帧都解析一遍。
     /// </summary>
     private string previewLastState = string.Empty;
+    private int previewSnapshotCount;
 
     private void updatePreview(TosuSnapshot snapshot)
     {
@@ -3132,6 +3133,10 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
         }
 
         previewInvalidSince = null;
+
+        if (++previewSnapshotCount % 20 == 1)
+            AppLog.Info($"预览快照：第 {previewSnapshotCount} 条 key={snapshot.BeatmapId}|{snapshot.DifficultyName} " +
+                        $"当前谱面={(previewChart is null ? "无" : "有")} 面板={(previewWindow?.IsPanelVisible == true ? "显示" : "未显示")}");
 
         string key = $"{snapshot.BeatmapId}|{snapshot.DifficultyName}";
         if (!string.Equals(key, previewKey, StringComparison.Ordinal))

@@ -116,12 +116,15 @@ public sealed class PreviewWindow : IDisposable
     {
         if (anchor is null || pendingChart is null)
         {
+            AppLog.Info($"预览显示判定：不显示（anchor={(anchor is null ? "空" : "有")} " +
+                        $"谱面={(pendingChart is null ? "无" : "有")}）");
             overlay.Hide();
             return;
         }
 
         if (!anchor.IsVisible)
         {
+            AppLog.Info("预览显示判定：不显示（信息窗不可见）");
             overlay.Hide();
             return;
         }
