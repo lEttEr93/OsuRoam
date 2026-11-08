@@ -153,6 +153,9 @@ public sealed partial class PreviewOverlay : IDisposable
     /// </summary>
     public static bool PrototypeMode { get; set; }
 
+    /// <summary>预览皮肤目录（空 = 用随程序的内置贴图）。**不自动扫描 osu!stable。**</summary>
+    public static string SkinDirectory { get; set; } = string.Empty;
+
     /// <summary>仅供对照诊断：保留旧的逐帧交换链路径。</summary>
     public static bool LegacyMode { get; set; }
     /// <summary>诊断用：单次匀速动画，不接受音频校正。</summary>

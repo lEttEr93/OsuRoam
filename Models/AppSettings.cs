@@ -87,6 +87,8 @@ public sealed class AppSettings
     public double PreviewScrollSeconds { get; set; } = 1.25;
     /// <summary>预览延迟补偿（毫秒）：预览要追上游戏画面，往未来多看一点。</summary>
     public double PreviewLatencyMilliseconds { get; set; } = 35;
+    /// <summary>预览贴图目录（空 = 内置贴图；不做自动扫描）。</summary>
+    public string PreviewSkinPath { get; set; } = string.Empty;
     public bool ExcludeRecentlyPlayed { get; set; } = true;
     /// <summary>扫描 osu! 谱面目录，已经装在机器上的难度不再推荐（同曲其他难度仍可推荐）。</summary>
     public bool ExcludeInstalledBeatmaps { get; set; } = true;

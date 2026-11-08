@@ -300,7 +300,8 @@ public partial class MainWindow : Window
             .FirstOrDefault(argument => argument.StartsWith("--gpu=", StringComparison.OrdinalIgnoreCase));
         if (gpuArg is not null && int.TryParse(gpuArg["--gpu=".Length..], out int gpuIndex))
         {
-            Controls.PreviewOverlay.AdapterIndex = gpuIndex;
+            Controls.PreviewOverlay.SkinDirectory = settings.PreviewSkinPath ?? string.Empty;
+        Controls.PreviewOverlay.AdapterIndex = gpuIndex;
             AppLog.Info($"预览渲染指定适配器：--gpu={gpuIndex}");
         }
         if (BeatmapDownloadService.ClassicLaunch)
@@ -2663,6 +2664,7 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
         value.CacheLimitMegabytes = parseInt(CacheLimitBox, 128, 65536);
         value.PreviewScrollSeconds = parseDouble(PreviewScrollBox, 0.4, 4.0);
         value.PreviewLatencyMilliseconds = parseDouble(PreviewLatencyBox, 0, 300);
+        value.PreviewSkinPath = PreviewSkinBox.Text.Trim();
         value.ExcludeRecentlyPlayed = ExcludeRecentCheck.IsChecked == true;
         value.ExcludeInstalledBeatmaps = ExcludeInstalledCheck.IsChecked == true;
         value.AutoDownload = AutoDownloadCheck.IsChecked == true;
@@ -2736,6 +2738,7 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
         CacheLimitBox.Text = settings.CacheLimitMegabytes.ToString();
         PreviewScrollBox.Text = settings.PreviewScrollSeconds.ToString("0.0#");
         PreviewLatencyBox.Text = settings.PreviewLatencyMilliseconds.ToString("0");
+        PreviewSkinBox.Text = settings.PreviewSkinPath;
         foreach (ComboBoxItem item in LanguageBox.Items)
             if (Equals(item.Tag?.ToString(), Loc.ToTag(Loc.Parse(settings.Language)))) LanguageBox.SelectedItem = item;
         // 配置里的语言在这里才生效（App 启动时用的是「跟随系统」）。

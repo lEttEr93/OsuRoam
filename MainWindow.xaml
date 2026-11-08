@@ -575,6 +575,8 @@
                                     <TextBox x:Name="PreviewLatencyBox" LostFocus="PreviewTuning_LostFocus" />
                                 </StackPanel>
                             </StackPanel>
+                            <TextBlock Text="{DynamicResource L.label.previewskin}" Foreground="{StaticResource MutedTextBrush}" FontSize="11" Margin="0,0,0,3" />
+                            <TextBox x:Name="PreviewSkinBox" LostFocus="PreviewTuning_LostFocus" />
                             <StackPanel Margin="0,0,0,9">
                                 <TextBlock Text="{DynamicResource L.label.infosource}" Foreground="{StaticResource MutedTextBrush}" FontSize="11" />
                                 <ComboBox x:Name="MapInfoSourceBox" SelectedIndex="0"

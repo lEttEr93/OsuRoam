@@ -313,7 +313,7 @@ public sealed partial class PreviewOverlay
         private PreviewSkin loadSkin(ID2D1RenderTarget target)
         {
             PreviewSkin loaded = new();
-            loaded.Load(target, PreviewSkin.ResolveDirectory(null));
+            loaded.Load(target, PreviewSkin.ResolveDirectory(SkinDirectory), chart.KeyCount);
             return loaded;
         }
 

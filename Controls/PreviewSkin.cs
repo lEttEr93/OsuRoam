@@ -44,43 +44,65 @@ internal sealed class PreviewSkin : IDisposable
     /// 最后回落到随程序的分发目录 <c>Assets\Preview</c>。
     /// （lazer 的皮肤在 realm 里，独立进程读不了，见 docs/谱面预览-皮肤调研.md）
     /// </summary>
+    /// <summary>
+    /// 只有两个来源，**不扫描 osu!stable 的皮肤目录**（不是所有人都有 stable）：
+    /// 用户指定的目录 → 随程序的内置贴图。
+    /// </summary>
     public static string ResolveDirectory(string? userDirectory)
     {
         if (!string.IsNullOrWhiteSpace(userDirectory) && Directory.Exists(userDirectory))
             return userDirectory;
-
-        string stableRoot = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "osu!", "Skins");
-        if (Directory.Exists(stableRoot))
-        {
-            string? newest = Directory.EnumerateDirectories(stableRoot)
-                .Where(dir => Directory.EnumerateFiles(dir, "*.png").Any())
-                .OrderByDescending(Directory.GetLastWriteTimeUtc)
-                .FirstOrDefault();
-            if (newest is not null)
-                return newest;
-        }
-
         return Path.Combine(AppContext.BaseDirectory, "Assets", "Preview");
     }
 
     /// <summary>在渲染线程里、D3D 设备建好之后调用。</summary>
-    public void Load(ID2D1RenderTarget target, string directory)
+    public void Load(ID2D1RenderTarget target, string directory, int keyCount = 4)
     {
         Source = directory;
-        foreach (string name in new[] { "note", "hold-head", "hold-tail", "hold-body", "key", "judge" })
+        // 内置贴图用的名字；如果目录是 osu 皮肤，则按 osu 的 mania 命名再找一遍。
+        (string Key, string[] Names)[] wanted =
+        [
+            ("note", ["note.png", "mania-note1.png"]),
+            ("hold-head", ["hold-head.png", "mania-note1H.png"]),
+            ("hold-tail", ["hold-tail.png", "mania-note1T.png"]),
+            ("hold-body", ["hold-body.png", "mania-note1L.png"]),
+            ("key", ["key.png", "mania-key1.png"]),
+            ("judge", ["judge.png", "mania-stage-hint.png"])
+        ];
+
+        // 按键数分目录的皮肤：ManiaK / Mania
+        string mania = Path.Combine(directory, "Mania");
+        List<string> roots = [directory];
+        if (Directory.Exists(mania))
         {
-            string path = Path.Combine(directory, name + ".png");
-            if (!File.Exists(path))
-                continue;
-            try
+            foreach (string candidate in new[] { $"{keyCount}K", keyCount.ToString(), $"{keyCount}k" })
             {
-                ID2D1Bitmap bitmap = loadBitmap(target, path);
-                bitmaps[name] = bitmap;
+                string path = Path.Combine(mania, candidate);
+                if (Directory.Exists(path))
+                {
+                    roots.Insert(0, path);
+                    break;
+                }
             }
-            catch (Exception exception)
+        }
+
+        foreach ((string key, string[] names) in wanted)
+        {
+            foreach (string root in roots)
             {
-                AppLog.Error($"预览贴图加载失败：{path}", exception);
+                string? hit = names.Select(n => Path.Combine(root, n)).FirstOrDefault(File.Exists);
+                if (hit is null)
+                    continue;
+                try
+                {
+                    bitmaps[key] = loadBitmap(target, hit);
+                }
+                catch (Exception exception)
+                {
+                    AppLog.Error($"预览贴图加载失败：{hit}", exception);
+                }
+
+                break;
             }
         }
 
