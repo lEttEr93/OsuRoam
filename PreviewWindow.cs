@@ -209,12 +209,13 @@ public sealed class PreviewWindow : IDisposable
         int gap = (int)Math.Round(GapDip * dpi);
         int anchorWidth = anchorRect.Right - anchorRect.Left;
         int anchorHeight = anchorRect.Bottom - anchorRect.Top;
-        int panelWidth = Math.Max(80, (int)(anchorWidth * 0.30));
-        // 面板高度固定 200 DIP：信息窗底部已经为它留出了同样的空间（见 MapInfoWindow.xaml）。
-        int panelHeight = Math.Max(120, (int)Math.Round(200 * dpi));
-        int left = anchorRect.Right - gap - panelWidth;
+        // 面板和「五行详情文字」同一行：高度就取那块的高度（约 96 DIP），
+        // 宽高比 1:0.62（宽 : 高），所以宽 = 高 / 0.62 ≈ 155 DIP。
+        int panelHeight = Math.Max(60, (int)Math.Round(96 * dpi));
+        int panelWidth2 = Math.Max(60, (int)Math.Round(panelHeight / 0.62));
+        int left = anchorRect.Right - gap - panelWidth2;
         int top = anchorRect.Bottom - gap - panelHeight;
-        overlay.SetBounds(left, top, panelWidth, panelHeight);
+        overlay.SetBounds(left, top, panelWidth2, panelHeight);
     }
 
     private static double dpiOf(IntPtr hwnd)
