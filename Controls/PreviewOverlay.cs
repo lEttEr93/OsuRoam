@@ -148,6 +148,10 @@ public sealed class PreviewOverlay : IDisposable
             return;
         owner = hwnd;
         SetWindowLongPtr(window, GwlpHwndParent, hwnd);
+        // 设 owner 会把 TOPMOST 丢掉（窗口变成「归属」于一个非置顶窗口），
+        // 之后它就会藏在浏览器后面 —— 明确重新置顶一次。
+        SetWindowPos(window, new IntPtr(-1), 0, 0, 0, 0,
+            SetWindowPosFlags.SWP_NOMOVE | SetWindowPosFlags.SWP_NOSIZE | SetWindowPosFlags.SWP_NOACTIVATE);
     }
 
     /// <summary>按**物理像素**摆位置（调用方从信息窗的 GetWindowRect 拿，不用管 DPI）。</summary>
@@ -167,8 +171,10 @@ public sealed class PreviewOverlay : IDisposable
         pixelWidth = width;
         pixelHeight = height;
 
-        SetWindowPos(window, IntPtr.Zero, left, top, width, height,
-            SetWindowPosFlags.SWP_NOZORDER | SetWindowPosFlags.SWP_NOACTIVATE);
+        SetWindowPos(window, new IntPtr(-1), left, top, width, height,
+            SetWindowPosFlags.SWP_NOACTIVATE);
+        if (GetWindowRect(window, out WindowRect rect))
+            AppLog.Info($"预览覆盖层：窗口矩形 {rect.Left},{rect.Top} {rect.Right - rect.Left}x{rect.Bottom - rect.Top}（物理像素）");
         if (sizeChanged)
             resizeSignal.Set();
     }
@@ -641,18 +647,30 @@ public sealed class PreviewOverlay : IDisposable
         }
 
         swapChain.Present(0, PresentFlags.None);
-        AppLog.Info($"预览覆盖层：原型模式，表面 {width}x{tallHeight}，动画由合成器推进");
+        AppLog.Info($"预览覆盖层：原型模式，表面 {width}x{tallHeight}，先静态显示 5 秒");
 
+        // 第一步：不放动画，offset = 0 静态显示。先确认「内容能不能出来」，
+        // 再把「动画参数对不对」分开验证。
+        visual.SetOffsetY(0f);
+        composition.Commit();
+        AppLog.Info("预览覆盖层：原型 静态 commit 完成（offset=0）");
+
+        // 静态阶段：每 4ms 再提交一次（排除「只 Present 一次所以没内容」这个可能）。
+        for (int i = 0; i < 300 && !token.IsCancellationRequested; i++)
+        {
+            swapChain.Present(0, PresentFlags.None);
+            Thread.Sleep(4);
+        }
+
+        // 第二步：叠动画。从 -H 到 0，重复两次。
         using IDCompositionAnimation animation = composition.CreateAnimation();
-        // 线性：从 -H 到 0，用时 VisibleSeconds，之后无限重复。
         animation.AddCubic(0, (float)VisibleSeconds, 0f, 0f, -height);
-        animation.AddRepeat(VisibleSeconds, 2);
+        animation.AddRepeat(VisibleSeconds, 100000);
         animation.End(VisibleSeconds * 2, 0f);
         visual.SetOffsetY(animation);
         composition.Commit();
+        AppLog.Info("预览覆盖层：原型 动画已挂上（-H → 0，重复）");
 
-        // 之后什么都不做：不提交、不重画，画面应该仍在匀速滚动。
-        // 一直保持到窗口被收起为止（之前只跑 4 秒，截图的时候画面早被回收了）。
         while (!token.IsCancellationRequested)
             Thread.Sleep(50);
     }
@@ -847,6 +865,18 @@ public sealed class PreviewOverlay : IDisposable
 
     private delegate IntPtr WindowProcDelegate(IntPtr hwnd, uint message, IntPtr wParam, IntPtr lParam);
 
+    [StructLayout(LayoutKind.Sequential)]
+    private struct WindowRect
+    {
+        public int Left;
+        public int Top;
+        public int Right;
+        public int Bottom;
+    }
+
+    [DllImport("user32.dll")]
+    private static extern bool GetWindowRect(IntPtr hwnd, out WindowRect rect);
+
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
     private struct WndClassEx
     {
@@ -932,6 +962,8 @@ public sealed class PreviewOverlay : IDisposable
     private enum SetWindowPosFlags : uint
     {
         SWP_NOZORDER = 0x0004,
+        SWP_NOSIZE = 0x0001,
+        SWP_NOMOVE = 0x0002,
         SWP_NOACTIVATE = 0x0010
     }
 }
