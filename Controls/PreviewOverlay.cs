@@ -286,6 +286,11 @@ public sealed partial class PreviewOverlay : IDisposable
     /// <summary>喂 tosu 报的预览音频位置（毫秒）。</summary>
     public void Sync(double milliseconds)
     {
+        // tosu 在「预览音频没在播」时会报 0；照它同步会让时钟回到开头，
+        // 而谱面音符在几十秒后 → 面板变成一块空的黑底。这种情况直接忽略。
+        if (!double.IsFinite(milliseconds) || milliseconds <= 0)
+            return;
+
         string? stats;
         lock (gate)
         {

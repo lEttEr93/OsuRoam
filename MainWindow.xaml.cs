@@ -1837,13 +1837,6 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
             if (mapInfoWindow is null)
                 ensureMapInfoWindow();
 
-            // 预览是信息窗的子页面：要显示预览，就得让这一页在。
-            // 从游玩回来时信息窗可能还是收起的，这里把它显示出来，否则面板会被隐藏逻辑挡掉。
-            if (mapInfoWindow is { IsVisible: false })
-            {
-                AppLog.Info("预览：信息窗不可见，重新显示它（预览是它的子页面）");
-                mapInfoWindow.Show();
-            }
 
             mapInfoWindow!.ShowFor(item);
             tosuNoticeKey = null;
