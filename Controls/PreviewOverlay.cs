@@ -157,7 +157,12 @@ public sealed partial class PreviewOverlay : IDisposable
     public static string SkinDirectory { get; set; } = string.Empty;
 
     /// <summary>仅供对照诊断：保留旧的逐帧交换链路径。</summary>
-    public static bool LegacyMode { get; set; }
+    /// <summary>
+    /// 默认走**逐帧直算**（每帧按时钟算位置，速度必然等于时钟速度）。
+    /// 设为 true 走图块 + 合成器动画那条路（--preview-retained），它靠估算速度/加速度，
+    /// 现场出现了「速度跟不上音乐 + 周期性抖动」。
+    /// </summary>
+    public static bool LegacyMode { get; set; } = true;
     /// <summary>诊断用：单次匀速动画，不接受音频校正。</summary>
     public static bool UncorrectedMotionProbe { get; set; }
     public static bool OpaqueMode { get; set; }

@@ -277,8 +277,9 @@ public partial class MainWindow : Window
             argument.Equals("--no-startup-ws", StringComparison.OrdinalIgnoreCase));
         if (!manageTosu)
             AppLog.Info("--no-tosu：这一轮不启动、也不连接 tosu");
-        Controls.PreviewOverlay.LegacyMode = Environment.GetCommandLineArgs()
-            .Any(a => a.Equals("--preview-legacy", StringComparison.OrdinalIgnoreCase));
+        // 默认逐帧直算（速度等于时钟速度）；--preview-retained 才用图块 + 合成器动画。
+        Controls.PreviewOverlay.LegacyMode = !Environment.GetCommandLineArgs()
+            .Any(a => a.Equals("--preview-retained", StringComparison.OrdinalIgnoreCase));
         // --preview-proto：保留旧原型开关；正式预览已默认使用合成器动画。
         if (Environment.GetCommandLineArgs().Any(a => a.Equals("--preview-proto", StringComparison.OrdinalIgnoreCase)))
         {
