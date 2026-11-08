@@ -309,6 +309,7 @@ public sealed partial class PreviewOverlay
 
 
         private PreviewSkin? skin;
+        private bool loggedFirstTile;
 
         private PreviewSkin loadSkin(ID2D1RenderTarget target)
         {
@@ -323,7 +324,7 @@ public sealed partial class PreviewOverlay
                 return null;
 
             // 横向拉伸（左右描边不糊），纵向平铺 —— 长条怎么拉长都保持图案密度。
-            using ID2D1BitmapBrush brush = target.CreateBitmapBrush(skin.HoldBody,
+            ID2D1BitmapBrush brush = target.CreateBitmapBrush(skin.HoldBody,
                 new Vortice.Direct2D1.BitmapBrushProperties(ExtendMode.Clamp, ExtendMode.Wrap,
                     Vortice.Direct2D1.BitmapInterpolationMode.Linear));
             return brush;
@@ -358,12 +359,19 @@ public sealed partial class PreviewOverlay
             double lane = (double)width / chart.KeyCount;
             double noteHeight = Math.Clamp(lane * 0.17, 6, 18);
             int count = 0;
+            ID2D1BitmapBrush? bodyBrush = null;
+            try
+            {
             Paint(tile.Surface, width, height,
-                target => skin ??= loadSkin(target),
+                target =>
+                {
+                    // 位图和位图画刷都必须在 BeginDraw **之前**创建：
+                    // D2D 在绘制期间持设备锁，那时 CreateBitmap/CreateBitmapBrush 会死锁。
+                    skin ??= loadSkin(target);
+                    bodyBrush = createBodyBrush(target);
+                },
                 target =>
             {
-                // 贴图优先：skin 里取得到就用皮肤的图，取不到才退回纯色块。
-                using ID2D1BitmapBrush? bodyBrush = createBodyBrush(target);
                 using ID2D1SolidColorBrush tap = target.CreateSolidColorBrush(new Color4(0.961f, 0.976f, 0.984f, 1));
                 using ID2D1SolidColorBrush hold = target.CreateSolidColorBrush(new Color4(0.882f, 0.318f, 0.482f, 1));
                 using ID2D1SolidColorBrush head = target.CreateSolidColorBrush(new Color4(0.984f, 0.949f, 0.961f, 1));
@@ -401,7 +409,17 @@ public sealed partial class PreviewOverlay
                     count++;
                 }
             });
+            }
+            finally
+            {
+                bodyBrush?.Dispose();
+            }
             tile.NoteCount = count;
+            if (!loggedFirstTile)
+            {
+                loggedFirstTile = true;
+                AppLog.Info($"预览：第一块图块已绘制（{count} 个音符，{width}x{height}）");
+            }
         }
 
         private void Paint(IDCompositionSurface surface, int w, int h,
