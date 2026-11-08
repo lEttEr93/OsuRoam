@@ -45,6 +45,9 @@ public sealed class TosuClient : IAsyncDisposable
     private string playStartResultsSignature = string.Empty;
     private string lastResultsSignature = string.Empty;
 
+    /// <summary>WebSocket 现在是通的（不代表 tosu 能读到游戏）。</summary>
+    public bool Connected { get; private set; }
+
     public event Action<string>? StatusChanged;
     /// <summary>连不上（或连上又断）时触发一次，一个重连周期一次。主窗口拿它决定要不要重新拉起 tosu。</summary>
     public event Action? ConnectFailed;
@@ -84,6 +87,7 @@ public sealed class TosuClient : IAsyncDisposable
                 using ClientWebSocket socket = new();
                 StatusChanged?.Invoke(Loc.T("tosu.connecting"));
                 await socket.ConnectAsync(new Uri(url), cancellationToken);
+                Connected = true;
                 StatusChanged?.Invoke(Loc.T("tosu.connected"));
                 await receiveAsync(socket, cancellationToken);
             }
@@ -94,12 +98,14 @@ public sealed class TosuClient : IAsyncDisposable
             catch (Exception exception)
             {
                 AppLog.Error("tosu 连接或读取失败", exception);
+                Connected = false;
                 StatusChanged?.Invoke(Loc.T("tosu.waiting"));
                 ConnectFailed?.Invoke();
                 try { await Task.Delay(TimeSpan.FromSeconds(3), cancellationToken); }
                 catch (OperationCanceledException) { break; }
             }
         }
+        Connected = false;
         StatusChanged?.Invoke(Loc.T("tosu.disconnected"));
     }
 

@@ -150,9 +150,13 @@ public partial class MainWindow : Window
     private string? statusRaw;
     private TosuSnapshot? lastSnapshot;
     private bool hiddenForPlay;
+    private readonly System.Windows.Threading.DispatcherTimer tosuHealthTimer;
     /// <summary>tosu 连续连不上几次了；每 4 次试着重拉一次。</summary>
     private int tosuConnectFailures;
     private int tosuRestartAttempts;
+    /// <summary>tosu 连着却读不到游戏状态时的自愈计时（现场：僵尸 tosu 占着端口，连得上但没数据）。</summary>
+    private DateTime emptyStateSince;
+    private DateTime lastTosuRestartAt;
     private bool restoreHistoryAfterPlay;
 
     public MainWindow()
@@ -187,6 +191,16 @@ public partial class MainWindow : Window
         {
             tosuConnectFailures = 0;
             tosuRestartAttempts = 0;
+            // 连着却一直报空状态 = tosu 读不到游戏（或者它已经坏在某个端口上）。
+            if (string.IsNullOrWhiteSpace(snapshot.StateName))
+            {
+                if (emptyStateSince == default)
+                    emptyStateSince = DateTime.UtcNow;
+            }
+            else
+            {
+                emptyStateSince = default;
+            }
             updateGameState(snapshot);
             updateInGameInfo(snapshot);
             updatePreview(snapshot);
@@ -200,6 +214,9 @@ public partial class MainWindow : Window
                 Dispatcher.BeginInvoke(stopPreview);
         };
         Loaded += MainWindow_Loaded;
+        tosuHealthTimer = new System.Windows.Threading.DispatcherTimer(TimeSpan.FromSeconds(5), System.Windows.Threading.DispatcherPriority.Background,
+            (_, _) => checkTosuHealth(), Dispatcher);
+        tosuHealthTimer.Start();
     }
 
     private async void MainWindow_Loaded(object sender, RoutedEventArgs e)
@@ -2484,6 +2501,53 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
         tosuRestartAttempts++;
         AppLog.Info($"tosu 连不上（连续 {tosuConnectFailures} 次），第 {tosuRestartAttempts} 次尝试重新拉起");
         _ = retryTosuAsync();
+    }
+
+    /// <summary>
+    /// tosu 自愈：连着、但 20 秒都没报出任何游戏状态，而 osu! 明明在跑 ——
+    /// 说明这个 tosu 已经读不到游戏了（现场就是僵尸 tosu 占着 24050）。
+    /// 它是我们拉起来的才敢重启，两次重启之间至少隔 2 分钟。
+    /// </summary>
+    private async void checkTosuHealth()
+    {
+        try
+        {
+            if (!tosu.Connected || emptyStateSince == default)
+                return;
+            if ((DateTime.UtcNow - emptyStateSince).TotalSeconds < 20)
+                return;
+            if ((DateTime.UtcNow - lastTosuRestartAt).TotalSeconds < 120)
+                return;
+            if (!tosuProcess.IsManagedRunning || !isGameRunning())
+                return;
+
+            lastTosuRestartAt = DateTime.UtcNow;
+            AppLog.Info("tosu 连着但 20 秒读不到游戏状态（osu! 在跑），重启 tosu");
+            await tosuProcess.ShutdownAsync(stopManagedProcess: true);
+            await Task.Delay(500);
+            await ensureTosuReadyAsync(sessionCancellation.Token);
+            emptyStateSince = default;
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception exception)
+        {
+            AppLog.Error("重启 tosu 失败", exception);
+        }
+    }
+
+    private static bool isGameRunning()
+    {
+        try
+        {
+            return System.Diagnostics.Process.GetProcessesByName("osu!").Length > 0 ||
+                   System.Diagnostics.Process.GetProcessesByName("osulazer").Length > 0;
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     private async Task retryTosuAsync()

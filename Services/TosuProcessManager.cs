@@ -9,13 +9,23 @@ namespace OsuRoam.Services;
 
 public sealed record TosuStartResult(bool Ready, bool StartedByRoam, string? ExecutablePath);
 
-public sealed class TosuProcessManager
+public sealed class TosuProcessManager : IDisposable
 {
     private static readonly TimeSpan StartupTimeout = TimeSpan.FromSeconds(30);
     private readonly SemaphoreSlim startGate = new(1, 1);
     private Process? managedProcess;
 
+    /// <summary>
+    /// 把 tosu 放进一个「最后一个句柄关闭就杀掉里面所有进程」的 Job。
+    /// 这样 Roam 被强杀（任务管理器 / taskkill / 崩溃）时，tosu 也会跟着消失 ——
+    /// 现场就是留了个僵尸 tosu 占着 24050，之后所有 Roam 都连上那个坏实例。
+    /// </summary>
+    private IntPtr jobHandle;
+
     public event Action<string>? StatusChanged;
+
+    /// <summary>tosu 是不是我们自己拉起来的（还活着）。</summary>
+    public bool IsManagedRunning => managedProcess is { HasExited: false };
 
     /// <summary>
     /// tosu 读不到 osu! 的内存（日志里出现 <c>Couldn't read …</c>）。
@@ -108,6 +118,7 @@ public sealed class TosuProcessManager
                 throw new InvalidOperationException(Loc.T("tosu.startfail"));
             }
 
+            addToKillOnCloseJob(process);
             managedProcess = process;
             process.BeginOutputReadLine();
             process.BeginErrorReadLine();
@@ -268,4 +279,98 @@ public sealed class TosuProcessManager
     /// <summary>tosu 读内存失败时的日志特征：<c>… updatePreciseState Couldn't read long at 418</c>。</summary>
     internal static bool IsMemoryReadFailure(string? line) =>
         !string.IsNullOrWhiteSpace(line) && line.Contains("Couldn't read", StringComparison.OrdinalIgnoreCase);
+
+    // ---- 让 tosu 必定随着 Roam 结束 ----
+
+    private const int JobObjectExtendedLimitInformation = 9;
+    private const uint JobObjectLimitKillOnJobClose = 0x2000;
+
+    /// <summary>把刚启动的 tosu 加进 Job：Roam 一死（哪怕是强杀），tosu 也会被系统收掉。</summary>
+    private void addToKillOnCloseJob(Process process)
+    {
+        try
+        {
+            if (jobHandle == IntPtr.Zero)
+            {
+                jobHandle = CreateJobObject(IntPtr.Zero, null);
+                if (jobHandle == IntPtr.Zero)
+                    return;
+
+                JobObjectExtendedLimitInformationStructure limits = new()
+                {
+                    BasicLimitInformation = new JobObjectBasicLimitInformation
+                    {
+                        LimitFlags = JobObjectLimitKillOnJobClose
+                    }
+                };
+                int size = System.Runtime.InteropServices.Marshal.SizeOf<JobObjectExtendedLimitInformationStructure>();
+                if (!SetInformationJobObject(jobHandle, JobObjectExtendedLimitInformation, ref limits, (uint)size))
+                    AppLog.Info($"设置 tosu 的 Job 限制失败（错误码 {System.Runtime.InteropServices.Marshal.GetLastWin32Error()}）");
+            }
+
+            if (!AssignProcessToJobObject(jobHandle, process.Handle))
+                AppLog.Info($"把 tosu 放进 Job 失败（错误码 {System.Runtime.InteropServices.Marshal.GetLastWin32Error()}）：强杀 Roam 时 tosu 可能会残留");
+        }
+        catch (Exception exception)
+        {
+            AppLog.Error("把 tosu 放进 Job 时出错", exception);
+        }
+    }
+
+    public void Dispose()
+    {
+        // 关掉句柄就会触发 KILL_ON_JOB_CLOSE，把 tosu 一起带走。
+        if (jobHandle == IntPtr.Zero)
+            return;
+        try { CloseHandle(jobHandle); } catch { }
+        jobHandle = IntPtr.Zero;
+    }
+
+    [System.Runtime.InteropServices.DllImport("kernel32.dll", SetLastError = true, CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
+    private static extern IntPtr CreateJobObject(IntPtr attributes, string? name);
+
+    [System.Runtime.InteropServices.DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool SetInformationJobObject(IntPtr job, int infoClass, ref JobObjectExtendedLimitInformationStructure info, uint length);
+
+    [System.Runtime.InteropServices.DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool AssignProcessToJobObject(IntPtr job, IntPtr process);
+
+    [System.Runtime.InteropServices.DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool CloseHandle(IntPtr handle);
+
+    [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
+    private struct JobObjectBasicLimitInformation
+    {
+        public long PerProcessUserTimeLimit;
+        public long PerJobUserTimeLimit;
+        public uint LimitFlags;
+        public UIntPtr MinimumWorkingSetSize;
+        public UIntPtr MaximumWorkingSetSize;
+        public uint ActiveProcessLimit;
+        public UIntPtr Affinity;
+        public uint PriorityClass;
+        public uint SchedulingClass;
+    }
+
+    [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
+    private struct IoCounters
+    {
+        public ulong ReadOperationCount;
+        public ulong WriteOperationCount;
+        public ulong OtherOperationCount;
+        public ulong ReadTransferCount;
+        public ulong WriteTransferCount;
+        public ulong OtherTransferCount;
+    }
+
+    [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
+    private struct JobObjectExtendedLimitInformationStructure
+    {
+        public JobObjectBasicLimitInformation BasicLimitInformation;
+        public IoCounters IoInfo;
+        public UIntPtr ProcessMemoryLimit;
+        public UIntPtr JobMemoryLimit;
+        public UIntPtr PeakProcessMemoryUsed;
+        public UIntPtr PeakJobMemoryUsed;
+    }
 }
