@@ -160,6 +160,9 @@ public sealed partial class PreviewOverlay : IDisposable
     /// <summary>顶部淡入（按屏幕位置逐段算 alpha）。默认关掉：先确认它是不是抖动来源之一。</summary>
     public static bool FadeEnabled { get; set; }
 
+    /// <summary>诊断：把整块画面填成品红，用来区分「画没画」和「显示链路通不通」。</summary>
+    public static bool OpaqueSelfTest { get; set; }
+
     /// <summary>仅供对照诊断：保留旧的逐帧交换链路径。</summary>
     /// <summary>
     /// 默认走**逐帧直算**（每帧按时钟算位置，速度必然等于时钟速度）。
@@ -867,6 +870,15 @@ public sealed partial class PreviewOverlay : IDisposable
     {
         ID2D1RenderTarget target = resources.Target;
         target.BeginDraw();
+        if (OpaqueSelfTest)
+        {
+            // 诊断用：整块画成品红。若面板是品红 → 画+显示都通，问题在音符绘制；
+            // 若仍是黑的 → 这条 hwnd 交换链的显示链路本身没生效。
+            target.Clear(new Color4(1f, 0f, 1f, 1f));
+            target.EndDraw(out _, out _);
+            return;
+        }
+
         target.Clear(useOpaque && !useHwndAlpha ? new Color4(0.055f, 0.071f, 0.094f, 1) : new Color4(0, 0, 0, 0));
         DrawnNotes = 0;
 
