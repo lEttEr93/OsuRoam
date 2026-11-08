@@ -266,14 +266,20 @@ public partial class MainWindow : Window
         // 用来定位「发布包能导入、本地新构建一导入就让游戏崩」到底出在哪一步。
         BeatmapDownloadService.ClassicLaunch = Environment.GetCommandLineArgs().Any(argument =>
             argument.Equals("--import-launch=classic", StringComparison.OrdinalIgnoreCase));
-        bool startupWebSocket = !Environment.GetCommandLineArgs().Any(argument =>
+        // --no-tosu：连 tosu 都不碰（不启动进程、不连 WebSocket），用来单独验证
+        // 「导不进去」到底和 tosu 有没有关系。
+        bool manageTosu = !Environment.GetCommandLineArgs().Any(argument =>
+            argument.Equals("--no-tosu", StringComparison.OrdinalIgnoreCase));
+        bool startupWebSocket = manageTosu && !Environment.GetCommandLineArgs().Any(argument =>
             argument.Equals("--no-startup-ws", StringComparison.OrdinalIgnoreCase));
+        if (!manageTosu)
+            AppLog.Info("--no-tosu：这一轮不启动、也不连接 tosu");
         if (BeatmapDownloadService.ClassicLaunch)
             AppLog.Info("导入启动方式：classic（1.5.5 的行为）");
         if (!startupWebSocket)
             AppLog.Info("启动时不连 tosu（1.5.5 的行为）");
 
-        if (settings.AutoStartTosu)
+        if (settings.AutoStartTosu && manageTosu)
             await ensureTosuReadyAsync(sessionCancellation.Token);
 
         // 谱面预览和「信息栏显示游戏内选中的谱面」都只靠 WebSocket 快照，
