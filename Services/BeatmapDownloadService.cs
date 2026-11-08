@@ -398,6 +398,10 @@ public sealed class BeatmapDownloadService : IDisposable
                             $"TEMP={Environment.GetEnvironmentVariable("TEMP")}｜" +
                             $"USERPROFILE={Environment.GetEnvironmentVariable("USERPROFILE")}｜" +
                             $"cwd={Environment.CurrentDirectory}");
+                // 现场查了很久的一种情形：随包的 tosu 版本和 osu! 版本不兼容，
+                // tosu 一挂上去游戏就在启动阶段崩（tosu 4.26.3 + lazer 2026.1005）。
+                AppLog.Info("提示：如果 tosu 是 Roam 自己启动的那份（随包版本），它和 osu! 版本不兼容时" +
+                            "也会让游戏在启动阶段崩；到设置里把 tosu 路径指向另一份 tosu 再试。");
                 Notice?.Invoke(message);
                 if (!ClassicLaunch)
                     _ = warmRetryAsync(installation, path);
