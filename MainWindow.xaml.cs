@@ -467,11 +467,9 @@ public partial class MainWindow : Window
                 return;
             }
 
-            if (!fpsProbe || mode == "fps-pair")
-            {
-                showMapInfoFor(buildSnapshotItem());
-                await Task.Delay(1000);
-            }
+            // 预览是信息窗的子页面，探针也必须先有信息窗（否则连画面都不会出现）。
+            showMapInfoFor(buildSnapshotItem());
+            await Task.Delay(1000);
 
             previewWindow = new PreviewWindow(layered: layeredWindow);
             previewWindow.Closed += (_, _) => previewWindow = null;
@@ -484,7 +482,7 @@ public partial class MainWindow : Window
             else
             {
                 previewWindow.DockTo(this);
-                previewWindow.Anchor = fpsProbe ? null : mapInfoWindow;
+                previewWindow.Anchor = mapInfoWindow;
             }
 
             if (mode == "fps-floating")
@@ -532,7 +530,8 @@ public partial class MainWindow : Window
 
             AppLog.Info($"预览窗：{previewWindow.Describe()}");
             AppLog.Info($"信息窗高度：{mapInfoWindow?.ActualHeight:0.0}（预览窗 {previewWindow.ActualHeight:0.0}）");
-            RenderDiagnostics.CaptureWindow(previewWindow, path);
+            if (shotPath is null)
+                RenderDiagnostics.CaptureWindow(mapInfoWindow, path);
             if (mapInfoWindow is not null)
                 RenderDiagnostics.CaptureWindow(mapInfoWindow, Path.Combine(
                     Path.GetDirectoryName(path) ?? ".", $"{Path.GetFileNameWithoutExtension(path)}-info.png"));
@@ -2622,6 +2621,8 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
         value.Exploration = ExplorationSlider.Value;
         value.PoolSize = int.TryParse((PoolSizeBox.SelectedItem as ComboBoxItem)?.Content?.ToString(), out int size) ? size : 5;
         value.CacheLimitMegabytes = parseInt(CacheLimitBox, 128, 65536);
+        value.PreviewScrollSeconds = parseDouble(PreviewScrollBox, 0.4, 4.0);
+        value.PreviewLatencyMilliseconds = parseDouble(PreviewLatencyBox, 0, 300);
         value.ExcludeRecentlyPlayed = ExcludeRecentCheck.IsChecked == true;
         value.ExcludeInstalledBeatmaps = ExcludeInstalledCheck.IsChecked == true;
         value.AutoDownload = AutoDownloadCheck.IsChecked == true;
@@ -2693,6 +2694,8 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
         foreach (ComboBoxItem item in PoolSizeBox.Items)
             if (Equals(item.Content?.ToString(), settings.PoolSize.ToString())) PoolSizeBox.SelectedItem = item;
         CacheLimitBox.Text = settings.CacheLimitMegabytes.ToString();
+        PreviewScrollBox.Text = settings.PreviewScrollSeconds.ToString("0.0#");
+        PreviewLatencyBox.Text = settings.PreviewLatencyMilliseconds.ToString("0");
         foreach (ComboBoxItem item in LanguageBox.Items)
             if (Equals(item.Tag?.ToString(), Loc.ToTag(Loc.Parse(settings.Language)))) LanguageBox.SelectedItem = item;
         // 配置里的语言在这里才生效（App 启动时用的是「跟随系统」）。
@@ -3118,6 +3121,13 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
     {
         try
         {
+            // 谱面预览是信息窗的一个子页面：信息窗不在就绝不显示。
+            if (mapInfoWindow is null)
+            {
+                dismissPreview();
+                return;
+            }
+
             if (previewWindow is null)
             {
                 previewWindow = new PreviewWindow();
@@ -3125,6 +3135,9 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
                 previewWindow.DockTo(this);
             }
 
+            // 流速 / 延迟补偿：用户可调，改完立刻生效（见 PreviewTuning_LostFocus）。
+            previewWindow.VisibleSeconds = settings.PreviewScrollSeconds;
+            previewWindow.LatencyMilliseconds = settings.PreviewLatencyMilliseconds;
             syncPreviewGeometry();
             List<string> meta = [$"{chart.KeyCount}K"];
             if (!string.IsNullOrWhiteSpace(snapshot.Mapper))
@@ -3230,6 +3243,23 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
         catch (Exception exception)
         {
             AppLog.Error("保存谱面信息窗设置失败", exception);
+        }
+    }
+
+    /// <summary>预览的两个手感参数（流速、延迟补偿）：失焦就立刻生效，不用重启。</summary>
+    private void PreviewTuning_LostFocus(object sender, RoutedEventArgs e)
+    {
+        if (!settingsControlsReady || previewWindow is null)
+            return;
+
+        try
+        {
+            previewWindow.VisibleSeconds = parseDouble(PreviewScrollBox, 0.4, 4.0);
+            previewWindow.LatencyMilliseconds = parseDouble(PreviewLatencyBox, 0, 300);
+        }
+        catch (Exception exception)
+        {
+            AppLog.Error("预览参数不合法", exception);
         }
     }
 

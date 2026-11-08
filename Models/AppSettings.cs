@@ -83,6 +83,10 @@ public sealed class AppSettings
     public string MapInfoSource { get; set; } = MapInfoSources.Imported;
     /// <summary>选歌界面里再开一个谱面预览窗，跟着游戏里的预览音频滚 mania 谱面。</summary>
     public bool ShowPreview { get; set; } = true;
+    /// <summary>预览流速：一屏覆盖多少秒谱面（越小滚得越快）。目标是与玩家游戏内流速一致。</summary>
+    public double PreviewScrollSeconds { get; set; } = 1.25;
+    /// <summary>预览延迟补偿（毫秒）：预览要追上游戏画面，往未来多看一点。</summary>
+    public double PreviewLatencyMilliseconds { get; set; } = 35;
     public bool ExcludeRecentlyPlayed { get; set; } = true;
     /// <summary>扫描 osu! 谱面目录，已经装在机器上的难度不再推荐（同曲其他难度仍可推荐）。</summary>
     public bool ExcludeInstalledBeatmaps { get; set; } = true;
