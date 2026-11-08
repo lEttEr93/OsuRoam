@@ -178,7 +178,7 @@ public sealed partial class PreviewOverlay : IDisposable
     /// 后缓冲索引没对上），而透明 + DComp 那条路是验证过能正常画的。
     /// 需要实验时加 --preview-opaque。
     /// </summary>
-    public static bool OpaqueMode { get; set; }
+    public static bool OpaqueMode { get; set; } = true;
     public static bool TransparentHwndMode { get; set; }
     public static bool NoteVisualMode { get; set; }
 
