@@ -233,6 +233,8 @@ public sealed partial class PreviewOverlay : IDisposable
     {
         lock (gate)
         {
+            if (ReferenceEquals(chart, value))
+                return;
             chart = value;
             clock = new PreviewClock();
             showing = value is not null;
@@ -379,8 +381,12 @@ public sealed partial class PreviewOverlay : IDisposable
 
     private void startRendering()
     {
-        if (renderThread is not null)
+        if (renderThread is { IsAlive: true })
             return;
+        // 线程异常退出后 renderThread 仍非空，之前会导致永不重启。
+        stopSource?.Dispose();
+        stopSource = null;
+        renderThread = null;
 
         stopSource = new CancellationTokenSource();
         CancellationToken token = stopSource.Token;
@@ -532,8 +538,20 @@ public sealed partial class PreviewOverlay : IDisposable
             Stopwatch frameClock = Stopwatch.StartNew();
             double lastFrame = 0;
 
+            string branch = "start";
+            double lastBeat = 0;
             while (!token.IsCancellationRequested)
             {
+                if (frameClock.Elapsed.TotalSeconds - lastBeat > 2)
+                {
+                    lastBeat = frameClock.Elapsed.TotalSeconds;
+                    lock (gate)
+                        AppLog.Info($"预览心跳：分支={branch} 线程={Environment.CurrentManagedThreadId} " +
+                                    $"谱面={(chart is null ? "无" : "有")} 显示={showing} " +
+                                    $"清屏请求={transparentFramePending} 尺寸={pixelWidth}x{pixelHeight} " +
+                                    $"窗口={(window == IntPtr.Zero ? "无" : IsWindow(window) ? (IsWindowVisible(window) ? "可见" : "隐藏") : "已销毁")}");
+                }
+
                 if (resizeSignal.Wait(0))
                 {
                     resizeSignal.Reset();
@@ -559,15 +577,25 @@ public sealed partial class PreviewOverlay : IDisposable
 
                 if (width <= 1 || height <= 1)
                 {
+                    branch = "size-too-small";
                     Thread.Sleep(15);
                     continue;
                 }
 
                 double waitStart = frameClock.Elapsed.TotalMilliseconds;
-                if (frameLatency != IntPtr.Zero && WaitForSingleObject(frameLatency, 100) == WaitTimeout)
+                branch = "wait";
+                if (frameLatency != IntPtr.Zero)
                 {
-                    Thread.Sleep(4);
-                    continue;
+                    uint wait = WaitForSingleObject(frameLatency, 100);
+                    if (wait == WaitTimeout)
+                    {
+                        branch = "wait-timeout";
+                        Thread.Sleep(4);
+                        continue;
+                    }
+
+                    if (wait == WaitFailed)
+                        AppLog.Info($"预览：帧延迟等待失败，错误码 {System.Runtime.InteropServices.Marshal.GetLastWin32Error()}");
                 }
                 double waitMs = frameClock.Elapsed.TotalMilliseconds - waitStart;
 
@@ -1080,6 +1108,7 @@ public sealed partial class PreviewOverlay : IDisposable
     }
 
     private const uint WaitTimeout = 258;
+    private const uint WaitFailed = 0xFFFFFFFF;
 
     [DllImport("kernel32.dll", SetLastError = true)]
     private static extern uint WaitForSingleObject(IntPtr handle, uint milliseconds);
@@ -1096,6 +1125,12 @@ public sealed partial class PreviewOverlay : IDisposable
 
     [DllImport("user32.dll", SetLastError = true)]
     private static extern bool DestroyWindow(IntPtr hwnd);
+
+    [DllImport("user32.dll")]
+    private static extern bool IsWindow(IntPtr hwnd);
+
+    [DllImport("user32.dll")]
+    private static extern bool IsWindowVisible(IntPtr hwnd);
 
     [DllImport("user32.dll", SetLastError = true)]
     private static extern IntPtr DefWindowProc(IntPtr hwnd, uint message, IntPtr wParam, IntPtr lParam);
