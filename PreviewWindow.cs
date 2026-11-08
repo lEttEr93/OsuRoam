@@ -132,6 +132,19 @@ public sealed class PreviewWindow : IDisposable
         startFollowing();
     }
 
+    /// <summary>
+    /// 有谱面但没显示时，重新显示一次。用于「加载与自动收起撞车」之后的自愈：
+    /// 回到选歌时 tosu 可能只发一条快照，那条快照的加载结果被收起逻辑丢掉了。
+    /// </summary>
+    /// <summary>面板当前是否真的显示着（窗口可见且有谱面）。</summary>
+    public bool IsPanelVisible => overlay.IsVisible;
+
+    public void Reshow()
+    {
+        if (pendingChart is not null)
+            tryShow();
+    }
+
     public void SetTime(double milliseconds) => overlay.Sync(milliseconds);
 
     public void CaptureSurface(string path) => overlay.CaptureFrame(path);

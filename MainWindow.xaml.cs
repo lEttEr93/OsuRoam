@@ -3143,7 +3143,16 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
         }
 
         if (previewChart is null)
+        {
+            // 谱面丢了（加载撞上收起）就重来一次，别等下一个快照 —— 回到选歌时它可能只发一条。
+            previewKey = string.Empty;
+            _ = loadPreviewChartAsync(snapshot, key);
             return;
+        }
+
+        // 有谱面但面板没显示：自愈（这正是「回选歌后只剩黑底」的那一步）。
+        if (previewWindow is null || !previewWindow.IsPanelVisible)
+            previewWindow?.Reshow();
 
         previewWindow?.SetTime(snapshot.PreviewTime);
     }
