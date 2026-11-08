@@ -73,6 +73,24 @@ public sealed class TosuProcessManager
                 },
                 EnableRaisingEvents = true
             };
+
+            // tosu 是 pkg 打的 Node 单文件：启动时要把原生模块解到
+            // %USERPROFILE%\.cache\pkg\<hash>，用户目录权限一有问题就
+            // 「EPERM: mkdir …」然后退出码 1（现场就是这台机器）。
+            // 把它的用户目录指到 Roam 自己的 data 下，这条路不依赖配置文件权限。
+            string tosuHome = Path.Combine(StoragePaths.Root, "tosu-home");
+            try
+            {
+                Directory.CreateDirectory(tosuHome);
+                process.StartInfo.Environment["USERPROFILE"] = tosuHome;
+                process.StartInfo.Environment["HOME"] = tosuHome;
+                AppLog.Info($"tosu 的用户目录：{tosuHome}");
+            }
+            catch (Exception exception)
+            {
+                AppLog.Error("tosu 的临时目录不可用，退回默认用户目录", exception);
+            }
+
             process.StartInfo.ArgumentList.Add("--update=false");
             process.OutputDataReceived += (_, args) => logProcessLine("tosu", args.Data);
             process.ErrorDataReceived += (_, args) => logProcessLine("tosu stderr", args.Data);
