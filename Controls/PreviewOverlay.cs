@@ -131,6 +131,12 @@ public sealed class PreviewOverlay : IDisposable
     /// </summary>
     public static int PaceMode { get; set; } = 0;
 
+    /// <summary>
+    /// 原型模式：不逐帧提交，内容交给 IDCompositionAnimation 匀速平移，应用线程只负责
+    /// 铺一次内容。用来验证「合成器自己推进」是否解决画面一抽一抽。
+    /// </summary>
+    public static bool PrototypeMode { get; set; }
+
     /// <summary>创建 D3D 设备用的适配器序号（-1 = 默认硬件适配器）。</summary>
     public static int AdapterIndex { get; set; } = -1;
     public int DrawnNotes { get; private set; }
@@ -184,6 +190,17 @@ public sealed class PreviewOverlay : IDisposable
 
         if (window == IntPtr.Zero)
             return;
+
+        // 原型/无锚点时给一个默认位置，否则窗口是 0x0，什么都看不到。
+        if (PrototypeMode)
+        {
+            SetBounds(600, 150, 300, 420);
+            AppLog.Info($"预览覆盖层（原型）：窗口 {pixelWidth}x{pixelHeight} @ {pixelLeft},{pixelTop}");
+        }
+        else if (pixelWidth <= 1 || pixelHeight <= 1)
+        {
+            SetBounds(900, 200, 300, 420);
+        }
 
         ShowWindow(window, ShowWindowCommand.SW_SHOWNOACTIVATE);
         startRendering();
@@ -360,7 +377,7 @@ public sealed class PreviewOverlay : IDisposable
                 swapChain = factory.CreateSwapChainForComposition(device, new SwapChainDescription1
                 {
                     Width = (uint)Math.Max(1, width),
-                    Height = (uint)Math.Max(1, height),
+                    Height = (uint)Math.Max(1, PrototypeMode ? height * 2 : height),
                     Format = Format.B8G8R8A8_UNorm,
                     BufferCount = 2,
                     BufferUsage = Usage.RenderTargetOutput,
@@ -401,6 +418,14 @@ public sealed class PreviewOverlay : IDisposable
 
             d2dFactory = D2D1.D2D1CreateFactory<ID2D1Factory1>(Vortice.Direct2D1.FactoryType.SingleThreaded);
             AppLog.Info($"预览覆盖层：D3D11 + DirectComposition 就绪，{width}x{height}");
+
+            if (PrototypeMode)
+            {
+                // 原型不依赖锚点：窗口尺寸没量到就先用一个固定大小，保证能看到东西。
+                runAnimationPrototype(device, swapChain, visual, composition!, d2dFactory,
+                    Math.Max(300, width), Math.Max(420, height), token);
+                return;
+            }
 
             FrameResources?[] resources = new FrameResources?[2];
             Stopwatch frameClock = Stopwatch.StartNew();
@@ -580,6 +605,56 @@ public sealed class PreviewOverlay : IDisposable
             AppLog.Error("预览覆盖层：枚举适配器失败", exception);
             return null;
         }
+    }
+
+    /// <summary>
+    /// 最小验证：一块 2 屏高的表面（上下两半图案相同），用 DComp 动画把它从 -H 匀速平移到 0，
+    /// 配合 AddRepeat 无限循环 —— 之后**应用线程不再提交任何一帧**，画面完全由合成器推进。
+    /// 如果这样看着是顺的，就说明「合成器动画」这条路可行，再把谱面分块接进来。
+    /// </summary>
+    private void runAnimationPrototype(ID3D11Device device, IDXGISwapChain1 swapChain,
+        IDCompositionVisual visual, IDCompositionDevice composition,
+        ID2D1Factory1 factory, int width, int height, CancellationToken token)
+    {
+        int tallHeight = Math.Max(2, height * 2);
+        // 交换链在创建时就按 2 屏高建好了（SetContent 之后再 ResizeBuffers 会让视觉失去内容）。
+
+        using (IDXGISurface surface = swapChain.GetBuffer<IDXGISurface>(0))
+        {
+            RenderTargetProperties properties = new(
+                RenderTargetType.Default,
+                new Vortice.DCommon.PixelFormat(Format.B8G8R8A8_UNorm, Vortice.DCommon.AlphaMode.Premultiplied),
+                96, 96, RenderTargetUsage.None, Vortice.Direct2D1.FeatureLevel.Default);
+            using ID2D1RenderTarget target = factory.CreateDxgiSurfaceRenderTarget(surface, properties);
+            using ID2D1SolidColorBrush brush = target.CreateSolidColorBrush(new Color4(0xF5 / 255f, 0xF9 / 255f, 0xFB / 255f, 1f));
+
+            target.BeginDraw();
+            target.Clear(new Color4(0, 0, 0, 0));
+            // 上下两半画同样的条纹：平移一个 H 之后内容完全重合，所以循环是无缝的。
+            double barHeight = Math.Max(3, height / 60.0);
+            for (double y = 0; y < height; y += height / 12.0)
+            {
+                target.FillRectangle(rect(0, y, width, barHeight), brush);
+                target.FillRectangle(rect(0, y + height, width, barHeight), brush);
+            }
+            target.EndDraw(out _, out _);
+        }
+
+        swapChain.Present(0, PresentFlags.None);
+        AppLog.Info($"预览覆盖层：原型模式，表面 {width}x{tallHeight}，动画由合成器推进");
+
+        using IDCompositionAnimation animation = composition.CreateAnimation();
+        // 线性：从 -H 到 0，用时 VisibleSeconds，之后无限重复。
+        animation.AddCubic(0, (float)VisibleSeconds, 0f, 0f, -height);
+        animation.AddRepeat(VisibleSeconds, 2);
+        animation.End(VisibleSeconds * 2, 0f);
+        visual.SetOffsetY(animation);
+        composition.Commit();
+
+        // 之后什么都不做：不提交、不重画，画面应该仍在匀速滚动。
+        // 一直保持到窗口被收起为止（之前只跑 4 秒，截图的时候画面早被回收了）。
+        while (!token.IsCancellationRequested)
+            Thread.Sleep(50);
     }
 
     private static FrameResources createFrameResources(ID2D1Factory1 factory, IDXGISwapChain1 swapChain, int index)

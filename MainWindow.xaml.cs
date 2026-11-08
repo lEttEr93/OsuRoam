@@ -275,7 +275,14 @@ public partial class MainWindow : Window
             argument.Equals("--no-startup-ws", StringComparison.OrdinalIgnoreCase));
         if (!manageTosu)
             AppLog.Info("--no-tosu：这一轮不启动、也不连接 tosu");
-        // --preview-pace=<0|1|2>：提交节拍模式，配合 PresentMon 做对照。
+        // --preview-proto：合成器动画原型（内容由 DComp 自己推进，应用线程不逐帧提交）。
+        if (Environment.GetCommandLineArgs().Any(a => a.Equals("--preview-proto", StringComparison.OrdinalIgnoreCase)))
+        {
+            Controls.PreviewOverlay.PrototypeMode = true;
+            AppLog.Info("预览：合成器动画原型模式");
+        }
+
+        // --preview-pace=<0|1|2|3>：提交节拍模式，配合 PresentMon 做对照。
         string? paceArg = Environment.GetCommandLineArgs()
             .FirstOrDefault(argument => argument.StartsWith("--preview-pace=", StringComparison.OrdinalIgnoreCase));
         if (paceArg is not null && int.TryParse(paceArg["--preview-pace=".Length..], out int pace))
