@@ -170,10 +170,12 @@ public sealed partial class PreviewOverlay : IDisposable
     /// <summary>诊断用：单次匀速动画，不接受音频校正。</summary>
     public static bool UncorrectedMotionProbe { get; set; }
     /// <summary>
-    /// 不透明呈现（普通窗口 + hwnd 交换链）。默认打开：透明必须走 DWM 合成，
-    /// 帧时间上限就是那样；改成不透明后有机会拿到独立翻转，而且画面上它就是卡片里的一块面板。
+    /// 不透明呈现（普通窗口 + hwnd 交换链）。
+    /// **默认关闭**：这条路径目前只画出黑底、音符不显示（D2D 目标与 hwnd 交换链的
+    /// 后缓冲索引没对上），而透明 + DComp 那条路是验证过能正常画的。
+    /// 需要实验时加 --preview-opaque。
     /// </summary>
-    public static bool OpaqueMode { get; set; } = true;
+    public static bool OpaqueMode { get; set; }
     public static bool TransparentHwndMode { get; set; }
     public static bool NoteVisualMode { get; set; }
 
