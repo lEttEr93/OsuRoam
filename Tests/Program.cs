@@ -3569,8 +3569,9 @@ static void testPreviewClockFreezesWhenSourceStops()
     PreviewClock clock = new();
     clock.Sync(5000, 0);
     double now = 0;
-    // 先跑过「停更判定」的门槛（200ms），再取样；之前那段本来还该往前走。
-    for (int frame = 0; frame < 20; frame++)
+    // 先跑过「停更判定」的门槛（PreviewClock.StallThreshold），再取样；
+    // 这段本来还该往前走，所以用 60 帧（≈960ms）确保已经越界。
+    for (int frame = 0; frame < 60; frame++)
     {
         now += 16;
         clock.Advance(now, 16);
@@ -3639,7 +3640,7 @@ static void testPreviewClockRepeatedSamplesStop()
         clock.Sync(5000, now);
         clock.Advance(now, 50);
     }
-    assertNear(5200, clock.Time, "repeated paused samples cannot extend extrapolation");
+    assertNear(5000 + PreviewClock.StallThreshold, clock.Time, "repeated paused samples cannot extend extrapolation");
     assertNear(0, clock.Rate, "paused animation must stop");
     clock.Sync(double.PositiveInfinity, 2050);
     assertTrue(double.IsFinite(clock.Time), "invalid samples cannot poison the timeline");
@@ -3650,7 +3651,8 @@ static void testPreviewClockDelayedWakeStopsAtDeadline()
     PreviewClock clock = new();
     clock.Sync(7000, 0);
     clock.Advance(1000, 1000);
-    assertNear(7200, clock.Time, "late worker wake cannot move past the animation deadline");
+    assertNear(7000 + PreviewClock.StallThreshold, clock.Time,
+        "late worker wake cannot move past the animation deadline");
     assertNear(0, clock.PredictionRemaining(1000), "expired prediction window");
 }
 
