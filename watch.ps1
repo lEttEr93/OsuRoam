@@ -25,12 +25,13 @@ $candidates += (Get-Command dotnet -ErrorAction SilentlyContinue | Select-Object
 $dotnet = $candidates | Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1
 if (-not $dotnet) { throw "找不到 dotnet：装一个，或改 watch.ps1 里的候选路径" }
 
-# TMP/TEMP 指向 C:\Users\<user>\AppData\Local\Temp 时 MSBuild 写不进去（ACL），
-# 报出来只是一句 MSB1025 内部错误。给编译单独一个仓库内的临时目录。
+# TMP/TEMP 可能写不进去（MSBuild 只会报一句 MSB1025 内部错误）。编译时指到仓库内的
+# bin\tmp，但**启动 App 前必须恢复**：App 拉起的 osu! 会继承 TMP，
+# 让游戏用仓库里的临时目录出过问题（导入后 7 秒崩在 AuthNative.dll）。
 $tempDir = Join-Path $root "bin\tmp"
 New-Item -ItemType Directory -Force -Path $tempDir | Out-Null
-$env:TMP = $tempDir
-$env:TEMP = $tempDir
+$realTmp = $env:TMP
+$realTemp = $env:TEMP
 
 # 根目录只看这一层（编译输出在 bin/obj 里，递归会把它们也算进来）；
 # 子目录按源码目录递归。
@@ -102,11 +103,18 @@ function Stop-App {
 function Start-App {
     Stop-App
     Ensure-DevTosu
+    $env:TMP = $tempDir
+    $env:TEMP = $tempDir
     $time = Measure-Command {
         $log = & $dotnet build $project -c Debug -v q --nologo 2>&1
         $script:buildLog = $log
         $script:buildCode = $LASTEXITCODE
     }
+
+    # 恢复真实 TMP/TEMP 再启动：App 拉起的 osu! 会继承它们。
+    if ($realTmp) { $env:TMP = $realTmp } else { Remove-Item Env:TMP -ErrorAction SilentlyContinue }
+    if ($realTemp) { $env:TEMP = $realTemp } else { Remove-Item Env:TEMP -ErrorAction SilentlyContinue }
+
     if ($script:buildCode -ne 0) {
         Write-Host ("[{0}] 编译失败（{1:0.0}s）" -f (Get-Date -Format HH:mm:ss), $time.TotalSeconds) -ForegroundColor Red
         $script:buildLog | Where-Object { $_ -match "error|错误" } | Select-Object -First 12 | ForEach-Object { Write-Host "  $_" }
