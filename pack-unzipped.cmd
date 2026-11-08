@@ -89,6 +89,14 @@ if not exist "%TARGET%\OsuRoam.exe" (
 )
 if not exist "%TARGET%\tosu.exe" echo   note: tosu.exe missing in the target
 
+rem  两个启动器：双击即可，等价于带不同参数运行（用于对照实验）
+> "%TARGET%un-default.cmd" echo @echo off
+>>"%TARGET%un-default.cmd" echo cd /d "%%~dp0"
+>>"%TARGET%un-default.cmd" echo start "" "OsuRoam.exe"
+> "%TARGET%un-pace1.cmd" echo @echo off
+>>"%TARGET%un-pace1.cmd" echo cd /d "%%~dp0"
+>>"%TARGET%un-pace1.cmd" echo start "" "OsuRoam.exe" --preview-pace=1
+
 echo.
 echo [OK] done. Contents of "%TARGET%":
 dir /b "%TARGET%"
