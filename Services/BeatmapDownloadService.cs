@@ -240,10 +240,16 @@ public sealed class BeatmapDownloadService : IDisposable
             throw new InvalidOperationException(Loc.T("download.noosu"));
         }
 
-        ProcessStartInfo startInfo = new(installation.Executable) { UseShellExecute = true };
-        // 工作目录跟资源管理器双击时一致（游戏自己目录）：某些版本的原生库是按
-        // 当前目录找的，从 Roam 目录里启动会让游戏在启动阶段就崩掉。
-        startInfo.WorkingDirectory = Path.GetDirectoryName(installation.Executable) ?? string.Empty;
+        // 用 CreateProcess（UseShellExecute=false）而不是 ShellExecute：
+        // 现场「手动双击游戏正常、从 Roam 带文件启动 7 秒后崩在 AuthNative.dll」，
+        // 而同样的命令行从 cmd 里跑是好的。两者唯一的区别就是走 ShellExecute 还是
+        // CreateProcess，所以这里改成和 cmd 一样的那条路。
+        ProcessStartInfo startInfo = new(installation.Executable)
+        {
+            UseShellExecute = false,
+            // 工作目录跟资源管理器双击时一致（游戏自己目录）。
+            WorkingDirectory = Path.GetDirectoryName(installation.Executable) ?? string.Empty
+        };
         startInfo.ArgumentList.Add(path);
 
         Process? started;
