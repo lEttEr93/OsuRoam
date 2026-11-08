@@ -50,7 +50,8 @@
                 </Border.Background>
             </Border>
 
-            <Grid Margin="11,9,11,10">
+            <!-- 底部留 210 DIP：右下角那块是谱面预览面板（不在 WPF 里画，由覆盖层窗口填进去） -->
+            <Grid Margin="11,9,11,210">
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto" />
                 <!-- 星级/胶囊那一行用星号：卡片高度锁定时，剩余空间都给它，

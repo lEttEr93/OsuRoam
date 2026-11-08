@@ -210,7 +210,8 @@ public sealed class PreviewWindow : IDisposable
         int anchorWidth = anchorRect.Right - anchorRect.Left;
         int anchorHeight = anchorRect.Bottom - anchorRect.Top;
         int panelWidth = Math.Max(80, (int)(anchorWidth * 0.30));
-        int panelHeight = Math.Max(60, (int)(anchorHeight * 0.18));
+        // 面板高度固定 200 DIP：信息窗底部已经为它留出了同样的空间（见 MapInfoWindow.xaml）。
+        int panelHeight = Math.Max(120, (int)Math.Round(200 * dpi));
         int left = anchorRect.Right - gap - panelWidth;
         int top = anchorRect.Bottom - gap - panelHeight;
         overlay.SetBounds(left, top, panelWidth, panelHeight);
