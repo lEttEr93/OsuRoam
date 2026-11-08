@@ -49,6 +49,7 @@ public sealed partial class PreviewOverlay : IDisposable
     private PreviewClock clock = new();
     private string? captureRequest;
     private bool transparentFramePending;
+    private double lastStatusLog;
     private bool hasContentOnScreen;
     private bool showing;
 
