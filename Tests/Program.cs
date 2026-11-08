@@ -120,6 +120,7 @@ testPreviewChartFindsVisibleRange();
 testPreviewClockFollowsSource();
 testPreviewClockFreezesWhenSourceStops();
 testPreviewClockSnapsOnJump();
+testPreviewClockNeverGoesBackwards();
 testTosuSnapshotCarriesPreviewTime();
 Console.WriteLine("All state transition, recommendation, mode profile, and tosu integration tests passed.");
 return 0;
@@ -3541,6 +3542,29 @@ static void testPreviewClockFreezesWhenSourceStops()
 }
 
 /// <summary>换歌 / 玩家把预览拖回去：差异大的时候直接对齐，别慢慢磨几秒。</summary>
+/// <summary>
+/// 采样抖动 / 样本迟到时，画面绝不能倒退 —— 那是肉眼能看到的「倒回去一点点」。
+/// 只有源真的跳回去一大截（预览重播）才允许倒退。
+/// </summary>
+static void testPreviewClockNeverGoesBackwards()
+{
+    PreviewClock clock = new();
+    clock.Sync(50000, 0);
+    for (int i = 1; i <= 20; i++)
+        clock.Advance(i * 16, 16);
+
+    double before = clock.Time;
+    // 一条「迟到」的样本：比预测值落后 60ms（小于 SnapThreshold，但足够触发旧逻辑的回拉）。
+    clock.Sync(before - 60, 320);
+    clock.Advance(336, 16);
+    assertTrue(clock.Time >= before, $"样本迟到时不能倒退：{before:0.0} → {clock.Time:0.0}");
+
+    // 源跳回去一大截（预览音频重播）：这条允许倒退。
+    clock.Sync(1000, 400);
+    clock.Advance(416, 16);
+    assertTrue(Math.Abs(clock.Time - 1000) < 60, $"明显回跳要直接对齐，实际 {clock.Time:0.0}");
+}
+
 static void testPreviewClockSnapsOnJump()
 {
     PreviewClock clock = new();

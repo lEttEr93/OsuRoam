@@ -80,9 +80,28 @@ public sealed class PreviewClock
 
         double predicted = sourceTime + stale;
         double drift = predicted - Time;
-        if (Math.Abs(drift) > SnapThreshold)
+
+        if (drift < -SnapThreshold)
+        {
+            // 源比画面落后一大截：这是真的「跳回去了」（预览音频重播 / 玩家重新开始），
+            // 只有这种情况允许倒退。
             Time = predicted;
-        else
+        }
+        else if (drift > SnapThreshold)
+        {
+            // 画面落在源后面太多：直接对齐（向前）。
+            Time = predicted;
+        }
+        else if (drift > 0)
+        {
             Time += delta + drift * Pull;
+        }
+        else
+        {
+            // 源比预测慢一点（采样抖动、样本迟到）：只按墙上时间前进，**绝不回退**。
+            // 以前这里会用 15% 的力度往回收，结果就是画面上「倒回去一点点」，
+            // 每次样本迟到都抽一下 —— 这才是肉眼看到的那个抖动。
+            Time += delta;
+        }
     }
 }

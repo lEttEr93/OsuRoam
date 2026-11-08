@@ -15,6 +15,7 @@ rem ============================================================================
 setlocal
 set "SECONDS=%~1"
 if not defined SECONDS set "SECONDS=10"
+set "PACE=%~2"
 set "ROOT=%~dp0.."
 set "HERE=%~dp0"
 set "PM=%PM_EXE%"
@@ -26,7 +27,7 @@ if not exist "%PM%" (
     goto end
 )
 
-set "OUT=%HERE%pm-preview.csv"
+set "OUT=%HERE%pm-preview-pace%PACE%.csv"
 if exist "%OUT%" del /q "%OUT%"
 
 rem  Start Roam in preview mode so there is something to measure.
@@ -48,5 +49,7 @@ echo CSV kept at: %OUT%
 
 :end
 echo.
-echo Press any key to close.
-pause >nul
+if not defined NOPAUSE (
+    echo Press any key to close.
+    pause >nul
+)

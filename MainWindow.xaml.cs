@@ -275,6 +275,15 @@ public partial class MainWindow : Window
             argument.Equals("--no-startup-ws", StringComparison.OrdinalIgnoreCase));
         if (!manageTosu)
             AppLog.Info("--no-tosu：这一轮不启动、也不连接 tosu");
+        // --preview-pace=<0|1|2>：提交节拍模式，配合 PresentMon 做对照。
+        string? paceArg = Environment.GetCommandLineArgs()
+            .FirstOrDefault(argument => argument.StartsWith("--preview-pace=", StringComparison.OrdinalIgnoreCase));
+        if (paceArg is not null && int.TryParse(paceArg["--preview-pace=".Length..], out int pace))
+        {
+            Controls.PreviewOverlay.PaceMode = Math.Clamp(pace, 0, 2);
+            AppLog.Info($"预览提交节拍模式：{Controls.PreviewOverlay.PaceMode}");
+        }
+
         // --gpu=<序号>：混合显卡笔记本上指定预览用哪块 GPU（见日志里的「可用适配器」）。
         string? gpuArg = Environment.GetCommandLineArgs()
             .FirstOrDefault(argument => argument.StartsWith("--gpu=", StringComparison.OrdinalIgnoreCase));
@@ -524,7 +533,15 @@ public partial class MainWindow : Window
                 .FirstOrDefault(argument => argument.StartsWith("--preview-hold=", StringComparison.OrdinalIgnoreCase));
             if (holdArg is not null && int.TryParse(holdArg["--preview-hold=".Length..], out int parsedHold))
                 holdMs = Math.Clamp(parsedHold, 200, 60000);
-            await Task.Delay(holdMs);
+            // 持续喂时间：预览时钟在「收不到新样本」时是会冻结的（那是给 tosu 断流用的保护），
+            // 所以开发模式必须像 tosu 一样每 16ms 喂一次，否则画面只有开头动一下然后定住。
+            System.Diagnostics.Stopwatch feedClock = System.Diagnostics.Stopwatch.StartNew();
+            double feedAnchor = mode == "noclock" ? 0 : chart.FirstNoteTime + 30000;
+            while (feedClock.ElapsedMilliseconds < holdMs)
+            {
+                previewWindow.SetTime(feedAnchor + feedClock.Elapsed.TotalMilliseconds);
+                await Task.Delay(16);
+            }
 
             // --preview-shot=<png>：让渲染线程把当前帧从显存读回来，确认真的画对了。
             string? shotPath = Environment.GetCommandLineArgs()

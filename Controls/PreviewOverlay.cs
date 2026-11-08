@@ -109,6 +109,13 @@ public sealed class PreviewOverlay : IDisposable
         }
     }
 
+    /// <summary>
+    /// 提交/节拍模式（PresentMon 对照用）：
+    /// 0 = 等帧延迟对象再提交（现状）；1 = 不等，直接 Present(1,0)；
+    /// 2 = 帧延迟对象 + MaximumFrameLatency=2（让 DWM 多攒一帧，容忍相位误差）。
+    /// </summary>
+    public static int PaceMode { get; set; } = 0;
+
     /// <summary>创建 D3D 设备用的适配器序号（-1 = 默认硬件适配器）。</summary>
     public static int AdapterIndex { get; set; } = -1;
     public int DrawnNotes { get; private set; }
@@ -363,8 +370,8 @@ public sealed class PreviewOverlay : IDisposable
             try
             {
                 using IDXGISwapChain2 latencyChain = swapChain.QueryInterface<IDXGISwapChain2>();
-                latencyChain.MaximumFrameLatency = 1;
-                frameLatency = latencyChain.FrameLatencyWaitableObject;
+                latencyChain.MaximumFrameLatency = (uint)(PaceMode == 2 ? 2 : 1);
+                frameLatency = PaceMode == 1 ? IntPtr.Zero : latencyChain.FrameLatencyWaitableObject;
             }
             catch (Exception exception)
             {
