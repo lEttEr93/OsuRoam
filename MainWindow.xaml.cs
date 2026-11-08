@@ -281,6 +281,13 @@ public partial class MainWindow : Window
         Controls.PreviewOverlay.LegacyMode = !Environment.GetCommandLineArgs()
             .Any(a => a.Equals("--preview-retained", StringComparison.OrdinalIgnoreCase));
 
+        // --preview-selftest：把预览整块填成品红，用来分辨「没画」还是「画了没显示」。
+        if (Environment.GetCommandLineArgs().Any(a => a.Equals("--preview-selftest", StringComparison.OrdinalIgnoreCase)))
+        {
+            Controls.PreviewOverlay.OpaqueSelfTest = true;
+            AppLog.Info("预览：自检模式（整块品红）");
+        }
+
         // --preview-opaque：不透明呈现（普通窗口 + hwnd 交换链，可能拿到独立翻转）。
         if (Environment.GetCommandLineArgs().Any(a => a.Equals("--preview-opaque", StringComparison.OrdinalIgnoreCase)))
         {
