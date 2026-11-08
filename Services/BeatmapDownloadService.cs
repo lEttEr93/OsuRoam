@@ -10,6 +10,13 @@ public sealed class BeatmapDownloadService : IDisposable
     /// <summary>需要让用户立刻看到的消息（比如「osu! 启动后秒退，导入没生效」）。</summary>
     public event Action<string>? Notice;
 
+    /// <summary>
+    /// 开发用开关：恢复 1.5.5 原来那套「把谱面交给 osu!」的方式
+    /// （ShellExecute、不设工作目录、失败不自动重试）。用来二分定位
+    /// 「发布包能导入、本地新构建一导入就把游戏搞崩」到底是哪一步造成的。
+    /// </summary>
+    public static bool ClassicLaunch { get; set; }
+
     private readonly HttpClient http = new(new SocketsHttpHandler
     {
         AutomaticDecompression = System.Net.DecompressionMethods.All,
@@ -269,10 +276,12 @@ public sealed class BeatmapDownloadService : IDisposable
     {
         ProcessStartInfo startInfo = new(installation.Executable)
         {
-            UseShellExecute = false,
-            // 工作目录跟资源管理器双击时一致（游戏自己目录）。
-            WorkingDirectory = Path.GetDirectoryName(installation.Executable) ?? string.Empty
+            // 1.5.5 用的是 ShellExecute 且不设工作目录；默认这边用 CreateProcess + 游戏目录，
+            // 两边都能用 --import-launch 切换（见 ClassicLaunch）。
+            UseShellExecute = ClassicLaunch
         };
+        if (!ClassicLaunch)
+            startInfo.WorkingDirectory = Path.GetDirectoryName(installation.Executable) ?? string.Empty;
         if (beatmapPath is not null)
             startInfo.ArgumentList.Add(beatmapPath);
 
@@ -390,7 +399,8 @@ public sealed class BeatmapDownloadService : IDisposable
                             $"USERPROFILE={Environment.GetEnvironmentVariable("USERPROFILE")}｜" +
                             $"cwd={Environment.CurrentDirectory}");
                 Notice?.Invoke(message);
-                _ = warmRetryAsync(installation, path);
+                if (!ClassicLaunch)
+                    _ = warmRetryAsync(installation, path);
             };
         }
         catch (Exception exception)

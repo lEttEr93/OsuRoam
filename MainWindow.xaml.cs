@@ -260,13 +260,27 @@ public partial class MainWindow : Window
             Top = settings.WindowTop;
         }
         updatePoolVisibility();
+        // 开发用二分开关：
+        //   --import-launch=classic  用 1.5.5 原来的方式把谱面交给 osu!（ShellExecute、不设工作目录、不自动重试）
+        //   --no-startup-ws          打开程序时不连 tosu（1.5.5 是点了「开始漫游」才连）
+        // 用来定位「发布包能导入、本地新构建一导入就让游戏崩」到底出在哪一步。
+        BeatmapDownloadService.ClassicLaunch = Environment.GetCommandLineArgs().Any(argument =>
+            argument.Equals("--import-launch=classic", StringComparison.OrdinalIgnoreCase));
+        bool startupWebSocket = !Environment.GetCommandLineArgs().Any(argument =>
+            argument.Equals("--no-startup-ws", StringComparison.OrdinalIgnoreCase));
+        if (BeatmapDownloadService.ClassicLaunch)
+            AppLog.Info("导入启动方式：classic（1.5.5 的行为）");
+        if (!startupWebSocket)
+            AppLog.Info("启动时不连 tosu（1.5.5 的行为）");
+
         if (settings.AutoStartTosu)
             await ensureTosuReadyAsync(sessionCancellation.Token);
 
         // 谱面预览和「信息栏显示游戏内选中的谱面」都只靠 WebSocket 快照，
         // 所以打开 Roam 就连上，不要等到点了「开始漫游」才连 —— 否则用户在选歌
         // 界面等半天也没有预览（那正是这两个功能的主场）。
-        tosu.Start(settings.TosuWebSocketUrl);
+        if (startupWebSocket)
+            tosu.Start(settings.TosuWebSocketUrl);
 
         if (Environment.GetCommandLineArgs().Any(arg => arg == "--diagnose"))
             await runDiagnosticsAsync();

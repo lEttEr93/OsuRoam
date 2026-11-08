@@ -27,6 +27,10 @@ if not exist "%TMPDIR%" mkdir "%TMPDIR%"
 set "TMP=%TMPDIR%"
 set "TEMP=%TMPDIR%"
 
+rem  Close a local-release instance that is still running: publish cannot
+rem  overwrite a running exe (it fails with MSB4018). Only this folder is hit.
+powershell -NoProfile -Command "Get-Process OsuRoam -ErrorAction SilentlyContinue | Where-Object { $_.Path -like '*\bin\local-release\OsuRoam.exe' } | ForEach-Object { $_.Kill() }" >nul 2>nul
+
 echo [pack] publishing self-contained single file...
 "%DOTNET%" publish "%ROOT%OsuRoam.csproj" -c Release -r win-x64 --self-contained true ^
     -p:PublishSingleFile=true -p:RoamFlavor=zh -o "%OUT%" --nologo -v q
