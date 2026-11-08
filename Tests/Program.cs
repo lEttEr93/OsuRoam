@@ -19,6 +19,20 @@ if (args.Length > 2 && args[0] == "--hint")
     return await hintAsync(args);
 if (args.Length > 0 && args[0] == "--verify")
     return await verifyAsync(args);
+if (args.Length > 0 && args[0] == "--preview-smoke")
+    return PreviewSmoke.Run(args.Length > 1 ? args[1] : null);
+if (args.Length > 0 && args[0] == "--preview-notes")
+    return PreviewSmoke.Run(args.Length > 1 ? args[1] : null, steady: true, noteVisual: true);
+if (args.Length > 0 && args[0] == "--preview-steady")
+    return PreviewSmoke.Run(args.Length > 1 ? args[1] : null, steady: true);
+if (args.Length > 0 && args[0] == "--preview-opaque")
+    return PreviewSmoke.Run(args.Length > 1 ? args[1] : null, steady: true, opaque: true);
+if (args.Length > 0 && args[0] == "--preview-hwnd-alpha")
+    return PreviewSmoke.Run(args.Length > 1 ? args[1] : null, steady: true, opaque: true, hwndAlpha: true);
+if (args.Length > 0 && args[0] == "--preview-heartbeat")
+    return PreviewSmoke.Run(args.Length > 1 ? args[1] : null, steady: true, heartbeat: true);
+if (args.Length > 0 && args[0] == "--preview-unpaced")
+    return PreviewSmoke.Run(args.Length > 1 ? args[1] : null, steady: true, unpaced: true);
 
 testSuccessfulCompletion();
 testAbortDoesNotComplete();
@@ -121,6 +135,10 @@ testPreviewClockFollowsSource();
 testPreviewClockFreezesWhenSourceStops();
 testPreviewClockSnapsOnJump();
 testPreviewClockNeverGoesBackwards();
+testPreviewClockCadenceIndependent();
+testPreviewClockRepeatedSamplesStop();
+testPreviewClockDelayedWakeStopsAtDeadline();
+testPreviewMotionCommitContinuity();
 testTosuSnapshotCarriesPreviewTime();
 Console.WriteLine("All state transition, recommendation, mode profile, and tosu integration tests passed.");
 return 0;
@@ -3492,6 +3510,35 @@ static void testPreviewChartFindsVisibleRange()
 /// 预览时钟：tosu 每 ~100ms 报一次，本地每 16ms 推进一帧。
 /// 一秒下来本地时间要跟得上（差不到两帧），且不能因为纠偏往回缩。
 /// </summary>
+static void testPreviewMotionCommitContinuity()
+{
+    PreviewMotion motion = new();
+    motion.Update(0, 10000, 1, 200, true);
+    double previousNow = 0;
+    double expectedPosition = motion.Position;
+    double expectedVelocity = motion.Velocity;
+    for (int i = 1; i <= 100; i++)
+    {
+        double delta = i % 3 == 0 ? 0.073 : 0.049;
+        double t = Math.Min(delta, motion.Blend);
+        expectedPosition = motion.Position + motion.Velocity * t + motion.Acceleration * t * t
+            + (motion.Velocity + 2 * motion.Acceleration * t) * (delta - t);
+        expectedVelocity = motion.Velocity + 2 * motion.Acceleration * t;
+        previousNow += delta;
+        motion.Update(previousNow, 10000 + previousNow * 1000 + (i % 2 == 0 ? 12 : -12), 1, 200, false);
+        assertTrue(Math.Abs(motion.Position - expectedPosition) < 0.00001,
+            "Animation replacement must not jump position when samples jitter");
+        assertTrue(Math.Abs(motion.Velocity - expectedVelocity) < 0.00001,
+            "Animation replacement must preserve velocity across irregular commits");
+    }
+    motion.Update(previousNow + 1, 500, 1, 200, true);
+    assertTrue(motion.Position == 500, "An explicit seek must reanchor the animation");
+    motion.Update(previousNow + 2, 500, 0, 0, false);
+    double stopped = motion.Position;
+    motion.Update(previousNow + 4, 500, 0, 0, false);
+    assertTrue(motion.Position == stopped, "An expired animation must remain stopped");
+}
+
 static void testPreviewClockFollowsSource()
 {
     PreviewClock clock = new();
@@ -3563,6 +3610,48 @@ static void testPreviewClockNeverGoesBackwards()
     clock.Sync(1000, 400);
     clock.Advance(416, 16);
     assertTrue(Math.Abs(clock.Time - 1000) < 60, $"明显回跳要直接对齐，实际 {clock.Time:0.0}");
+}
+
+static void testPreviewClockCadenceIndependent()
+{
+    static double run(int step)
+    {
+        PreviewClock clock = new();
+        clock.Sync(10000, 0);
+        for (int now = step; now <= 2000; now += step)
+        {
+            if (now % 100 == 0)
+                clock.Sync(10000 + now - 25, now);
+            clock.Advance(now, step);
+        }
+        return clock.Time;
+    }
+    assertTrue(Math.Abs(run(4) - run(50)) < 3,
+        "240Hz rendering and 20Hz maintenance must follow the same audio timeline");
+}
+
+static void testPreviewClockRepeatedSamplesStop()
+{
+    PreviewClock clock = new();
+    clock.Sync(5000, 0);
+    for (int now = 50; now <= 2000; now += 50)
+    {
+        clock.Sync(5000, now);
+        clock.Advance(now, 50);
+    }
+    assertNear(5200, clock.Time, "repeated paused samples cannot extend extrapolation");
+    assertNear(0, clock.Rate, "paused animation must stop");
+    clock.Sync(double.PositiveInfinity, 2050);
+    assertTrue(double.IsFinite(clock.Time), "invalid samples cannot poison the timeline");
+}
+
+static void testPreviewClockDelayedWakeStopsAtDeadline()
+{
+    PreviewClock clock = new();
+    clock.Sync(7000, 0);
+    clock.Advance(1000, 1000);
+    assertNear(7200, clock.Time, "late worker wake cannot move past the animation deadline");
+    assertNear(0, clock.PredictionRemaining(1000), "expired prediction window");
 }
 
 static void testPreviewClockSnapsOnJump()

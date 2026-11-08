@@ -275,7 +275,9 @@ public partial class MainWindow : Window
             argument.Equals("--no-startup-ws", StringComparison.OrdinalIgnoreCase));
         if (!manageTosu)
             AppLog.Info("--no-tosu：这一轮不启动、也不连接 tosu");
-        // --preview-proto：合成器动画原型（内容由 DComp 自己推进，应用线程不逐帧提交）。
+        Controls.PreviewOverlay.LegacyMode = Environment.GetCommandLineArgs()
+            .Any(a => a.Equals("--preview-legacy", StringComparison.OrdinalIgnoreCase));
+        // --preview-proto：保留旧原型开关；正式预览已默认使用合成器动画。
         if (Environment.GetCommandLineArgs().Any(a => a.Equals("--preview-proto", StringComparison.OrdinalIgnoreCase)))
         {
             Controls.PreviewOverlay.PrototypeMode = true;

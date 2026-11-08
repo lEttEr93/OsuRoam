@@ -28,10 +28,13 @@ namespace OsuRoam.Controls;
 /// 生命周期由信息窗决定：它只是信息窗的一个子页面，信息窗没了它就没有
 /// （<see cref="SetOwner"/> 设置 owner，owner 关闭时随系统一起销毁）。
 /// </summary>
-public sealed class PreviewOverlay : IDisposable
+public sealed partial class PreviewOverlay : IDisposable
 {
     private const string WindowClass = "OsuRoamPreviewOverlay";
 
+    private readonly bool useOpaque = OpaqueMode;
+    private readonly bool useHwndAlpha = TransparentHwndMode;
+    private readonly bool useLegacy = LegacyMode;
     private readonly object gate = new();
     private readonly Stopwatch now = Stopwatch.StartNew();
     private readonly List<double> frames = [];
@@ -61,7 +64,7 @@ public sealed class PreviewOverlay : IDisposable
     {
         registerWindowClass();
         window = CreateWindowEx(
-            WindowExStyles.WS_EX_NOREDIRECTIONBITMAP | WindowExStyles.WS_EX_TRANSPARENT |
+            (useHwndAlpha ? 0 : WindowExStyles.WS_EX_NOREDIRECTIONBITMAP) | WindowExStyles.WS_EX_TRANSPARENT |
             WindowExStyles.WS_EX_NOACTIVATE | WindowExStyles.WS_EX_TOOLWINDOW | WindowExStyles.WS_EX_TOPMOST,
             WindowClass, "osu! Roam preview", WindowStyles.WS_POPUP,
             pixelLeft, pixelTop, pixelWidth, pixelHeight,
@@ -69,6 +72,17 @@ public sealed class PreviewOverlay : IDisposable
 
         if (window == IntPtr.Zero)
             AppLog.Error($"预览覆盖层：创建窗口失败（错误码 {Marshal.GetLastWin32Error()}）");
+        if (useHwndAlpha && window != IntPtr.Zero)
+        {
+            IntPtr region = CreateRectRgn(0, 0, -1, -1);
+            try
+            {
+                BlurBehind blur = new() { Flags = 3, Enable = true, Region = region };
+                int result = DwmEnableBlurBehindWindow(window, ref blur);
+                if (result < 0) Marshal.ThrowExceptionForHR(result);
+            }
+            finally { DeleteObject(region); }
+        }
     }
 
     /// <summary>一屏画面覆盖多少毫秒的谱面（越小越快）。</summary>
@@ -137,6 +151,19 @@ public sealed class PreviewOverlay : IDisposable
     /// </summary>
     public static bool PrototypeMode { get; set; }
 
+    /// <summary>仅供对照诊断：保留旧的逐帧交换链路径。</summary>
+    public static bool LegacyMode { get; set; }
+    /// <summary>诊断用：单次匀速动画，不接受音频校正。</summary>
+    public static bool UncorrectedMotionProbe { get; set; }
+    public static bool OpaqueMode { get; set; }
+    public static bool TransparentHwndMode { get; set; }
+    public static bool NoteVisualMode { get; set; }
+
+    public string RendererDescription { get; private set; } = "DComp retained tiles";
+    public bool UsesRetainedRenderer { get; private set; } = true;
+    public int TileUpdates { get; private set; }
+    public int AnimationCommits { get; private set; }
+
     /// <summary>创建 D3D 设备用的适配器序号（-1 = 默认硬件适配器）。</summary>
     public static int AdapterIndex { get; set; } = -1;
     public int DrawnNotes { get; private set; }
@@ -166,6 +193,8 @@ public sealed class PreviewOverlay : IDisposable
         height = Math.Max(1, height);
 
         bool sizeChanged = width != pixelWidth || height != pixelHeight;
+        if (!sizeChanged && left == pixelLeft && top == pixelTop)
+            return;
         pixelLeft = left;
         pixelTop = top;
         pixelWidth = width;
@@ -173,8 +202,6 @@ public sealed class PreviewOverlay : IDisposable
 
         SetWindowPos(window, new IntPtr(-1), left, top, width, height,
             SetWindowPosFlags.SWP_NOACTIVATE);
-        if (GetWindowRect(window, out WindowRect rect))
-            AppLog.Info($"预览覆盖层：窗口矩形 {rect.Left},{rect.Top} {rect.Right - rect.Left}x{rect.Bottom - rect.Top}（物理像素）");
         if (sizeChanged)
             resizeSignal.Set();
     }
@@ -198,7 +225,7 @@ public sealed class PreviewOverlay : IDisposable
             return;
 
         // 原型/无锚点时给一个默认位置，否则窗口是 0x0，什么都看不到。
-        if (PrototypeMode)
+        if (PrototypeMode && useLegacy)
         {
             SetBounds(600, 150, 300, 420);
             AppLog.Info($"预览覆盖层（原型）：窗口 {pixelWidth}x{pixelHeight} @ {pixelLeft},{pixelTop}");
@@ -245,6 +272,8 @@ public sealed class PreviewOverlay : IDisposable
             contentBackwards = 0;
             lastContentTime = double.NaN;
             warmupFrames = WarmupFrames;
+            TileUpdates = 0;
+            AnimationCommits = 0;
         }
     }
 
@@ -307,7 +336,13 @@ public sealed class PreviewOverlay : IDisposable
 
         stopSource = new CancellationTokenSource();
         CancellationToken token = stopSource.Token;
-        renderThread = new Thread(() => renderLoop(token))
+        renderThread = new Thread(() =>
+        {
+            if (useLegacy)
+                renderLoop(token);
+            else
+                renderRetainedLoop(token);
+        })
         {
             IsBackground = true,
             Name = "PreviewOverlayRender"
@@ -319,7 +354,9 @@ public sealed class PreviewOverlay : IDisposable
     {
         stopSource?.Cancel();
         resizeSignal.Set();
-        try { renderThread?.Join(1500); } catch { }
+        // Surface/设备由工作线程释放完毕后才允许下一次 Show 创建新线程。
+        // 不在超时后丢弃仍然运行的线程，否则两条线程会同时向同一个 HWND 提交。
+        renderThread?.Join();
         renderThread = null;
         stopSource?.Dispose();
         stopSource = null;
@@ -347,6 +384,8 @@ public sealed class PreviewOverlay : IDisposable
 
     private void renderLoop(CancellationToken token)
     {
+        RendererDescription = useOpaque ? (useHwndAlpha ? "transparent HWND flip swap chain" : "opaque flip swap chain") : "legacy swap chain (application cadence)";
+        UsesRetainedRenderer = false;
         ID3D11Device? device = null;
         ID3D11DeviceContext? context = null;
         IDXGISwapChain1? swapChain = null;
@@ -358,6 +397,7 @@ public sealed class PreviewOverlay : IDisposable
         ID2D1Factory1? d2dFactory = null;
         IntPtr frameLatency = IntPtr.Zero;
         int width = 0, height = 0;
+        FrameResources?[] resources = new FrameResources?[2];
 
         try
         {
@@ -372,6 +412,8 @@ public sealed class PreviewOverlay : IDisposable
                 out device, out context);
             chosenAdapter?.Dispose();
 
+            (width, height) = (pixelWidth, pixelHeight);
+
             using (IDXGIDevice ownDevice = device.QueryInterface<IDXGIDevice>())
             using (IDXGIAdapter ownAdapter = ownDevice.GetAdapter())
                 AppLog.Info($"预览覆盖层：渲染适配器 = {ownAdapter.Description.Description.Trim()}");
@@ -380,7 +422,7 @@ public sealed class PreviewOverlay : IDisposable
             using (IDXGIFactory2 factory = dxgiDevice.GetAdapter().GetParent<IDXGIFactory2>())
             {
                 // 合成交换链 + 预乘 alpha：DWM 直接按 alpha 把它们贴到桌面上。
-                swapChain = factory.CreateSwapChainForComposition(device, new SwapChainDescription1
+                SwapChainDescription1 description = new()
                 {
                     Width = (uint)Math.Max(1, width),
                     Height = (uint)Math.Max(1, PrototypeMode ? height * 2 : height),
@@ -388,11 +430,15 @@ public sealed class PreviewOverlay : IDisposable
                     BufferCount = 2,
                     BufferUsage = Usage.RenderTargetOutput,
                     SampleDescription = new SampleDescription(1, 0),
-                    SwapEffect = SwapEffect.FlipSequential,
-                    AlphaMode = Vortice.DXGI.AlphaMode.Premultiplied,
-                    Flags = SwapChainFlags.FrameLatencyWaitableObject
-                });
+                    SwapEffect = useHwndAlpha ? SwapEffect.Discard : useOpaque ? SwapEffect.FlipDiscard : SwapEffect.FlipSequential,
+                    AlphaMode = useOpaque ? Vortice.DXGI.AlphaMode.Ignore : Vortice.DXGI.AlphaMode.Premultiplied,
+                    Flags = useHwndAlpha ? SwapChainFlags.None : SwapChainFlags.FrameLatencyWaitableObject
+                };
+                swapChain = useOpaque ? factory.CreateSwapChainForHwnd(device, window, description)
+                    : factory.CreateSwapChainForComposition(device, description);
 
+                if (!useOpaque)
+                {
                 composition = DComp.DCompositionCreateDevice3<IDCompositionDevice>(dxgiDevice);
                 AppLog.Info("预览覆盖层：DComp 设备已创建");
                 compositionDesktop = composition.QueryInterface<IDCompositionDesktopDevice>();
@@ -405,6 +451,7 @@ public sealed class PreviewOverlay : IDisposable
                 compositionTarget.SetRoot(visual);
                 composition.Commit();
                 AppLog.Info("预览覆盖层：Commit 成功（视觉树已挂上交换链）");
+                }
             }
 
             swapChain3 = swapChain.QueryInterface<IDXGISwapChain3>();
@@ -425,15 +472,14 @@ public sealed class PreviewOverlay : IDisposable
             d2dFactory = D2D1.D2D1CreateFactory<ID2D1Factory1>(Vortice.Direct2D1.FactoryType.SingleThreaded);
             AppLog.Info($"预览覆盖层：D3D11 + DirectComposition 就绪，{width}x{height}");
 
-            if (PrototypeMode)
+            if (PrototypeMode && !useOpaque)
             {
                 // 原型不依赖锚点：窗口尺寸没量到就先用一个固定大小，保证能看到东西。
-                runAnimationPrototype(device, swapChain, visual, composition!, d2dFactory,
+                runAnimationPrototype(device, swapChain, visual!, composition!, d2dFactory,
                     Math.Max(300, width), Math.Max(420, height), token);
                 return;
             }
 
-            FrameResources?[] resources = new FrameResources?[2];
             Stopwatch frameClock = Stopwatch.StartNew();
             double lastFrame = 0;
 
@@ -455,7 +501,7 @@ public sealed class PreviewOverlay : IDisposable
                             // 创建时带了 FrameLatencyWaitableObject，ResizeBuffers 必须保留同一个标志，
                             // 否则帧延迟句柄会失效（DXGI 的明确要求）。
                             SharpGen.Runtime.Result resizeResult = swapChain.ResizeBuffers(2, (uint)width, (uint)height,
-                                Format.B8G8R8A8_UNorm, SwapChainFlags.FrameLatencyWaitableObject);
+                                Format.B8G8R8A8_UNorm, useHwndAlpha ? SwapChainFlags.None : SwapChainFlags.FrameLatencyWaitableObject);
                             if (resizeResult.Failure)
                                 AppLog.Info($"预览覆盖层：ResizeBuffers 失败 {resizeResult.Description}");
                         }
@@ -487,7 +533,7 @@ public sealed class PreviewOverlay : IDisposable
                 double opacity;
                 lock (gate)
                 {
-                    clock.Advance(nowMs, Math.Clamp(nowMs - lastFrame, 0, 120));
+                    clock.Advance(now.Elapsed.TotalMilliseconds, Math.Clamp(nowMs - lastFrame, 0, 120));
                     // 延迟补偿：直接往未来多看一点，抵消 tosu 采样 + 合成的那一两帧。
                     timeMs = clock.Time + LatencyMilliseconds;
                     visibleSeconds = VisibleSeconds;
@@ -561,6 +607,9 @@ public sealed class PreviewOverlay : IDisposable
         }
         finally
         {
+            if (PaceMode == 3) timeEndPeriod(1);
+            foreach (FrameResources? resource in resources)
+                resource?.Dispose();
             d2dFactory?.Dispose();
             visual?.Dispose();
             compositionTarget?.Dispose();
@@ -596,6 +645,9 @@ public sealed class PreviewOverlay : IDisposable
                 if (pick.Adapter is not null)
                 {
                     AppLog.Info($"预览覆盖层：按 --gpu={AdapterIndex} 使用 {pick.Name}");
+                    foreach (var entry in all)
+                        if (entry.Adapter != pick.Adapter)
+                            entry.Adapter.Dispose();
                     return pick.Adapter;
                 }
 
@@ -622,8 +674,17 @@ public sealed class PreviewOverlay : IDisposable
         IDCompositionVisual visual, IDCompositionDevice composition,
         ID2D1Factory1 factory, int width, int height, CancellationToken token)
     {
+        // 用**此刻**的窗口尺寸（线程起来时可能是 1x1，之后又被锚点改过）。
+        width = Math.Max(1, pixelWidth);
+        height = Math.Max(1, pixelHeight);
         int tallHeight = Math.Max(2, height * 2);
-        // 交换链在创建时就按 2 屏高建好了（SetContent 之后再 ResizeBuffers 会让视觉失去内容）。
+        // 渲染线程可能在窗口还是 1x1 的时候就起来了（交换链也是 1x1），
+        // 所以这里按目标尺寸重建缓冲，并把内容重新挂到视觉上。
+        SharpGen.Runtime.Result resize = swapChain.ResizeBuffers(2, (uint)Math.Max(1, width),
+            (uint)Math.Max(1, tallHeight), Format.B8G8R8A8_UNorm, SwapChainFlags.FrameLatencyWaitableObject);
+        AppLog.Info($"预览覆盖层：原型 重建缓冲到 {width}x{tallHeight}（{(resize.Failure ? resize.Description : "OK")}）");
+        visual.SetContent(swapChain);
+        composition.Commit();
 
         using (IDXGISurface surface = swapChain.GetBuffer<IDXGISurface>(0))
         {
@@ -646,8 +707,11 @@ public sealed class PreviewOverlay : IDisposable
             target.EndDraw(out _, out _);
         }
 
-        swapChain.Present(0, PresentFlags.None);
-        AppLog.Info($"预览覆盖层：原型模式，表面 {width}x{tallHeight}，先静态显示 5 秒");
+        SharpGen.Runtime.Result firstPresent = swapChain.Present(0, PresentFlags.None);
+        using (IDXGISurface probe = swapChain.GetBuffer<IDXGISurface>(0))
+            AppLog.Info($"预览覆盖层：原型模式，窗口 {pixelWidth}x{pixelHeight}，表面 {width}x{tallHeight}，" +
+                        $"实际缓冲 {(int)probe.Description.Width}x{(int)probe.Description.Height}，" +
+                        $"首次 Present={(firstPresent.Failure ? firstPresent.Description : "OK")}");
 
         // 第一步：不放动画，offset = 0 静态显示。先确认「内容能不能出来」，
         // 再把「动画参数对不对」分开验证。
@@ -656,20 +720,28 @@ public sealed class PreviewOverlay : IDisposable
         AppLog.Info("预览覆盖层：原型 静态 commit 完成（offset=0）");
 
         // 静态阶段：每 4ms 再提交一次（排除「只 Present 一次所以没内容」这个可能）。
+        int presented = 0;
+        SharpGen.Runtime.Result lastResult = default;
         for (int i = 0; i < 300 && !token.IsCancellationRequested; i++)
         {
-            swapChain.Present(0, PresentFlags.None);
+            lastResult = swapChain.Present(0, PresentFlags.None);
+            presented++;
             Thread.Sleep(4);
         }
 
-        // 第二步：叠动画。从 -H 到 0，重复两次。
+        AppLog.Info($"预览覆盖层：原型 静态阶段提交 {presented} 次，" +
+                    $"最后一次={(lastResult.Failure ? lastResult.Description : "OK")}");
+
+        // AddCubic 的参数是常数、一次、二次、三次系数；一次项即可得到匀速直线。
+        float duration = (float)Math.Max(0.25, VisibleSeconds);
+        float slope = (float)height / duration;
         using IDCompositionAnimation animation = composition.CreateAnimation();
-        animation.AddCubic(0, (float)VisibleSeconds, 0f, 0f, -height);
-        animation.AddRepeat(VisibleSeconds, 100000);
-        animation.End(VisibleSeconds * 2, 0f);
+        animation.AddCubic(0, -height, slope, 0, 0);
+        animation.AddRepeat(duration, duration);
+        animation.End(86400, 0f);
         visual.SetOffsetY(animation);
         composition.Commit();
-        AppLog.Info("预览覆盖层：原型 动画已挂上（-H → 0，重复）");
+        AppLog.Info($"预览覆盖层：原型 动画已挂上（{duration:0.00}s/屏，线性循环）");
 
         while (!token.IsCancellationRequested)
             Thread.Sleep(50);
@@ -706,7 +778,7 @@ public sealed class PreviewOverlay : IDisposable
     {
         ID2D1RenderTarget target = resources.Target;
         target.BeginDraw();
-        target.Clear(new Color4(0, 0, 0, 0));
+        target.Clear(useOpaque && !useHwndAlpha ? new Color4(0.055f, 0.071f, 0.094f, 1) : new Color4(0, 0, 0, 0));
         DrawnNotes = 0;
 
         if (chart is null || width <= 1 || height <= 1)
@@ -862,6 +934,17 @@ public sealed class PreviewOverlay : IDisposable
     }
 
     // ---- Win32 ----
+    [StructLayout(LayoutKind.Sequential)]
+    private struct BlurBehind
+    {
+        public uint Flags;
+        [MarshalAs(UnmanagedType.Bool)] public bool Enable;
+        public IntPtr Region;
+        [MarshalAs(UnmanagedType.Bool)] public bool TransitionOnMaximized;
+    }
+    [DllImport("dwmapi.dll")] private static extern int DwmEnableBlurBehindWindow(IntPtr hwnd, ref BlurBehind blur);
+    [DllImport("gdi32.dll")] private static extern IntPtr CreateRectRgn(int left, int top, int right, int bottom);
+    [DllImport("gdi32.dll")] private static extern bool DeleteObject(IntPtr handle);
 
     private delegate IntPtr WindowProcDelegate(IntPtr hwnd, uint message, IntPtr wParam, IntPtr lParam);
 

@@ -105,12 +105,15 @@ public sealed class PreviewWindow : IDisposable
     public void BeginFpsProbe() => overlay.ResetFrameStats();
 
     public string Describe() =>
-        $"时间 {overlay.FrameIntervals.Count} 帧样本｜本帧画出 {overlay.DrawnNotes} 个音符｜" +
+        $"{overlay.RendererDescription}｜内容块更新 {overlay.TileUpdates} 次｜动画提交 {overlay.AnimationCommits} 次｜" +
         $"流速 {overlay.VisibleSeconds:0.00}s/屏｜补偿 {overlay.LatencyMilliseconds:0}ms｜" +
         $"窗口 {Width:0}x{Height:0} DIP";
 
     public string DescribeFps()
     {
+        if (overlay.UsesRetainedRenderer)
+            return $"{Describe()}｜滚动由 DWM 动画驱动；应用提交频率不代表显示帧率";
+
         List<double> frames = [.. overlay.FrameIntervals];
         if (frames.Count < 10)
             return $"样本太少（{frames.Count} 帧），渲染线程可能还没起来";
