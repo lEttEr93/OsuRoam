@@ -38,9 +38,14 @@ if /i "%ARGS:~0,9%"=="-nobuild " (
 :build
 if "%BUILD%"=="0" goto launch
 
-rem  TMP/TEMP point at C:\Users\<user>\AppData\Local\Temp here, and MSBuild
-rem  cannot write there (ACL) - that surfaces as a bare "MSB1025 internal
-rem  error". Give the build its own temp folder inside the repo.
+rem  Remember the real temp dir before pointing the build somewhere else.
+set "REAL_TMP=%TMP%"
+set "REAL_TEMP=%TEMP%"
+
+rem  TMP/TEMP may be unwritable for MSBuild (bare "MSB1025 internal error"),
+rem  so give the build its own folder inside the repo. It is restored before
+rem  launching: everything the app starts (osu!, tosu) inherits TMP, and a temp
+rem  dir inside the repo is not a good place for other programs.
 set "TMPDIR=%ROOT%bin\tmp"
 if not exist "%TMPDIR%" mkdir "%TMPDIR%"
 set "TMP=%TMPDIR%"
@@ -71,6 +76,10 @@ if not exist "%OUT%\OsuRoam.exe" (
     echo [run] not built yet: drop -nobuild and run again.
     exit /b 1
 )
+
+rem  Restore the real temp dirs before starting the app (see :build).
+if defined REAL_TMP set "TMP=%REAL_TMP%"
+if defined REAL_TEMP set "TEMP=%REAL_TEMP%"
 
 rem  Give the dev build its own tosu next to the exe: Roam looks for tosu.exe in
 rem  its own folder first, so the dev instance stops depending on whatever stale
