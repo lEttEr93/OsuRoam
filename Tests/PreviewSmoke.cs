@@ -123,7 +123,8 @@ internal static class PreviewSmoke
     private static ManiaPreviewChart BuildChart(int keys)
     {
         StringBuilder osu = new($"osu file format v14\n[General]\nMode:3\n[Difficulty]\nCircleSize:{keys}\n[HitObjects]\n");
-        for (int i = 0; i < 800; i++)
+        // Keep notes moving throughout 90-second observational probes (starting at 10s).
+        for (int i = 0; i < 1600; i++)
         {
             int time = i * 90;
             int x = (i * 3 % keys) * 512 / keys + 256 / keys;

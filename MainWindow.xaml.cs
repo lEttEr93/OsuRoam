@@ -154,6 +154,8 @@ public partial class MainWindow : Window
     /// <summary>tosu 连续连不上几次了；每 4 次试着重拉一次。</summary>
     private int tosuConnectFailures;
     private int tosuRestartAttempts;
+    /// <summary>预览收到的「无效状态」从什么时候开始（用于容忍切歌瞬间的抖动）。</summary>
+    private DateTime? previewInvalidSince;
     /// <summary>tosu 连着却读不到游戏状态时的自愈计时（现场：僵尸 tosu 占着端口，连得上但没数据）。</summary>
     private DateTime emptyStateSince;
     private DateTime lastTosuRestartAt;
@@ -3081,12 +3083,19 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
             return;
         }
 
+        // tosu 在切歌时会短暂报出「状态不是 selectPlay」或者「谱面 id = 0」。
+        // 以前只要遇到一条就立刻收起预览，于是切歌时看到「出现后立刻消失」。
+        // 现在要求这种无效状态**连续持续 400ms** 才真的收起。
         bool selectPlay = string.Equals(snapshot.StateName, "selectPlay", StringComparison.OrdinalIgnoreCase);
         if (!selectPlay || snapshot.BeatmapId <= 0)
         {
-            dismissPreview();
+            previewInvalidSince ??= DateTime.UtcNow;
+            if ((DateTime.UtcNow - previewInvalidSince.Value).TotalMilliseconds > 400)
+                dismissPreview();
             return;
         }
+
+        previewInvalidSince = null;
 
         string key = $"{snapshot.BeatmapId}|{snapshot.DifficultyName}";
         if (!string.Equals(key, previewKey, StringComparison.Ordinal))

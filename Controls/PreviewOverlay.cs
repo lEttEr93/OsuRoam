@@ -48,6 +48,8 @@ public sealed partial class PreviewOverlay : IDisposable
     private ManiaPreviewChart? chart;
     private PreviewClock clock = new();
     private string? captureRequest;
+    private bool transparentFramePending;
+    private bool hasContentOnScreen;
     private bool showing;
 
     private IntPtr window;
@@ -236,14 +238,22 @@ public sealed partial class PreviewOverlay : IDisposable
         }
 
         ShowWindow(window, ShowWindowCommand.SW_SHOWNOACTIVATE);
-        startRendering();
+        startRendering();   // 线程常驻：已经在跑就直接复用，不再重建 D3D/DComp
     }
 
+    /// <summary>
+    /// 收起画面：**不销毁渲染栈、也不隐藏窗口**，只把内容清空并提交一帧全透明。
+    /// 之前这里是 ShowWindow(SW_HIDE) + 停线程 + Dispose 设备/交换链/视觉树，
+    /// 切歌时反复「拆了重建」，重建期间窗口是空的 —— 看起来就是「出现后立刻消失」。
+    /// </summary>
     public void Hide()
     {
         lock (gate)
+        {
             showing = false;
-        hide();
+            chart = null;
+            transparentFramePending = true;
+        }
     }
 
     private void hide()
@@ -522,6 +532,39 @@ public sealed partial class PreviewOverlay : IDisposable
                 }
                 double waitMs = frameClock.Elapsed.TotalMilliseconds - waitStart;
 
+                bool transparentPending;
+                lock (gate)
+                {
+                    transparentPending = transparentFramePending;
+                    transparentFramePending = false;
+                }
+
+                ManiaPreviewChart? currentChart;
+                lock (gate)
+                    currentChart = chart;
+
+                if (transparentPending || (currentChart is null && hasContentOnScreen))
+                {
+                    // 清屏：画一帧全透明并提交，然后停在这里，不再提交。
+                    int clearIndex = (int)swapChain3.CurrentBackBufferIndex;
+                    resources[clearIndex] ??= createFrameResources(d2dFactory, swapChain, clearIndex);
+                    ID2D1RenderTarget clearTarget = resources[clearIndex]!.Target;
+                    clearTarget.BeginDraw();
+                    clearTarget.Clear(new Color4(0, 0, 0, 0));
+                    clearTarget.EndDraw(out _, out _);
+                    swapChain.Present(0, PresentFlags.None);
+                    hasContentOnScreen = false;
+                    Thread.Sleep(20);
+                    continue;
+                }
+
+                if (currentChart is null)
+                {
+                    // 没内容也没东西可清：完全空闲，别空转。
+                    Thread.Sleep(20);
+                    continue;
+                }
+
                 int index = (int)swapChain3.CurrentBackBufferIndex;
                 resources[index] ??= createFrameResources(d2dFactory, swapChain, index);
 
@@ -544,6 +587,7 @@ public sealed partial class PreviewOverlay : IDisposable
 
                 double drawStart = frameClock.Elapsed.TotalMilliseconds;
                 draw(resources[index]!, width, height, snapshot, timeMs, visibleSeconds, opacity);
+                hasContentOnScreen = true;
                 double drawMs = frameClock.Elapsed.TotalMilliseconds - drawStart;
 
                 string? pendingCapture;
