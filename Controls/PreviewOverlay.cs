@@ -156,6 +156,9 @@ public sealed partial class PreviewOverlay : IDisposable
     /// <summary>预览皮肤目录（空 = 用随程序的内置贴图）。**不自动扫描 osu!stable。**</summary>
     public static string SkinDirectory { get; set; } = string.Empty;
 
+    /// <summary>顶部淡入（按屏幕位置逐段算 alpha）。默认关掉：先确认它是不是抖动来源之一。</summary>
+    public static bool FadeEnabled { get; set; }
+
     /// <summary>仅供对照诊断：保留旧的逐帧交换链路径。</summary>
     /// <summary>
     /// 默认走**逐帧直算**（每帧按时钟算位置，速度必然等于时钟速度）。
@@ -862,7 +865,8 @@ public sealed partial class PreviewOverlay : IDisposable
         double noteHeight = Math.Clamp(laneWidth * 0.17, 6, 18);
         double noteWidth = Math.Max(2, laneWidth - 6);
         // 顶部淡入：按**屏幕**位置算透明度（不是按谱面时间），所以音符进入画面时是渐显的。
-        double fadeHeight = Math.Max(24, height * 0.18);
+        // FadeEnabled=false 时传 0，fillFaded 会整块按不透明画。
+        double fadeHeight = FadeEnabled ? Math.Max(24, height * 0.18) : 0;
 
         IReadOnlyList<PreviewNote> notes = chart.Notes;
         double visibleMs = visibleSeconds * 1000;
