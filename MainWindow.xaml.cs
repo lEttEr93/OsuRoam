@@ -3188,12 +3188,10 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
     {
         try
         {
-            // 谱面预览是信息窗的一个子页面：信息窗不在就绝不显示。
+            // 谱面预览是信息窗的一个子页面：信息窗不在就重建一个（比如游玩时被收起了），
+            // 而不是干脆不显示 —— 之前从游戏回来预览就再也不出现，就是这个分支。
             if (mapInfoWindow is null)
-            {
-                dismissPreview();
-                return;
-            }
+                ensureMapInfoWindow();
 
             if (previewWindow is null)
             {

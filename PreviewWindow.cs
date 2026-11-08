@@ -170,7 +170,7 @@ public sealed class PreviewWindow : IDisposable
             TimeSpan.FromMilliseconds(200), System.Windows.Threading.DispatcherPriority.Background,
             (_, _) =>
             {
-                if (anchor is { IsVisible: true } && overlay.IsVisible)
+                if (anchor is not null && overlay.IsVisible)
                     applyBounds();
             },
             anchor!.Dispatcher);
@@ -189,7 +189,9 @@ public sealed class PreviewWindow : IDisposable
     /// </summary>
     private void applyBounds()
     {
-        if (anchor is null || !anchor.IsVisible)
+        // 不要要求 anchor 可见：进游戏时信息窗会被收起，回来时仍是同一个窗口对象，
+        // 之前在这里直接 return，面板就停在上一次（甚至 0×0）的尺寸上，看起来就是不渲染。
+        if (anchor is null)
             return;
 
         IntPtr hwnd = new WindowInteropHelper(anchor).Handle;
