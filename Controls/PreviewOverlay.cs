@@ -49,6 +49,7 @@ public sealed partial class PreviewOverlay : IDisposable
     private PreviewClock clock = new();
     private string? captureRequest;
     private bool transparentFramePending;
+    private int consecutiveWaitTimeouts;
     private double lastStatusLog;
     private bool hasContentOnScreen;
     private bool showing;
@@ -146,7 +147,12 @@ public sealed partial class PreviewOverlay : IDisposable
     /// 0 = 等帧延迟对象再提交（现状）；1 = 不等，直接 Present(1,0)；
     /// 2 = 帧延迟对象 + MaximumFrameLatency=2（让 DWM 多攒一帧，容忍相位误差）。
     /// </summary>
-    public static int PaceMode { get; set; } = 0;
+    /// <summary>
+    /// 提交节拍模式。**默认 1（不等帧延迟句柄）**：现场证据表明该等待在状态转换后
+    /// 会持续超时，而它位于「读取谱面」之前，于是线程活着却永不恢复绘制。
+    /// 0 = 等帧延迟句柄（保留做实验）。
+    /// </summary>
+    public static int PaceMode { get; set; } = 1;
 
     /// <summary>
     /// 原型模式：不逐帧提交，内容交给 IDCompositionAnimation 匀速平移，应用线程只负责
@@ -590,9 +596,20 @@ public sealed partial class PreviewOverlay : IDisposable
                     if (wait == WaitTimeout)
                     {
                         branch = "wait-timeout";
+                        if (++consecutiveWaitTimeouts > 30)
+                        {
+                            // 连续超时说明这条节拍在这个状态下不会再有信号：
+                            // 永久退化成 Present(1,0) 自身节拍，绝不能让等待挡住内容处理。
+                            AppLog.Info("预览：帧延迟等待连续超时 30 次，改用 Present 自身节拍");
+                            frameLatency = IntPtr.Zero;
+                            consecutiveWaitTimeouts = 0;
+                        }
+
                         Thread.Sleep(4);
                         continue;
                     }
+
+                    consecutiveWaitTimeouts = 0;
 
                     if (wait == WaitFailed)
                         AppLog.Info($"预览：帧延迟等待失败，错误码 {System.Runtime.InteropServices.Marshal.GetLastWin32Error()}");
