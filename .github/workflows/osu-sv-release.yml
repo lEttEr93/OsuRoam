@@ -5,7 +5,7 @@ name: osu-sv release
 #   2) 推 NuGet：OsuSv（库）、OsuSv.Cli（dotnet tool）
 #   3) 编 win-x64 / linux-x64 单文件 exe，挂到同名 GitHub Release
 #
-# 需要仓库 secret NUGET_API_KEY（nuget.org push key，scope: Push new packages and package versions）。
+# 不需要任何 secret：nuget.org 那边配一条 Trusted Publishing 策略（OIDC 换临时 key，见 nuget job 的注释）。
 
 on:
   push:
@@ -29,6 +29,12 @@ jobs:
   nuget:
     needs: test
     runs-on: ubuntu-latest
+    # nuget.org 的 Trusted Publishing：用 GitHub OIDC 换一把 1 小时有效的临时 API key，
+    # 所以不需要 NUGET_API_KEY secret。仓库那边要有一条策略：
+    #   Repository Owner = lEttEr93 / Repository = OsuRoam / Workflow File = osu-sv-release.yml / Scopes = Push
+    permissions:
+      id-token: write
+      contents: read
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
@@ -42,18 +48,18 @@ jobs:
           dotnet pack src/OsuSv/OsuSv.csproj -c Release -o nupkg -p:Version="$version"
           dotnet pack src/OsuSv.Cli/OsuSv.Cli.csproj -c Release -o nupkg -p:Version="$version"
           ls -l nupkg
+      # 临时 key 只有 1 小时，所以放在 push 前紧挨着换
+      - name: NuGet login (OIDC -> temp API key)
+        id: login
+        uses: NuGet/login@v1
+        with:
+          user: lEttEr93
       - name: push to nuget.org
-        env:
-          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
         run: |
           set -euo pipefail
-          if [ -z "${NUGET_API_KEY:-}" ]; then
-            echo "::error::缺 NUGET_API_KEY —— 在 Settings → Secrets and variables → Actions 加 nuget.org 的 push key"
-            exit 1
-          fi
           for package in nupkg/*.nupkg; do
             dotnet nuget push "$package" \
-              --api-key "$NUGET_API_KEY" \
+              --api-key "${{ steps.login.outputs.NUGET_API_KEY }}" \
               --source https://api.nuget.org/v3/index.json \
               --skip-duplicate
           done
