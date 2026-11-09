@@ -87,7 +87,7 @@ jobs:
             --self-contained true -p:PublishSingleFile=true -p:Version="$version" \
             -o "out/${{ matrix.rid }}"
           mv "out/${{ matrix.rid }}/osu-sv${{ matrix.ext }}" \
-             "out/osu-sv-${GITHUB_REF_NAME}-${{ matrix.rid }}${{ matrix.ext }}"
+             "out/osu-sv-${version}-${{ matrix.rid }}${{ matrix.ext }}"
       - uses: actions/upload-artifact@v4
         with:
           name: osu-sv-${{ matrix.rid }}
