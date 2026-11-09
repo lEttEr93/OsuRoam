@@ -346,11 +346,11 @@ public static class LocTable
         ["empty.pool"] = "The recommendation pool is empty",
         ["status.ready"] = "Ready",
 
-        // 分组标题
+        // 分组标题（现在是底部标签条的文案：4 个标签要塞进 430 宽的窗口，英文必须短）
         ["section.next"] = "Up next",
-        ["section.range"] = "Recommendation range",
-        ["section.account"] = "Account & connection",
-        ["section.advanced"] = "Downloads & advanced",
+        ["section.range"] = "Range",
+        ["section.account"] = "Account",
+        ["section.advanced"] = "Advanced",
         ["section.interface"] = "Interface",
 
         // 推荐范围的标签页

@@ -8,6 +8,13 @@
         Topmost="True" ResizeMode="CanResizeWithGrip" ShowInTaskbar="True" Icon="/OsuRoam;component/Assets/OsuRoam.ico">
     <Window.Resources>
         <!-- 推荐范围的三个标签页：扁平分段按钮，选中态由代码染色（applyRangeTab）。 -->
+        <!-- 四个大块（推荐范围 / 账号与连接 / 界面 / 下载与高级设置）的底部标签：选中态由代码染色（applySectionTab）。 -->
+        <Style x:Key="SectionTabStyle" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+            <Setter Property="Padding" Value="0,5" />
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="Foreground" Value="{StaticResource MutedTextBrush}" />
+        </Style>
+
         <Style x:Key="RangeTabStyle" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
             <Setter Property="Padding" Value="0,6" />
             <Setter Property="FontSize" Value="12" />
@@ -19,7 +26,11 @@
         <Grid>
             <Grid.RowDefinitions>
                 <RowDefinition Height="48" />
-                <RowDefinition Height="*" />
+                <!-- 推荐列表：设置面板常驻之后，这里只拿剩下的高度 -->
+                <RowDefinition Height="*" MinHeight="90" />
+                <!-- 设置面板（常驻）：高度由当前面板决定，代码在切换时用动画改 Border.Height -->
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="34" />
                 <RowDefinition Height="42" />
             </Grid.RowDefinitions>
 
@@ -396,8 +407,19 @@
                     <TextBlock x:Name="EmptyPoolText" Text="{DynamicResource L.empty.pool}" Foreground="{StaticResource MutedTextBrush}"
                                HorizontalAlignment="Center" Margin="0,18" />
 
-                    <Expander x:Name="RangeExpander" Header="{DynamicResource L.section.range}" IsExpanded="True" Margin="0,8,0,0">
-                        <StackPanel Margin="0,10,0,4">
+
+                </StackPanel>
+            </ScrollViewer>
+
+            <!-- 设置面板：四个大块改成常驻标签页，这里显示当前选中的那一块，内容超高时在区内滚动。
+                 放在日志区上方、标签条上方，不再需要逐个展开。
+                 默认收起（Height=0 + Collapsed），点标签时由代码按面板高度撑开（animateSectionHeight）。 -->
+            <Border x:Name="SectionHost" Grid.Row="2" Height="0" Visibility="Collapsed" Background="{StaticResource SurfaceBrush}"
+                    BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,1,0,0">
+                <ScrollViewer x:Name="SectionScroll" VerticalScrollBarVisibility="Visible" HorizontalScrollBarVisibility="Disabled"
+                              controls:SmoothScroll.IsEnabled="True">
+                    <Grid Margin="14,10,10,8">
+                        <StackPanel x:Name="RangeSectionPanel" Margin="0,0,0,6">
                             <!-- 基本 / tag / 键型：一次只显示一个，点标签切换 -->
                             <UniformGrid x:Name="RangeTabBar" Rows="1" Columns="3">
                                 <Button x:Name="RangeBasicTab" Tag="basic" Content="{DynamicResource L.tab.rangebasic}"
@@ -564,10 +586,7 @@
                                         ValueChanged="ExplorationSlider_ValueChanged" />
                             </StackPanel>
                         </StackPanel>
-                    </Expander>
-
-                    <Expander x:Name="AccountExpander" Header="{DynamicResource L.section.account}" Margin="0,8,0,0">
-                        <StackPanel Margin="0,10,0,4">
+                        <StackPanel x:Name="AccountSectionPanel" Visibility="Collapsed" Margin="0,0,0,6">
                             <TextBlock Text="{DynamicResource L.label.username}" Foreground="{StaticResource MutedTextBrush}" FontSize="11" />
                             <TextBox x:Name="UsernameBox" />
                             <TextBlock Text="OAuth Client ID" Foreground="{StaticResource MutedTextBrush}" FontSize="11" Margin="0,9,0,0" />
@@ -575,10 +594,7 @@
                             <TextBlock Text="OAuth Client Secret" Foreground="{StaticResource MutedTextBrush}" FontSize="11" Margin="0,9,0,0" />
                             <PasswordBox x:Name="ClientSecretBox" />
                         </StackPanel>
-                    </Expander>
-
-                    <Expander x:Name="InterfaceExpander" Header="{DynamicResource L.section.interface}" Margin="0,8,0,0">
-                        <StackPanel Margin="0,10,0,4">
+                        <StackPanel x:Name="InterfaceSectionPanel" Visibility="Collapsed" Margin="0,0,0,6">
                             <TextBlock Text="{DynamicResource L.label.uilanguage}" Foreground="{StaticResource MutedTextBrush}" FontSize="11" />
                             <ComboBox x:Name="LanguageBox" SelectedIndex="0" SelectionChanged="LanguageBox_SelectionChanged"
                                       DropDownOpened="ComboBox_DropDownOpened" DropDownClosed="ComboBox_DropDownClosed">
@@ -587,10 +603,7 @@
                                 <ComboBoxItem Content="{DynamicResource L.lang.en}" Tag="en" />
                             </ComboBox>
                         </StackPanel>
-                    </Expander>
-
-                    <Expander x:Name="AdvancedExpander" Header="{DynamicResource L.section.advanced}" Margin="0,8,0,0">
-                        <StackPanel Margin="0,10,0,4">
+                        <StackPanel x:Name="AdvancedSectionPanel" Visibility="Collapsed" Margin="0,0,0,6">
                             <WrapPanel Margin="0,0,0,9">
                                 <CheckBox x:Name="ExcludeRecentCheck" Content="{DynamicResource L.check.excluderecent}" Margin="0,0,18,0" />
                                 <CheckBox x:Name="ExcludeInstalledCheck" Content="{DynamicResource L.check.excludeinstalled}"
@@ -671,11 +684,23 @@
                             <TextBlock Text="{DynamicResource L.label.tosupath}" Foreground="{StaticResource MutedTextBrush}" FontSize="11" Margin="0,9,0,0" />
                             <TextBox x:Name="TosuPathBox" />
                         </StackPanel>
-                    </Expander>
-                </StackPanel>
-            </ScrollViewer>
+                    </Grid>
+                </ScrollViewer>
+            </Border>
 
-            <Grid x:Name="Footer" Grid.Row="2" Background="{StaticResource SurfaceBrush}">
+            <!-- 四个大块：横向标签靠底部排布，点击切换（选中态由代码染色，见 applySectionTab） -->
+            <UniformGrid x:Name="SectionTabBar" Grid.Row="3" Rows="1" Columns="4" Background="{StaticResource SurfaceBrush}">
+                <Button x:Name="SectionRangeTab" Tag="range" Content="{DynamicResource L.section.range}"
+                        Style="{StaticResource SectionTabStyle}" Margin="6,5,3,5" Click="SectionTab_Click" />
+                <Button x:Name="SectionAccountTab" Tag="account" Content="{DynamicResource L.section.account}"
+                        Style="{StaticResource SectionTabStyle}" Margin="3,5,3,5" Click="SectionTab_Click" />
+                <Button x:Name="SectionInterfaceTab" Tag="interface" Content="{DynamicResource L.section.interface}"
+                        Style="{StaticResource SectionTabStyle}" Margin="3,5,3,5" Click="SectionTab_Click" />
+                <Button x:Name="SectionAdvancedTab" Tag="advanced" Content="{DynamicResource L.section.advanced}"
+                        Style="{StaticResource SectionTabStyle}" Margin="3,5,6,5" Click="SectionTab_Click" />
+            </UniformGrid>
+
+            <Grid x:Name="Footer" Grid.Row="4" Background="{StaticResource SurfaceBrush}">
                 <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
                 <TextBox x:Name="StatusText" Text="{DynamicResource L.status.ready}" Margin="14,6,8,6" VerticalContentAlignment="Center"
                          IsReadOnly="True" IsTabStop="True" TextWrapping="Wrap" AcceptsReturn="True"

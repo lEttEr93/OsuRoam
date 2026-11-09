@@ -68,8 +68,10 @@ public partial class MainWindow : Window
     private bool miniNextBusy;
     /// <summary>推荐范围当前显示哪个标签页：basic / tag / pattern（只记在内存里，不写配置）。</summary>
     private string rangeTab = "basic";
-    /// <summary>标签页按钮各自的可变画刷，用来做颜色过渡（见 tabBrushes）。</summary>
-    private readonly Dictionary<Button, TabBrushes> rangeTabBrushes = [];
+    /// <summary>底部四个大块当前展开的是哪一个；null = 收起（默认）。</summary>
+    private string? sectionTab;
+    /// <summary>标签按钮各自的可变画刷，用来做颜色过渡（见 tabBrushes）。推荐范围和四个大块的按钮共用这张表。</summary>
+    private readonly Dictionary<Button, TabBrushes> tabBrushCache = [];
     /// <summary>mania 键数选择当前是不是显示着（显隐要带动画，得自己记状态）。</summary>
     private bool maniaKeysShown;
     private int maniaKeysToken;
@@ -175,6 +177,9 @@ public partial class MainWindow : Window
         MiniTitleText.Text = Loc.T("mini.nobeatmap");
         refreshMiniNextLabel();
         applyRangeTab(rangeTab);
+        applySectionTab(sectionTab);
+        // 启动时窗口还没量过尺寸，等 Loaded 再把设置区的高度撑到当前面板该有的样子。
+        Loaded += (_, _) => animateSectionHeight(currentSectionPanel());
         Loc.Changed += applyLanguage;
         applyDiagnosticWindowMode();
         topmostKeeper = new TopmostKeeper(this);
@@ -644,14 +649,13 @@ public partial class MainWindow : Window
             await Task.Delay(settleDelay);
         }
 
-        // 开发用：--expand 展开所有设置分组，方便一次截完整个设置区
-        if (Environment.GetCommandLineArgs().Any(arg => arg == "--expand"))
+        // 开发用：--section=range|account|interface|advanced 把底部标签条的那一块展开，
+        // 这样一张截图就能核对四个标签的选中态和各自的排版。
+        if (Environment.GetCommandLineArgs().FirstOrDefault(arg => arg.StartsWith("--section=", StringComparison.OrdinalIgnoreCase))
+            is { } sectionArg)
         {
-            RangeExpander.IsExpanded = true;
-            AccountExpander.IsExpanded = true;
-            InterfaceExpander.IsExpanded = true;
-            AdvancedExpander.IsExpanded = true;
-            await Task.Delay(500);
+            applySectionTab(sectionArg[(sectionArg.IndexOf('=') + 1)..].Trim().ToLowerInvariant());
+            await Task.Delay(settleDelay);
         }
 
         // 开发用：--scroll-bottom 先把主内容滚到底，方便截设置区；
@@ -684,8 +688,8 @@ public partial class MainWindow : Window
         }
 
         RenderDiagnostics.CaptureWindow(this, path);
-        AppLog.Info($"截图尺寸（标签页 {rangeTab}）：窗口 {ActualWidth:0.#}｜内容 {MainContent.ActualWidth:0.#}｜" +
-            $"范围块 {RangeExpander.ActualWidth:0.#}｜标签条 {RangeTabBar.ActualWidth:0.#}｜" +
+        AppLog.Info($"截图尺寸（标签页 {rangeTab} / 大块 {sectionTab ?? "收起"}）：窗口 {ActualWidth:0.#}｜内容 {MainContent.ActualWidth:0.#}｜" +
+            $"设置区 {SectionScroll.ActualWidth:0.#}｜范围块 {RangeTabBar.ActualWidth:0.#}｜" +
             $"可滚高度 {MainContent.ScrollableHeight:0.#}｜滚动条 {MainContent.ComputedVerticalScrollBarVisibility}");
         Close();
     }
@@ -3732,7 +3736,7 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
 
     private TabBrushes tabBrushes(Button button)
     {
-        if (rangeTabBrushes.TryGetValue(button, out TabBrushes? brushes))
+        if (tabBrushCache.TryGetValue(button, out TabBrushes? brushes))
             return brushes;
 
         brushes = new TabBrushes();
@@ -3742,7 +3746,7 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
         button.Background = brushes.Background;
         button.BorderBrush = brushes.Border;
         button.Foreground = brushes.Foreground;
-        rangeTabBrushes[button] = brushes;
+        tabBrushCache[button] = brushes;
         return brushes;
     }
 
@@ -3799,6 +3803,121 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
         {
             AppLog.Error("标签页切换动画失败", exception);
         }
+    }
+
+    /// <summary>
+    /// 底部四个大块（推荐范围 / 账号与连接 / 界面 / 下载与高级设置）：标签常驻在日志区上方，
+    /// 点哪个就从底部抽出哪一块；再点同一个标签收起。
+    ///
+    /// 这四块原来是 Expander（看哪块都得先展开），现在是一张可收起的抽屉 —— 默认收起，
+    /// 推荐池拿回全部高度，需要设置时才让出地方。展开/切换时面板淡入上浮、标签底色渐变。
+    /// </summary>
+    private void SectionTab_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not Button { Tag: string tag })
+            return;
+
+        // 点已经展开的那个标签 = 收起
+        applySectionTab(tag == sectionTab ? null : tag);
+    }
+
+    /// <summary>tag 为 null 表示收起（抽屉关掉）。</summary>
+    private void applySectionTab(string? tag)
+    {
+        sectionTab = tag;
+
+        FrameworkElement? incoming = null;
+        foreach ((Button _, string value, FrameworkElement panel) in sectionTabs())
+        {
+            bool selected = value == tag;
+            panel.Visibility = selected ? Visibility.Visible : Visibility.Collapsed;
+            if (selected)
+                incoming = panel;
+        }
+
+        // 星级滑块是手画的 Canvas：藏起来时宽度是 0，重新显示后要量一次才放得对。
+        if (tag == "range")
+            updateStarRangeVisual();
+
+        // 先把新块的布局跑完再开始动画，否则动画的时间会被布局吃掉（同 applyRangeTab）。
+        if (incoming is not null)
+            UpdateLayout();
+
+        Color accent = colorOf("AccentBrush");
+        Color surface = colorOf("SurfaceRaisedBrush");
+        Color border = colorOf("BorderBrush");
+        Color muted = colorOf("MutedTextBrush");
+        Color onAccent = colorOf("BackgroundBrush");
+
+        foreach ((Button button, string value, FrameworkElement _) in sectionTabs())
+        {
+            bool selected = value == tag;
+            TabBrushes brushes = tabBrushes(button);
+            animateColor(brushes.Background, selected ? accent : surface, 150);
+            animateColor(brushes.Border, selected ? accent : border, 150);
+            animateColor(brushes.Foreground, selected ? onAccent : muted, 150);
+        }
+
+        if (incoming is not null)
+            animatePanelEntrance(incoming);
+
+        animateSectionHeight(incoming);
+    }
+
+    /// <summary>
+    /// 抽屉的高度：收起时收到 0；展开时按当前面板量出来的高度走 ——
+    /// 界面 / 账号这种一两行的块不在下面留空白，下载与高级设置封顶 360 后区内滚动。
+    /// </summary>
+    private void animateSectionHeight(FrameworkElement? panel)
+    {
+        if (!IsLoaded || ActualHeight <= 0)
+            return;
+
+        double target = 0;
+        if (panel is not null)
+        {
+            // 标题条 48 + 标签条 34 + 日志 42 + 根卡片留白，剩下的才是能分的空间
+            double available = ActualHeight - 48 - 34 - 42 - 16;
+            double cap = Math.Clamp(available * 0.62, 120, 360);
+            double width = SectionScroll.ActualWidth > 40 ? SectionScroll.ActualWidth : ActualWidth - 60;
+            panel.Measure(new Size(Math.Max(60, width), double.PositiveInfinity));
+            target = Math.Clamp(panel.DesiredSize.Height + 22, 96, cap);
+        }
+
+        double current = SectionHost.ActualHeight > 0 ? SectionHost.ActualHeight : SectionHost.Height;
+
+        // 收起后是 Collapsed，展开前得先让它可见，否则量不到、也看不到动画
+        if (target > 0)
+            SectionHost.Visibility = Visibility.Visible;
+
+        void settle()
+        {
+            SectionHost.BeginAnimation(FrameworkElement.HeightProperty, null);
+            SectionHost.Height = target;
+            if (target <= 0)
+                SectionHost.Visibility = Visibility.Collapsed;
+        }
+
+        if (!Controls.Motion.Enabled || double.IsNaN(current) || Math.Abs(current - target) < 1)
+        {
+            settle();
+            return;
+        }
+
+        DoubleAnimation height = Controls.Motion.tween(current, target, target > 0 ? 220 : 170);
+        height.Completed += (_, _) => settle();
+        SectionHost.BeginAnimation(FrameworkElement.HeightProperty, height, HandoffBehavior.SnapshotAndReplace);
+    }
+
+    private FrameworkElement? currentSectionPanel() =>
+        sectionTab is null ? null : sectionTabs().First(entry => entry.Tag == sectionTab).Panel;
+
+    private IEnumerable<(Button Button, string Tag, FrameworkElement Panel)> sectionTabs()
+    {
+        yield return (SectionRangeTab, "range", RangeSectionPanel);
+        yield return (SectionAccountTab, "account", AccountSectionPanel);
+        yield return (SectionInterfaceTab, "interface", InterfaceSectionPanel);
+        yield return (SectionAdvancedTab, "advanced", AdvancedSectionPanel);
     }
 
     private void ManiaKeysBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
