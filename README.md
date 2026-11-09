@@ -1,4 +1,4 @@
-# osu! Roam v1.5.6fix
+# osu! Roam v1.5.6.1
 
 [English](#english) · [中文](#中文)
 
@@ -15,12 +15,26 @@ keep roaming without touching it.
 
 | Package | UI language | Default download source |
 |---|---|---|
-| `osu-roam-1.5.6fix-portable.zip` | follows the system language | sayobot mirrors (China) |
-| `osu-roam-1.5.6fix-en-portable.zip` | English | catboy / beatconnect (international) |
+| `osu-roam-1.5.6.1-portable.zip` | follows the system language | sayobot mirrors (China) |
+| `osu-roam-1.5.6.1-en-portable.zip` | English | catboy / beatconnect (international) |
 
 The .NET runtime and `tosu.exe` are already inside the archive — extract and run. Each build keeps its own `data`
 folder, so **do not install one over the other**.  A fresh folder inherits the analysed-pattern library from a
 neighbouring `osu-roam*` install, so pattern data does not start from zero.
+
+## What's new in 1.5.6.1
+
+The 1.5.6fix baseline plus four interface changes from the maintenance list:
+
+- **The mini player's button says what it does**: with nothing imported it reads "Start roaming" instead of
+  "Next", because pressing it is exactly that.
+- **The recommendation range is split into three tabs** — *Basic* (stars / years / lengths), *Tag* (status /
+  genre / language / the tag lists) and *Pattern* (pattern preference, LN-only). One is shown at a time.
+  Exploration sits on its own row at the bottom: it applies to the whole pool, not to one tab.
+- **The game mode moved above the pool** as four icon buttons (osu! / taiko / catch / mania). mania is last and,
+  while selected, the free space on the right is used for the key count instead of a separate row.
+- **Preview speed is entered as the in-game scroll speed**: speed × milliseconds = 11485, so the field reads
+  something like `9.19` and the milliseconds per screen are printed underneath.
 
 ## What's new in 1.5.6fix
 
@@ -49,7 +63,7 @@ compositor-animated tile renderer were all tried without removing it.
 
 1. Extract and run `OsuRoam.exe`.
 2. Under "Account & connection", fill in the OAuth Client ID, Client Secret and your player name.
-3. Pick a mode (osu! / taiko / catch / mania 1K–10K).
+3. Pick a mode with the four icons above the pool (mania is last; the key count appears on the right).
 4. Drag the star rating slider, or click "Suggest" to compute it from your scores.
 5. Click "Start roaming".
 
@@ -123,8 +137,22 @@ osu! 谱面漫游推荐工具，Windows / WPF / .NET 8。读你的成绩样本�
 
 | 包 | 界面语言 | 默认下载源 |
 |---|---|---|
-| `osu-roam-1.5.6fix-portable.zip` | 跟随系统 | sayobot 镜像（国内） |
-| `osu-roam-1.5.6fix-en-portable.zip` | 英文 | catboy / beatconnect（国际） |
+| `osu-roam-1.5.6.1-portable.zip` | 跟随系统 | sayobot 镜像（国内） |
+| `osu-roam-1.5.6.1-en-portable.zip` | 英文 | catboy / beatconnect（国际） |
+
+## 1.5.6.1 新增
+
+1.5.6fix 这个维护基线照旧，下面是按维护清单改的四处界面：
+
+- **迷你播放器的按钮改成「说人话」**：还没有谱面（标题显示「尚未导入谱面」）时，按钮显示「开始漫游」而不是
+  「下一首」—— 因为点下去做的事就是开始漫游。
+- **推荐范围拆成「基本 / Tag / 键型」三个标签页**：基本 = 星级、年份、时长；Tag = 分类、流派、语言、tag 列表；
+  键型 = 键型偏好、只要面谱。一次只显示一个，点标签切换。**探索度单独放在最下面一行**，因为它影响整个推荐池，
+  不属于任何一个标签页。
+- **游戏模式挪到推荐池上方**，换成四个玩法图标按钮（osu! / taiko / catch / mania）。mania 排在最后，
+  选中时用这一行右边的空位选键数，不再单独占一行。
+- **「预览流速」改成填游戏里的滚动速度**：速度 × 毫秒数 = 11485，所以框里是 `9.19` 这样的数，
+  下面一行显示换算出来的「≈ 1250 毫秒/屏」。
 
 ## 1.5.6fix 新增（维护基线）
 
@@ -148,7 +176,7 @@ osu! 谱面漫游推荐工具，Windows / WPF / .NET 8。读你的成绩样本�
 
 1. 解压，双击 `OsuRoam.exe`。
 2. 「账号与连接」填 OAuth Client ID、Client Secret 和玩家名。
-3. 选游戏模式（osu! / taiko / catch / mania 1K–10K）。
+3. 用推荐池上方的四个图标选游戏模式（mania 在最后，选中后右边出现键数）。
 4. 拖星级双滑块，或点「建议星级」按成绩算一次。
 5. 点「开始漫游」。
 

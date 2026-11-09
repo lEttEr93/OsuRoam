@@ -85,6 +85,31 @@ public sealed class AppSettings
     public bool ShowPreview { get; set; } = true;
     /// <summary>预览流速：一屏覆盖多少秒谱面（越小滚得越快）。目标是与玩家游戏内流速一致。</summary>
     public double PreviewScrollSeconds { get; set; } = 1.25;
+
+    /// <summary>
+    /// osu!mania 的滚动速度和「一屏毫秒数」成反比的换算常数：速度 × 毫秒 = 11485。
+    /// 界面上填的是速度（和游戏里那个数字一致），存盘仍然存秒/屏，
+    /// 因为预览渲染那边只认秒。
+    /// </summary>
+    public const double PreviewScrollProduct = 11485.0;
+
+    /// <summary>界面允许填的滚动速度范围（对应 5.7 秒/屏 … 0.29 秒/屏）。</summary>
+    public const double PreviewScrollSpeedMinimum = 2.0;
+    public const double PreviewScrollSpeedMaximum = 40.0;
+
+    /// <summary>秒/屏 → 游戏里那个滚动速度。</summary>
+    public static double PreviewScrollSpeedFromSeconds(double seconds) =>
+        Math.Round(
+            Math.Clamp(
+                PreviewScrollProduct / Math.Max(seconds, 0.001) / 1000.0,
+                PreviewScrollSpeedMinimum,
+                PreviewScrollSpeedMaximum),
+            2);
+
+    /// <summary>游戏里那个滚动速度 → 秒/屏。</summary>
+    public static double PreviewScrollSecondsFromSpeed(double speed) =>
+        PreviewScrollProduct / Math.Clamp(speed, PreviewScrollSpeedMinimum, PreviewScrollSpeedMaximum) / 1000.0;
+
     /// <summary>预览延迟补偿（毫秒）：预览要追上游戏画面，往未来多看一点。</summary>
     public double PreviewLatencyMilliseconds { get; set; } = 35;
     /// <summary>预览贴图目录（空 = 内置贴图；不做自动扫描）。</summary>

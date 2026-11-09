@@ -66,6 +66,8 @@ public partial class MainWindow : Window
     private RecommendationItem? preparedNextItem;
     private RecommendationItem? currentRoamItem;
     private bool miniNextBusy;
+    /// <summary>推荐范围当前显示哪个标签页：basic / tag / pattern（只记在内存里，不写配置）。</summary>
+    private string rangeTab = "basic";
     private bool settingsControlsReady;
     /// <summary>
     /// 推荐池的代次：每建一次池 +1。后台的键型验证发现代次变了就停手，
@@ -166,6 +168,8 @@ public partial class MainWindow : Window
         InitializeComponent();
         RootCard.RenderTransform = rootSlide;
         MiniTitleText.Text = Loc.T("mini.nobeatmap");
+        refreshMiniNextLabel();
+        applyRangeTab(rangeTab);
         Loc.Changed += applyLanguage;
         applyDiagnosticWindowMode();
         topmostKeeper = new TopmostKeeper(this);
@@ -604,6 +608,22 @@ public partial class MainWindow : Window
         seedDiagnosticCards();
         await Task.Delay(1800);
 
+        // 开发用：--rangetab=tag|pattern 先把推荐范围切到那个标签页，--mode=mania 让键数选择露出来，
+        // 这样一张截图就能核对三个标签页和模式按钮的选中态。
+        if (Environment.GetCommandLineArgs().FirstOrDefault(arg => arg.StartsWith("--rangetab=", StringComparison.OrdinalIgnoreCase))
+            is { } rangeTabArg)
+        {
+            applyRangeTab(rangeTabArg[(rangeTabArg.IndexOf('=') + 1)..].Trim().ToLowerInvariant());
+            await Task.Delay(300);
+        }
+        if (Environment.GetCommandLineArgs().FirstOrDefault(arg => arg.StartsWith("--mode=", StringComparison.OrdinalIgnoreCase))
+            is { } modeArg)
+        {
+            settings.Mode = modeArg[(modeArg.IndexOf('=') + 1)..].Trim().ToLowerInvariant();
+            updateDifficultyControls();
+            await Task.Delay(300);
+        }
+
         // 开发用：--expand 展开所有设置分组，方便一次截完整个设置区
         if (Environment.GetCommandLineArgs().Any(arg => arg == "--expand"))
         {
@@ -636,6 +656,16 @@ public partial class MainWindow : Window
             CollapseButton_Click(this, new RoutedEventArgs());
 
         RecommendationItem item = buildSnapshotItem();
+        // 开发用：--mini-idle 停在「还没导入谱面」的状态，核对迷你播放器那个按钮的标题
+        // （「开始漫游」比「下一首」长，英文更长）。
+        if (Environment.GetCommandLineArgs().Any(arg => arg == "--mini-idle"))
+        {
+            refreshMiniPlayer();
+            await Task.Delay(700);
+            RenderDiagnostics.CaptureWindow(this, path);
+            Close();
+            return;
+        }
         currentRoamItem = item;
         refreshMiniPlayer();
         // 等曲绘下载完（截图模式是现拉的，本机最慢 3.4s）
@@ -1765,7 +1795,7 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
 
         miniNextBusy = true;
         MiniNextButton.IsEnabled = false;
-        MiniNextButton.Content = "...";
+        refreshMiniNextLabel();
         RecommendationItem? previous = currentRoamItem;
         try
         {
@@ -1813,7 +1843,6 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
         {
             miniNextBusy = false;
             MiniNextButton.IsEnabled = true;
-            MiniNextButton.Content = Loc.T("btn.next");
             refreshMiniPlayer();
         }
     }
@@ -2109,11 +2138,29 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
 
         MiniPlayerHeader.DataContext = currentRoamItem;
         MiniTitleText.Text = currentRoamItem?.DisplayTitle ?? Loc.T("mini.nobeatmap");
+        refreshMiniNextLabel();
         MiniTrackDetailText.Text = currentRoamItem is null
             ? Loc.T("mini.waiting")
             : $"{currentRoamItem.DifficultyName} · {currentRoamItem.DifficultySummary}";
 
         animateMiniPlayerEntrance(kind);
+    }
+
+    /// <summary>
+    /// 迷你播放器右边那个按钮的标题。还没有谱面时它其实就是「开始漫游」
+    /// （点下去先跑一轮构建、再导入第一首），有谱面了才是「下一首」。
+    /// </summary>
+    private void refreshMiniNextLabel()
+    {
+        if (miniNextBusy)
+        {
+            MiniNextButton.Content = "...";
+            return;
+        }
+
+        bool idle = currentRoamItem is null;
+        MiniNextButton.Content = Loc.T(idle ? "btn.start" : "btn.next");
+        MiniNextButton.ToolTip = Loc.T(idle ? "tip.startroam" : "tip.next");
     }
 
     /// <summary>
@@ -2507,7 +2554,8 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
         if (profile is null)
             ProfileText.Text = Loc.T("profile.waiting");
         StartButton.Content = Loc.T(isRunning ? "btn.stop" : "btn.start");
-        MiniNextButton.Content = miniNextBusy ? "..." : Loc.T("btn.next");
+        refreshMiniNextLabel();
+        updatePreviewScrollHint();
         if (miniNextBusy)
             MiniTrackDetailText.Text = Loc.T("status.minibuilding");
         else
@@ -2663,7 +2711,7 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
         AppSettings value = settings;
         value.Username = UsernameBox.Text.Trim();
         value.ClientId = ClientIdBox.Text.Trim();
-        value.Mode = (ModeBox.SelectedItem as ComboBoxItem)?.Tag?.ToString() ?? "osu";
+        // 游戏模式由推荐池上方的四个图标按钮直接写 settings.Mode，这里没有控件可读。
         value.ManiaKeys = selectedManiaKeys();
         DifficultyRangeSettings difficultyRange = value.GetDifficultyRange();
         difficultyRange.Automatic = false;
@@ -2678,7 +2726,8 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
         value.Exploration = ExplorationSlider.Value;
         value.PoolSize = int.TryParse((PoolSizeBox.SelectedItem as ComboBoxItem)?.Content?.ToString(), out int size) ? size : 5;
         value.CacheLimitMegabytes = parseInt(CacheLimitBox, 128, 65536);
-        value.PreviewScrollSeconds = parseDouble(PreviewScrollBox, 0.4, 4.0);
+        value.PreviewScrollSeconds = AppSettings.PreviewScrollSecondsFromSpeed(
+            parseDouble(PreviewScrollBox, AppSettings.PreviewScrollSpeedMinimum, AppSettings.PreviewScrollSpeedMaximum));
         value.PreviewLatencyMilliseconds = parseDouble(PreviewLatencyBox, 0, 300);
         value.PreviewSkinPath = PreviewSkinBox.Text.Trim();
         value.ExcludeRecentlyPlayed = ExcludeRecentCheck.IsChecked == true;
@@ -2747,12 +2796,12 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
         StopManagedTosuCheck.IsChecked = settings.StopManagedTosuOnExit;
         foreach (ComboBoxItem item in ManiaKeysBox.Items)
             if (Equals(item.Tag?.ToString(), settings.ManiaKeys.ToString())) ManiaKeysBox.SelectedItem = item;
-        foreach (ComboBoxItem item in ModeBox.Items)
-            if (Equals(item.Tag?.ToString(), settings.Mode)) ModeBox.SelectedItem = item;
         foreach (ComboBoxItem item in PoolSizeBox.Items)
             if (Equals(item.Content?.ToString(), settings.PoolSize.ToString())) PoolSizeBox.SelectedItem = item;
         CacheLimitBox.Text = settings.CacheLimitMegabytes.ToString();
-        PreviewScrollBox.Text = settings.PreviewScrollSeconds.ToString("0.0#");
+        // 界面上填的是游戏里的滚动速度（速度 × 毫秒 = 11485），存盘的是秒/屏。
+        PreviewScrollBox.Text = AppSettings.PreviewScrollSpeedFromSeconds(settings.PreviewScrollSeconds).ToString("0.##");
+        updatePreviewScrollHint();
         PreviewLatencyBox.Text = settings.PreviewLatencyMilliseconds.ToString("0");
         PreviewSkinBox.Text = settings.PreviewSkinPath;
         foreach (ComboBoxItem item in LanguageBox.Items)
@@ -3362,7 +3411,10 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
 
         try
         {
-            double seconds = parseDouble(PreviewScrollBox, 0.4, 4.0);
+            double speed = parseDouble(PreviewScrollBox, AppSettings.PreviewScrollSpeedMinimum, AppSettings.PreviewScrollSpeedMaximum);
+            // 超范围被夹住时把输入框改成夹住后的值，否则框里留着 999 而实际用的是 40。
+            PreviewScrollBox.Text = speed.ToString("0.##");
+            double seconds = AppSettings.PreviewScrollSecondsFromSpeed(speed);
             double latency = parseDouble(PreviewLatencyBox, 0, 300);
             settings.PreviewScrollSeconds = seconds;
             settings.PreviewLatencyMilliseconds = latency;
@@ -3373,14 +3425,34 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
                 previewWindow.LatencyMilliseconds = latency;
             }
 
+            updatePreviewScrollHint();
             await settingsStore.SaveAsync(settings);
-            AppLog.Info($"预览参数：流速 {seconds:0.0#} 秒/屏，延迟补偿 {latency:0}ms");
+            AppLog.Info($"预览参数：流速 {speed:0.##}（{seconds * 1000:0} 毫秒/屏），延迟补偿 {latency:0}ms");
         }
         catch (Exception exception)
         {
             AppLog.Error("预览参数不合法", exception);
         }
     }
+
+    /// <summary>
+    /// 流速输入框下面那行换算结果：填的是游戏里的滚动速度，预览渲染要的是秒/屏。
+    /// 填错（非数字）时给一条横线，不要把异常往状态栏上抛。
+    /// </summary>
+    private void updatePreviewScrollHint()
+    {
+        if (PreviewScrollHint is null)
+            return;
+        if (!tryParseDouble(PreviewScrollBox.Text, out double speed))
+        {
+            PreviewScrollHint.Text = string.Empty;
+            return;
+        }
+        double seconds = AppSettings.PreviewScrollSecondsFromSpeed(speed);
+        PreviewScrollHint.Text = Loc.F("preview.scrollhint", Math.Round(seconds * 1000));
+    }
+
+    private void PreviewScrollBox_TextChanged(object sender, TextChangedEventArgs e) => updatePreviewScrollHint();
 
     private async void PreviewCheck_Click(object sender, RoutedEventArgs e)
     {
@@ -3415,13 +3487,86 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
         }
     }
 
-    private void ModeBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    /// <summary>四个模式图标按钮（顺序即显示顺序，mania 一定排在最后一个）。</summary>
+    private IEnumerable<(Button Button, string Mode)> modeButtons()
+    {
+        yield return (ModeOsuButton, "osu");
+        yield return (ModeTaikoButton, "taiko");
+        yield return (ModeCatchButton, "fruits");
+        yield return (ModeManiaButton, "mania");
+    }
+
+    /// <summary>把当前模式画到图标按钮上：选中的用强调色底 + 深色图标，其余保持灰。</summary>
+    private void applyModeButtons()
+    {
+        Brush accent = (Brush)FindResource("AccentBrush");
+        Brush surface = (Brush)FindResource("SurfaceRaisedBrush");
+        Brush border = (Brush)FindResource("BorderBrush");
+        Brush muted = (Brush)FindResource("MutedTextBrush");
+        Brush onAccent = (Brush)FindResource("BackgroundBrush");
+
+        foreach ((Button button, string mode) in modeButtons())
+        {
+            bool selected = string.Equals(mode, settings.Mode, StringComparison.OrdinalIgnoreCase) ||
+                (mode == "fruits" && string.Equals(settings.Mode, "catch", StringComparison.OrdinalIgnoreCase));
+            button.Background = selected ? accent : surface;
+            button.BorderBrush = selected ? accent : border;
+            button.Foreground = selected ? onAccent : muted;
+        }
+
+        // 键数只在 mania 下有意义，放在这一行右边的空位上，不额外占高度。
+        ManiaKeysPanel.Visibility = settings.Mode == "mania" ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    private void ModeButton_Click(object sender, RoutedEventArgs e)
     {
         if (!settingsControlsReady)
             return;
+
+        string mode = (sender as Button)?.Tag?.ToString() ?? "osu";
+        if (string.Equals(mode, settings.Mode, StringComparison.OrdinalIgnoreCase))
+            return;
+
         saveCurrentDifficultyRange();
-        settings.Mode = (ModeBox.SelectedItem as ComboBoxItem)?.Tag?.ToString() ?? "osu";
+        settings.Mode = mode;
         updateDifficultyControls();
+    }
+
+    /// <summary>推荐范围的三个标签页：一次只显示一个，选中的那个染色。</summary>
+    private void RangeTab_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is Button { Tag: string tag })
+            applyRangeTab(tag);
+    }
+
+    private void applyRangeTab(string tag)
+    {
+        rangeTab = tag;
+        Brush accent = (Brush)FindResource("AccentBrush");
+        Brush surface = (Brush)FindResource("SurfaceRaisedBrush");
+        Brush border = (Brush)FindResource("BorderBrush");
+        Brush muted = (Brush)FindResource("MutedTextBrush");
+        Brush onAccent = (Brush)FindResource("BackgroundBrush");
+
+        foreach ((Button button, string value, FrameworkElement panel) in rangeTabs())
+        {
+            bool selected = value == tag;
+            button.Background = selected ? accent : surface;
+            button.BorderBrush = selected ? accent : border;
+            button.Foreground = selected ? onAccent : muted;
+            panel.Visibility = selected ? Visibility.Visible : Visibility.Collapsed;
+        }
+
+        // 星级滑块是手画的 Canvas：藏起来时宽度是 0，重新显示后要量一次才放得对。
+        if (tag == "basic")
+            updateStarRangeVisual();
+    }
+
+    private IEnumerable<(Button Button, string Tag, FrameworkElement Panel)> rangeTabs()
+    {
+        yield return (RangeBasicTab, "basic", RangeBasicPanel);
+        yield return (RangeTagTab, "tag", RangeTagPanel);
+        yield return (RangePatternTab, "pattern", RangePatternPanel);
     }
 
     private void ManiaKeysBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -3637,7 +3782,7 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
     }
     private void updateDifficultyControls()
     {
-        ManiaKeysPanel.Visibility = settings.Mode == "mania" ? Visibility.Visible : Visibility.Collapsed;
+        applyModeButtons();
         applyDifficultyRangeToControls(settings.GetDifficultyRange());
         DifficultyProfileText.Text = difficultyProfileLabel();
     }

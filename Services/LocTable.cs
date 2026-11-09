@@ -27,6 +27,7 @@ public static class LocTable
 
         // 提示气泡
         ["tip.next"] = "下载并导入下一首",
+        ["tip.startroam"] = "下载并导入第一首",
         ["tip.history"] = "历史推荐",
         ["tip.miniplayer"] = "迷你播放器",
         ["tip.expand"] = "展开",
@@ -58,6 +59,11 @@ public static class LocTable
         ["section.account"] = "账号与连接",
         ["section.advanced"] = "下载与高级设置",
         ["section.interface"] = "界面",
+
+        // 推荐范围的标签页
+        ["tab.rangebasic"] = "基本",
+        ["tab.rangetag"] = "Tag",
+        ["tab.rangepattern"] = "键型",
 
         // 字段名
         ["label.stars"] = "难度星级",
@@ -102,8 +108,10 @@ public static class LocTable
         ["check.embeddedfont"] = "使用内置字体（Outfit）",
         ["check.mapinfo"] = "导入后显示谱面信息窗",
         ["preview.check"] = "选歌时显示谱面预览（实验性）",
-        ["label.previewscroll"] = "预览流速（秒/屏，越小越快）",
+        ["label.previewscroll"] = "预览流速（滚动速度）",
+        ["tip.previewscroll"] = "osu!mania 里的滚动速度：速度和「一屏毫秒数」成反比，速度 × 毫秒 = 11485",
         ["label.previewlatency"] = "预览延迟补偿（毫秒）",
+        ["preview.scrollhint"] = "≈ {0} 毫秒/屏",
         ["label.previewskin"] = "预览贴图目录（留空 = 内置贴图）",
         ["preview.tip"] = "在选歌界面按 tosu 报的预览音频位置滚一遍当前谱面（mania），窗口贴在谱面信息窗右侧、和它等高",
         ["preview.title"] = "谱面预览",
@@ -312,6 +320,7 @@ public static class LocTable
 
         // 提示气泡
         ["tip.next"] = "Download and import the next beatmap",
+        ["tip.startroam"] = "Download and import the first beatmap",
         ["tip.history"] = "Recommendation history",
         ["tip.miniplayer"] = "Mini player",
         ["tip.expand"] = "Expand",
@@ -343,6 +352,16 @@ public static class LocTable
         ["section.account"] = "Account & connection",
         ["section.advanced"] = "Downloads & advanced",
         ["section.interface"] = "Interface",
+
+        // 推荐范围的标签页
+        ["tab.rangebasic"] = "Basic",
+        ["tab.rangetag"] = "Tag",
+        ["tab.rangepattern"] = "Pattern",
+
+        // 推荐范围的标签页
+        ["tab.rangebasic"] = "Basic",
+        ["tab.rangetag"] = "Tag",
+        ["tab.rangepattern"] = "Pattern",
 
         // 字段名
         ["label.stars"] = "Difficulty",
@@ -387,8 +406,10 @@ public static class LocTable
         ["check.embeddedfont"] = "Use the bundled font (Outfit)",
         ["check.mapinfo"] = "Show the beatmap info window after import",
         ["preview.check"] = "Show a beatmap preview in song select (experimental)",
-        ["label.previewscroll"] = "Preview speed (seconds per screen)",
-        ["label.previewlatency"] = "Preview latency compensation (ms)",
+        ["label.previewscroll"] = "Preview speed",
+        ["tip.previewscroll"] = "osu!mania scroll speed: it is inversely proportional to the milliseconds per screen, speed × ms = 11485",
+        ["label.previewlatency"] = "Preview latency (ms)",
+        ["preview.scrollhint"] = "≈ {0} ms per screen",
         ["label.previewskin"] = "Preview texture folder (empty = built-in)",
         ["preview.tip"] = "Scrolls the selected beatmap (mania) with tosu's preview audio position; docks to the right of the info window at the same height",
         ["preview.title"] = "Beatmap preview",

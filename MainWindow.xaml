@@ -6,6 +6,14 @@
         FontFamily="{DynamicResource UiFont}"
         WindowStyle="None" AllowsTransparency="True" Background="Transparent"
         Topmost="True" ResizeMode="CanResizeWithGrip" ShowInTaskbar="True" Icon="/OsuRoam;component/Assets/OsuRoam.ico">
+    <Window.Resources>
+        <!-- 推荐范围的三个标签页：扁平分段按钮，选中态由代码染色（applyRangeTab）。 -->
+        <Style x:Key="RangeTabStyle" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+            <Setter Property="Padding" Value="0,6" />
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="Foreground" Value="{StaticResource MutedTextBrush}" />
+        </Style>
+    </Window.Resources>
     <Border x:Name="RootCard" Margin="8" Background="{StaticResource BackgroundBrush}" BorderBrush="{StaticResource BorderBrush}"
             BorderThickness="1" CornerRadius="7">
         <Grid>
@@ -64,7 +72,8 @@
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*" />
                         <ColumnDefinition Width="Auto" />
-                        <ColumnDefinition Width="58" />
+                        <!-- 标题不固定宽度：「下一首」和「开始漫游」字数不一样（英文差得更多） -->
+                        <ColumnDefinition Width="Auto" />
                     </Grid.ColumnDefinitions>
                     <StackPanel Margin="0,0,7,0" VerticalAlignment="Center">
                         <TextBlock x:Name="MiniTitleText"
@@ -79,7 +88,7 @@
                     <Button x:Name="MiniInfoButton" Grid.Column="1" Width="30" Height="30" Padding="0" Margin="0,0,6,0"
                             Content="i" FontWeight="SemiBold" Click="MiniInfoButton_Click"
                             ToolTip="{DynamicResource L.tip.showinfo}" />
-                    <Button x:Name="MiniNextButton" Grid.Column="2" Width="58" Height="30" Padding="0"
+                    <Button x:Name="MiniNextButton" Grid.Column="2" MinWidth="58" Height="30" Padding="8,0"
                             Content="{DynamicResource L.btn.next}" Click="MiniNextButton_Click" ToolTip="{DynamicResource L.tip.next}" />
                 </Grid>
                 <StackPanel Grid.Column="1" Orientation="Horizontal" Margin="0,7,7,7">
@@ -116,6 +125,50 @@
                         </StackPanel>
                         <Button x:Name="StartButton" Grid.Column="1" Content="{DynamicResource L.btn.start}" Background="{StaticResource AccentBrush}"
                                 BorderBrush="{StaticResource AccentBrush}" Click="StartButton_Click" />
+                    </Grid>
+
+                    <!-- 游戏模式：四个玩法图标靠左一行，选中那个染成强调色。
+                         mania 选中时，右边空出来的位置用来选键数（不占额外的高度）。 -->
+                    <Grid Margin="0,0,0,10">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <StackPanel Orientation="Horizontal">
+                            <Button x:Name="ModeOsuButton" Tag="osu" Click="ModeButton_Click" Width="40" Height="30"
+                                    Padding="0" Margin="0,0,6,0" ToolTip="osu!standard">
+                                <controls:ModeIcon Mode="Osu" Width="18" Height="18"
+                                                   Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" />
+                            </Button>
+                            <Button x:Name="ModeTaikoButton" Tag="taiko" Click="ModeButton_Click" Width="40" Height="30"
+                                    Padding="0" Margin="0,0,6,0" ToolTip="osu!taiko">
+                                <controls:ModeIcon Mode="Taiko" Width="18" Height="18"
+                                                   Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" />
+                            </Button>
+                            <Button x:Name="ModeCatchButton" Tag="fruits" Click="ModeButton_Click" Width="40" Height="30"
+                                    Padding="0" Margin="0,0,6,0" ToolTip="osu!catch">
+                                <controls:ModeIcon Mode="Catch" Width="18" Height="18"
+                                                   Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" />
+                            </Button>
+                            <Button x:Name="ModeManiaButton" Tag="mania" Click="ModeButton_Click" Width="40" Height="30"
+                                    Padding="0" ToolTip="osu!mania">
+                                <controls:ModeIcon Mode="Mania" Width="18" Height="18"
+                                                   Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" />
+                            </Button>
+                        </StackPanel>
+                        <StackPanel x:Name="ManiaKeysPanel" Grid.Column="1" Orientation="Horizontal"
+                                    HorizontalAlignment="Right" VerticalAlignment="Center" Visibility="Collapsed">
+                            <TextBlock Text="{DynamicResource L.label.keys}" Foreground="{StaticResource MutedTextBrush}"
+                                       FontSize="11" VerticalAlignment="Center" Margin="0,0,6,0" />
+                            <ComboBox x:Name="ManiaKeysBox" Width="74" SelectedIndex="3" SelectionChanged="ManiaKeysBox_SelectionChanged"
+                                      DropDownOpened="ComboBox_DropDownOpened" DropDownClosed="ComboBox_DropDownClosed">
+                                <ComboBoxItem Content="1K" Tag="1" /><ComboBoxItem Content="2K" Tag="2" />
+                                <ComboBoxItem Content="3K" Tag="3" /><ComboBoxItem Content="4K" Tag="4" />
+                                <ComboBoxItem Content="5K" Tag="5" /><ComboBoxItem Content="6K" Tag="6" />
+                                <ComboBoxItem Content="7K" Tag="7" /><ComboBoxItem Content="8K" Tag="8" />
+                                <ComboBoxItem Content="9K" Tag="9" /><ComboBoxItem Content="10K" Tag="10" />
+                            </ComboBox>
+                        </StackPanel>
                     </Grid>
 
                     <ItemsControl x:Name="RecommendationList">
@@ -342,75 +395,83 @@
                                HorizontalAlignment="Center" Margin="0,18" />
 
                     <Expander x:Name="RangeExpander" Header="{DynamicResource L.section.range}" IsExpanded="True" Margin="0,8,0,0">
-                        <Grid Margin="0,10,0,4">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="12" />
-                                <ColumnDefinition Width="*" />
-                            </Grid.ColumnDefinitions>
-                            <Grid.RowDefinitions>
-                                <RowDefinition Height="Auto" />
-                            <RowDefinition Height="Auto" />
-                                <RowDefinition Height="Auto" />
-                            <RowDefinition Height="Auto" />
-                                <RowDefinition Height="Auto" />
-                            <RowDefinition Height="Auto" />
-                                <RowDefinition Height="Auto" />
-                            <RowDefinition Height="Auto" />
-                                <RowDefinition Height="Auto" />
-                            <RowDefinition Height="Auto" />
-                            </Grid.RowDefinitions>
-                            <Button x:Name="SuggestDifficultyButton" Grid.ColumnSpan="2" Content="{DynamicResource L.btn.suggest}" HorizontalAlignment="Left" Padding="10,4" Margin="0,0,0,9" Click="SuggestDifficultyButton_Click" />
-                            <TextBlock x:Name="DifficultyProfileText" Grid.Column="2" HorizontalAlignment="Right"
-                                       Foreground="{StaticResource SecondaryBrush}" FontSize="11" />
-                            <StackPanel Grid.Row="1" Visibility="Collapsed">
-                                <TextBlock Text="{DynamicResource L.label.minstar}" Foreground="{StaticResource MutedTextBrush}" FontSize="11" />
-                            </StackPanel>
-                            <StackPanel Grid.Row="1" Grid.Column="2" Visibility="Collapsed">
-                                <TextBlock Text="{DynamicResource L.label.maxstar}" Foreground="{StaticResource MutedTextBrush}" FontSize="11" />
-                            </StackPanel>
-                            <Grid Grid.Row="1" Grid.ColumnSpan="3">
-                                <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="42" /></Grid.RowDefinitions>
-                                <TextBlock Text="{DynamicResource L.label.stars}" Foreground="{StaticResource MutedTextBrush}" FontSize="11" />
-                                <Grid x:Name="StarRangeControl" Grid.Row="1" Height="42" SizeChanged="StarRangeControl_SizeChanged">
-                                    <Canvas x:Name="StarRangeCanvas" Background="Transparent" MouseLeftButtonDown="StarRangeTrack_MouseLeftButtonDown" MouseMove="StarRangeCanvas_MouseMove" MouseLeftButtonUp="StarRangeCanvas_MouseLeftButtonUp">
-                                        <Border x:Name="StarRangeTrack" Canvas.Top="15" Height="12" BorderBrush="#3F4951" BorderThickness="1" CornerRadius="4">
-                                            <Border.Background>
-                                                <LinearGradientBrush StartPoint="0,0.5" EndPoint="1,0.5">
-                                                    <GradientStop Color="#3D96F5" Offset="0" />
-                                                    <GradientStop Color="#43C2CE" Offset="0.20" />
-                                                    <GradientStop Color="#71D26F" Offset="0.38" />
-                                                    <GradientStop Color="#E0C352" Offset="0.55" />
-                                                    <GradientStop Color="#DE6676" Offset="0.72" />
-                                                    <GradientStop Color="#B364C5" Offset="0.88" />
-                                                    <GradientStop Color="#6A84D4" Offset="1" />
-                                                </LinearGradientBrush>
-                                            </Border.Background>
-                                        </Border>
-                                        <Border x:Name="StarRangeLeftDim" Canvas.Top="15" Height="12" Background="#42000000" CornerRadius="4,0,0,4" IsHitTestVisible="False" />
-                                        <Border x:Name="StarRangeRightDim" Canvas.Top="15" Height="12" Background="#42000000" CornerRadius="0,4,4,0" IsHitTestVisible="False" />
-                                        <Border x:Name="MinimumStarThumb" Canvas.Top="9" Width="30" Height="24" Background="#3D96F5" BorderBrush="#74C5FF" BorderThickness="1" CornerRadius="3" Cursor="Hand" MouseLeftButtonDown="MinimumStarThumb_MouseLeftButtonDown"><TextBlock x:Name="MinimumStarText" HorizontalAlignment="Center" VerticalAlignment="Center" FontWeight="SemiBold" FontSize="11" Foreground="#0C1A2A" /></Border>
-                                        <Border x:Name="MaximumStarThumb" Canvas.Top="9" Width="30" Height="24" Background="#20262C" BorderBrush="#56636E" BorderThickness="1" CornerRadius="3" Cursor="Hand" MouseLeftButtonDown="MaximumStarThumb_MouseLeftButtonDown"><TextBlock x:Name="MaximumStarText" HorizontalAlignment="Center" VerticalAlignment="Center" FontWeight="SemiBold" FontSize="11" /></Border>
-                                    </Canvas>
-                                </Grid>
+                        <StackPanel Margin="0,10,0,4">
+                            <!-- 建议星级是整块的入口，放标签页上方 -->
+                            <Grid Margin="0,0,0,10">
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+                                <Button x:Name="SuggestDifficultyButton" Content="{DynamicResource L.btn.suggest}"
+                                        HorizontalAlignment="Left" Padding="10,4" Click="SuggestDifficultyButton_Click" />
+                                <TextBlock x:Name="DifficultyProfileText" Grid.Column="1" HorizontalAlignment="Right" VerticalAlignment="Center"
+                                           Foreground="{StaticResource SecondaryBrush}" FontSize="11" TextTrimming="CharacterEllipsis" />
                             </Grid>
-                            <StackPanel Grid.Row="2" Margin="0,9,0,0">
-                                <TextBlock Text="{DynamicResource L.label.minyear}" Foreground="{StaticResource MutedTextBrush}" FontSize="11" />
-                                <TextBox x:Name="MinimumYearBox" />
-                            </StackPanel>
-                            <StackPanel Grid.Row="2" Grid.Column="2" Margin="0,9,0,0">
-                                <TextBlock Text="{DynamicResource L.label.maxyear}" Foreground="{StaticResource MutedTextBrush}" FontSize="11" />
-                                <TextBox x:Name="MaximumYearBox" />
-                            </StackPanel>
-                            <StackPanel Grid.Row="3" Margin="0,9,0,0">
-                                <TextBlock Text="{DynamicResource L.label.minlength}" Foreground="{StaticResource MutedTextBrush}" FontSize="11" />
-                                <TextBox x:Name="MinimumLengthBox" />
-                            </StackPanel>
-                            <StackPanel Grid.Row="3" Grid.Column="2" Margin="0,9,0,0">
-                                <TextBlock Text="{DynamicResource L.label.maxlength}" Foreground="{StaticResource MutedTextBrush}" FontSize="11" />
-                                <TextBox x:Name="MaximumLengthBox" />
-                            </StackPanel>
-                            <StackPanel Grid.Row="4" Grid.ColumnSpan="3" Margin="0,10,0,0">
+
+                            <!-- 基本 / tag / 键型：一次只显示一个，点标签切换 -->
+                            <UniformGrid x:Name="RangeTabBar" Rows="1" Columns="3">
+                                <Button x:Name="RangeBasicTab" Tag="basic" Content="{DynamicResource L.tab.rangebasic}"
+                                        Style="{StaticResource RangeTabStyle}" Margin="0,0,3,0" Click="RangeTab_Click" />
+                                <Button x:Name="RangeTagTab" Tag="tag" Content="{DynamicResource L.tab.rangetag}"
+                                        Style="{StaticResource RangeTabStyle}" Margin="0,0,3,0" Click="RangeTab_Click" />
+                                <Button x:Name="RangePatternTab" Tag="pattern" Content="{DynamicResource L.tab.rangepattern}"
+                                        Style="{StaticResource RangeTabStyle}" Click="RangeTab_Click" />
+                            </UniformGrid>
+
+                            <!-- ① 基本：星级 / 年份 / 时长 -->
+                            <Grid x:Name="RangeBasicPanel" Margin="0,9,0,0">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="12" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                </Grid.RowDefinitions>
+                                <Grid Grid.ColumnSpan="3">
+                                    <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="42" /></Grid.RowDefinitions>
+                                    <TextBlock Text="{DynamicResource L.label.stars}" Foreground="{StaticResource MutedTextBrush}" FontSize="11" />
+                                    <Grid x:Name="StarRangeControl" Grid.Row="1" Height="42" SizeChanged="StarRangeControl_SizeChanged">
+                                        <Canvas x:Name="StarRangeCanvas" Background="Transparent" MouseLeftButtonDown="StarRangeTrack_MouseLeftButtonDown" MouseMove="StarRangeCanvas_MouseMove" MouseLeftButtonUp="StarRangeCanvas_MouseLeftButtonUp">
+                                            <Border x:Name="StarRangeTrack" Canvas.Top="15" Height="12" BorderBrush="#3F4951" BorderThickness="1" CornerRadius="4">
+                                                <Border.Background>
+                                                    <LinearGradientBrush StartPoint="0,0.5" EndPoint="1,0.5">
+                                                        <GradientStop Color="#3D96F5" Offset="0" />
+                                                        <GradientStop Color="#43C2CE" Offset="0.20" />
+                                                        <GradientStop Color="#71D26F" Offset="0.38" />
+                                                        <GradientStop Color="#E0C352" Offset="0.55" />
+                                                        <GradientStop Color="#DE6676" Offset="0.72" />
+                                                        <GradientStop Color="#B364C5" Offset="0.88" />
+                                                        <GradientStop Color="#6A84D4" Offset="1" />
+                                                    </LinearGradientBrush>
+                                                </Border.Background>
+                                            </Border>
+                                            <Border x:Name="StarRangeLeftDim" Canvas.Top="15" Height="12" Background="#42000000" CornerRadius="4,0,0,4" IsHitTestVisible="False" />
+                                            <Border x:Name="StarRangeRightDim" Canvas.Top="15" Height="12" Background="#42000000" CornerRadius="0,4,4,0" IsHitTestVisible="False" />
+                                            <Border x:Name="MinimumStarThumb" Canvas.Top="9" Width="30" Height="24" Background="#3D96F5" BorderBrush="#74C5FF" BorderThickness="1" CornerRadius="3" Cursor="Hand" MouseLeftButtonDown="MinimumStarThumb_MouseLeftButtonDown"><TextBlock x:Name="MinimumStarText" HorizontalAlignment="Center" VerticalAlignment="Center" FontWeight="SemiBold" FontSize="11" Foreground="#0C1A2A" /></Border>
+                                            <Border x:Name="MaximumStarThumb" Canvas.Top="9" Width="30" Height="24" Background="#20262C" BorderBrush="#56636E" BorderThickness="1" CornerRadius="3" Cursor="Hand" MouseLeftButtonDown="MaximumStarThumb_MouseLeftButtonDown"><TextBlock x:Name="MaximumStarText" HorizontalAlignment="Center" VerticalAlignment="Center" FontWeight="SemiBold" FontSize="11" /></Border>
+                                        </Canvas>
+                                    </Grid>
+                                </Grid>
+                                <StackPanel Grid.Row="1" Margin="0,9,0,0">
+                                    <TextBlock Text="{DynamicResource L.label.minyear}" Foreground="{StaticResource MutedTextBrush}" FontSize="11" />
+                                    <TextBox x:Name="MinimumYearBox" />
+                                </StackPanel>
+                                <StackPanel Grid.Row="1" Grid.Column="2" Margin="0,9,0,0">
+                                    <TextBlock Text="{DynamicResource L.label.maxyear}" Foreground="{StaticResource MutedTextBrush}" FontSize="11" />
+                                    <TextBox x:Name="MaximumYearBox" />
+                                </StackPanel>
+                                <StackPanel Grid.Row="2" Margin="0,9,0,0">
+                                    <TextBlock Text="{DynamicResource L.label.minlength}" Foreground="{StaticResource MutedTextBrush}" FontSize="11" />
+                                    <TextBox x:Name="MinimumLengthBox" />
+                                </StackPanel>
+                                <StackPanel Grid.Row="2" Grid.Column="2" Margin="0,9,0,0">
+                                    <TextBlock Text="{DynamicResource L.label.maxlength}" Foreground="{StaticResource MutedTextBrush}" FontSize="11" />
+                                    <TextBox x:Name="MaximumLengthBox" />
+                                </StackPanel>
+                            </Grid>
+
+                            <!-- ② tag：分类 / 流派 / 语言 / tag 白名单 -->
+                            <StackPanel x:Name="RangeTagPanel" Visibility="Collapsed" Margin="0,9,0,0">
                                 <Grid>
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition />
@@ -470,15 +531,10 @@
                                     <ItemsControl.ItemTemplate><DataTemplate><Button Content="{Binding}" Tag="{Binding}" Click="RemoveExcludedTagButton_Click" Margin="0,0,4,3" Padding="7,2" /></DataTemplate></ItemsControl.ItemTemplate>
                                 </ItemsControl>
                             </StackPanel>
-                            <StackPanel Grid.Row="5" Grid.ColumnSpan="3" Margin="0,10,0,0">
-                                <DockPanel>
-                                    <TextBlock Text="{DynamicResource L.label.exploration}" Foreground="{StaticResource MutedTextBrush}" FontSize="11" />
-                                    <TextBlock x:Name="ExplorationText" DockPanel.Dock="Right" HorizontalAlignment="Right" FontSize="11" />
-                                </DockPanel>
-                                <Slider x:Name="ExplorationSlider" Minimum="0" Maximum="1" TickFrequency="0.05"
-                                        ValueChanged="ExplorationSlider_ValueChanged" />
-                                <TextBlock Text="{DynamicResource L.label.patterns}" Margin="0,10,0,0"
-                                           Foreground="{StaticResource MutedTextBrush}" FontSize="11" />
+
+                            <!-- ③ 键型：偏好勾选 + 只要面谱 -->
+                            <StackPanel x:Name="RangePatternPanel" Visibility="Collapsed" Margin="0,9,0,0">
+                                <TextBlock Text="{DynamicResource L.label.patterns}" Foreground="{StaticResource MutedTextBrush}" FontSize="11" />
                                 <WrapPanel Margin="0,2,0,0">
                                     <CheckBox x:Name="PatternStreamCheck" Content="{DynamicResource L.pattern.stream}" Tag="Stream" Click="PatternCheck_Click" Margin="0,0,12,4" />
                                     <CheckBox x:Name="PatternChordstreamCheck" Content="{DynamicResource L.pattern.chordstream}" Tag="Chordstream" Click="PatternCheck_Click" Margin="0,0,12,4" />
@@ -490,41 +546,25 @@
                                 <CheckBox x:Name="PreferLnCheck" Content="{DynamicResource L.label.preferln}" Margin="0,4,0,0"
                                           Click="PreferLnCheck_Click" />
                             </StackPanel>
-                        </Grid>
+
+                            <!-- 探索度影响整个推荐池，不属于任何一个标签页，所以单独放最下面 -->
+                            <StackPanel Margin="0,12,0,0">
+                                <DockPanel>
+                                    <TextBlock Text="{DynamicResource L.label.exploration}" Foreground="{StaticResource MutedTextBrush}" FontSize="11" />
+                                    <TextBlock x:Name="ExplorationText" DockPanel.Dock="Right" HorizontalAlignment="Right" FontSize="11" />
+                                </DockPanel>
+                                <Slider x:Name="ExplorationSlider" Minimum="0" Maximum="1" TickFrequency="0.05"
+                                        ValueChanged="ExplorationSlider_ValueChanged" />
+                            </StackPanel>
+                        </StackPanel>
                     </Expander>
 
                     <Expander x:Name="AccountExpander" Header="{DynamicResource L.section.account}" Margin="0,8,0,0">
                         <StackPanel Margin="0,10,0,4">
                             <TextBlock Text="{DynamicResource L.label.username}" Foreground="{StaticResource MutedTextBrush}" FontSize="11" />
                             <TextBox x:Name="UsernameBox" />
-                            <Grid Margin="0,9,0,0">
-                                <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="12" /><ColumnDefinition Width="150" /></Grid.ColumnDefinitions>
-                                <StackPanel>
-                                    <TextBlock Text="OAuth Client ID" Foreground="{StaticResource MutedTextBrush}" FontSize="11" />
-                                    <TextBox x:Name="ClientIdBox" />
-                                </StackPanel>
-                                <StackPanel Grid.Column="2">
-                                    <TextBlock Text="{DynamicResource L.label.mode}" Foreground="{StaticResource MutedTextBrush}" FontSize="11" />
-                                    <ComboBox x:Name="ModeBox" SelectedIndex="0" SelectionChanged="ModeBox_SelectionChanged"
-                                              DropDownOpened="ComboBox_DropDownOpened" DropDownClosed="ComboBox_DropDownClosed">
-                                        <ComboBoxItem Content="osu!standard" Tag="osu" />
-                                        <ComboBoxItem Content="taiko" Tag="taiko" />
-                                        <ComboBoxItem Content="catch" Tag="fruits" />
-                                        <ComboBoxItem Content="mania" Tag="mania" />
-                                    </ComboBox>
-                                    <StackPanel x:Name="ManiaKeysPanel" Visibility="Collapsed" Margin="0,7,0,0">
-                                        <TextBlock Text="{DynamicResource L.label.keys}" Foreground="{StaticResource MutedTextBrush}" FontSize="11" />
-                                        <ComboBox x:Name="ManiaKeysBox" SelectedIndex="3" SelectionChanged="ManiaKeysBox_SelectionChanged"
-                                                  DropDownOpened="ComboBox_DropDownOpened" DropDownClosed="ComboBox_DropDownClosed">
-                                            <ComboBoxItem Content="1K" Tag="1" /><ComboBoxItem Content="2K" Tag="2" />
-                                            <ComboBoxItem Content="3K" Tag="3" /><ComboBoxItem Content="4K" Tag="4" />
-                                            <ComboBoxItem Content="5K" Tag="5" /><ComboBoxItem Content="6K" Tag="6" />
-                                            <ComboBoxItem Content="7K" Tag="7" /><ComboBoxItem Content="8K" Tag="8" />
-                                            <ComboBoxItem Content="9K" Tag="9" /><ComboBoxItem Content="10K" Tag="10" />
-                                        </ComboBox>
-                                    </StackPanel>
-                                </StackPanel>
-                            </Grid>
+                            <TextBlock Text="OAuth Client ID" Foreground="{StaticResource MutedTextBrush}" FontSize="11" Margin="0,9,0,0" />
+                            <TextBox x:Name="ClientIdBox" />
                             <TextBlock Text="OAuth Client Secret" Foreground="{StaticResource MutedTextBrush}" FontSize="11" Margin="0,9,0,0" />
                             <PasswordBox x:Name="ClientSecretBox" />
                         </StackPanel>
@@ -566,11 +606,15 @@
                                           ToolTip="{DynamicResource L.preview.tip}" />
                             </WrapPanel>
                             <StackPanel Orientation="Horizontal" Margin="0,0,0,9">
-                                <StackPanel Width="130" Margin="0,0,8,0">
+                                <StackPanel Width="150" Margin="0,0,8,0">
                                     <TextBlock Text="{DynamicResource L.label.previewscroll}" Foreground="{StaticResource MutedTextBrush}" FontSize="11" />
-                                    <TextBox x:Name="PreviewScrollBox" LostFocus="PreviewTuning_LostFocus" />
+                                    <TextBox x:Name="PreviewScrollBox" LostFocus="PreviewTuning_LostFocus"
+                                             TextChanged="PreviewScrollBox_TextChanged"
+                                             ToolTip="{DynamicResource L.tip.previewscroll}" />
+                                    <TextBlock x:Name="PreviewScrollHint" FontSize="10" Margin="0,3,0,0"
+                                               Foreground="{StaticResource MutedTextBrush}" TextTrimming="CharacterEllipsis" />
                                 </StackPanel>
-                                <StackPanel Width="130">
+                                <StackPanel Width="150">
                                     <TextBlock Text="{DynamicResource L.label.previewlatency}" Foreground="{StaticResource MutedTextBrush}" FontSize="11" />
                                     <TextBox x:Name="PreviewLatencyBox" LostFocus="PreviewTuning_LostFocus" />
                                 </StackPanel>
