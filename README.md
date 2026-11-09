@@ -1,4 +1,4 @@
-# osu! Roam v1.5.5
+# osu! Roam v1.5.6fix
 
 [English](#english) · [中文](#中文)
 
@@ -15,26 +15,35 @@ keep roaming without touching it.
 
 | Package | UI language | Default download source |
 |---|---|---|
-| `osu-roam-1.5.5-portable.zip` | follows the system language | sayobot mirrors (China) |
-| `osu-roam-1.5.5-en-portable.zip` | English | catboy / beatconnect (international) |
+| `osu-roam-1.5.6fix-portable.zip` | follows the system language | sayobot mirrors (China) |
+| `osu-roam-1.5.6fix-en-portable.zip` | English | catboy / beatconnect (international) |
 
 The .NET runtime and `tosu.exe` are already inside the archive — extract and run. Each build keeps its own `data`
 folder, so **do not install one over the other**.  A fresh folder inherits the analysed-pattern library from a
 neighbouring `osu-roam*` install, so pattern data does not start from zero.
 
-## What's new in 1.5.5
+## What's new in 1.5.6fix
 
-- **A beatmap preview window in song select.** While you browse, Roam opens a second window next to the info
-  panel — same height — and scrolls the selected mania chart with the preview audio osu! is playing (tosu reports
-  the position in milliseconds). Plain lanes and tiles: no judgement, no sound, no skin files.
-- **SV charts are scored, not just star-rated.** The info panel gains four rings — isochrony and comfort (higher
-  is better), memorisation and intensity (higher is worse).
-- **tosu trouble is visible.** When tosu cannot read osu!, the info panel says why instead of staying empty.
-- **The info panel stopped jumping.** Details come first and the card is laid out at its final height, so the radar
-  and pattern bars arriving a moment later no longer resize it; the notice state uses that same height.
-- **osu! detection was rewritten**: Velopack-installed lazer, a missing `.osz` association and non-default install
-  folders all import now.
-- Everything from 1.5.3 is unchanged.
+This is the **maintenance baseline**: everything from 1.5.5, plus the fixes below.
+
+- **The preview no longer dies after gameplay.** Returning to song select from a pause could leave the panel with
+  its background but no notes at all. The render thread was blocked on a frame-latency wait that sits *before* it
+  reads the chart, so it stayed alive but never drew again. It no longer waits there, has a timeout fallback and
+  can restart itself if the thread ever dies.
+- **Notes are drawn from textures now** instead of solid rectangles: a built-in set ships in `Assets/Preview`, and
+  Settings → *preview texture folder* can point at an osu! skin (a skin folder is never auto-detected). Missing
+  textures fall back to the plain rectangles.
+- Fixed two crashes/hangs found on the way: textures showing only their left half, and a Direct2D deadlock when
+  bitmaps were created inside `BeginDraw`.
+- **tosu no longer leaves zombies behind** (the child process is bound to a Job object), and a tosu that is
+  connected but reports no game data is restarted automatically.
+- **Import failures are no longer silent**: if `osu!.exe` exits non-zero within 30 seconds, the status bar says so
+  and the exit code is logged.
+
+**Known limitation, not fixed:** the preview still has slight periodic judder. With per-pixel transparency it must
+go through DWM composition, which occasionally holds a frame for an extra refresh (measured display interval
+p95 8.3 ms, versus 4.21 ms for osu!lazer's independent flip). Queue depth, submission rate, both GPUs and a
+compositor-animated tile renderer were all tried without removing it.
 
 ## Quick start
 
@@ -114,17 +123,24 @@ osu! 谱面漫游推荐工具，Windows / WPF / .NET 8。读你的成绩样本�
 
 | 包 | 界面语言 | 默认下载源 |
 |---|---|---|
-| `osu-roam-1.5.5-portable.zip` | 跟随系统 | sayobot 镜像（国内） |
-| `osu-roam-1.5.5-en-portable.zip` | 英文 | catboy / beatconnect（国际） |
+| `osu-roam-1.5.6fix-portable.zip` | 跟随系统 | sayobot 镜像（国内） |
+| `osu-roam-1.5.6fix-en-portable.zip` | 英文 | catboy / beatconnect（国际） |
 
-## 1.5.5 新增
+## 1.5.6fix 新增（维护基线）
 
-- **选歌界面有谱面预览了**：浏览谱面时，信息窗旁边再开一个等高的窗口，按 osu! 正在播的那段预览音频滚动当前选中的 mania 谱面（位置由 tosu 报毫秒）。只有轨道和方砖：不判定、不出声、不读皮肤。
-- **SV 也打分了**：信息窗多四个小环 —— 等时性、舒适度（越高越好），背谱、强度（越高越差）。
-- **tosu 出问题会说人话**：tosu 读不到 osu! 时，信息窗直接说明原因，而不是空着不显示。
-- **信息窗不再跳一下**：详情先出、卡片按最终高度布好，键型雷达晚一步出现也不会改高度；提示态用同一个高度。
-- **osu! 定位重写**：lazer 用 Velopack 安装、`.osz` 没有默认关联、装在非默认目录，导入都能用了。
-- 1.5.3 的功能全部照旧。
+1.5.5 的全部功能照旧，下面是这个版本修的：
+
+- **从游戏退回选歌后预览不再“只剩黑底”**：根因是渲染线程卡在“帧延迟等待”上，而该等待在读谱面之前，
+  线程活着却再也不绘制。现在不再等它，并且加了连续超时兜底与线程自愈。
+- **音符改成贴图驱动**（不再是纯色矩形）：内置一套贴图在 `Assets/Preview`；设置里的「预览贴图目录」可以指向
+  一个 osu! 皮肤目录（**不会自动扫描**）。读不到就退回纯色块。
+- 顺手修了两个坑：贴图只显示左半截、以及在 `BeginDraw` 里创建位图导致的 Direct2D 死锁。
+- **tosu 不再留僵尸进程**（放进 Job 对象，Roam 被强杀时一起收掉），并且“连着但读不到游戏”会自动重启。
+- **导入失败不再静默**：`osu!.exe` 30 秒内非 0 退出会在状态栏说明并记录退出码。
+
+**已知限制（不修）**：预览仍有轻微周期性抖动。逐像素透明必须走 DWM 合成，它会偶尔把一帧多留一个刷新周期
+（实测显示间隔 p95 8.3 ms，而 osu!lazer 的独立翻转是 4.21 ms）。排队深度、提交频率、两块 GPU、
+图块 + 合成器动画都试过，没能消除。
 
 .NET 运行时和 `tosu.exe` 都在包里，解压即用。两版各有自己的 `data` 目录，**不要覆盖安装**。
 
