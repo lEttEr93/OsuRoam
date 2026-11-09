@@ -1,4 +1,5 @@
 using OsuRoam.Models;
+using OsuSv;
 
 namespace OsuRoam.Services;
 
@@ -87,7 +88,7 @@ public static class ManiaPatternAnalyzer
             Source = PatternSource.Osu,
             AnalyzerVersion = Version,
             RiceStarRating = ManiaStarRating.Compute(osuText, stripHolds: true) ?? 0,
-            Sv = SvEvaluator.Compute(osuText)
+            Sv = Evaluator.Compute(osuText)
         };
         pattern.SkillAxes = buildSkillAxes(pattern);
         SkillResult skills = computeSkills(chart, pattern);

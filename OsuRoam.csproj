@@ -25,12 +25,20 @@
   <ItemGroup>
     <Compile Remove="Tests\**\*.cs" />
     <Page Remove="Tests\**\*.xaml" />
+    <!-- src\ 下是拆出去的子项目（OsuSv 库 / CLI / 它自己的测试），本体不重复编译 -->
+    <Compile Remove="src\**\*.cs" />
+    <Page Remove="src\**\*.xaml" />
+    <Resource Remove="src\**\*" />
     <Resource Include="Assets\OsuRoam.ico" />
     <!-- 字体必须以 Resource 编进程序集，pack URI 才能按 #Outfit 找到它；
          Content/CopyToOutput 的话换目录运行就会掉字。 -->
     <Resource Include="Fonts\*.ttf" />
     <None Update="Fonts\ATTRIBUTION.md" CopyToOutputDirectory="PreserveNewest" />
     <None Update="Fonts\OFL-Outfit.txt" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- 附带产品：SV 评估库（同一个源码树，单独出 NuGet 包；接口稳定前用项目引用，不走 PackageReference） -->
+    <ProjectReference Include="src\OsuSv\OsuSv.csproj" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="NAudio" Version="2.2.1" />

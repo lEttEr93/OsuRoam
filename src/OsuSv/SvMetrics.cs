@@ -1,9 +1,9 @@
 using System.Text.Json.Serialization;
 
-namespace OsuRoam.Models;
+namespace OsuSv;
 
 /// <summary>
-/// 一张谱面的变速（SV）评估结果，口径见 <see cref="Services.SvEvaluator"/> 与
+/// 一张谱面的变速（SV）评估结果，口径见 <see cref="Evaluator"/> 与
 /// <c>docs/1.5.3-SV评估算法.md</c>。
 ///
 /// 拆成四个独立的量，不合成一个分数 —— 单一分数在 Star Stream 与 HOTTO DOGU 上会把顺序判反：

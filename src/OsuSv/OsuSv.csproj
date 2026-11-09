@@ -1,0 +1,29 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <AssemblyName>OsuSv</AssemblyName>
+    <RootNamespace>OsuSv</RootNamespace>
+
+    <!-- NuGet 包信息。版本独立于 osu! Roam 本体：接口不变就不跟着 1.5.x 动。 -->
+    <PackageId>OsuSv</PackageId>
+    <Version>0.1.0</Version>
+    <Authors>lEttEr93</Authors>
+    <Description>osu! mania 谱面的变速（SV）评估：把滚动速度变化拆成不等时、极端度、背谱度、不适度、夸张度几个独立的量，不合成单一分数。输入是 .osu 文本，纯托管、零依赖、跨平台。</Description>
+    <PackageTags>osu;osu!mania;sv;scroll-velocity;beatmap;analysis</PackageTags>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <RepositoryUrl>https://github.com/lEttEr93/OsuRoam</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PublishRepositoryUrl>true</PublishRepositoryUrl>
+    <IncludeSymbols>true</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <None Include="README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
+</Project>

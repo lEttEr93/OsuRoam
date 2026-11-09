@@ -1,7 +1,6 @@
 using System.Globalization;
-using OsuRoam.Models;
 
-namespace OsuRoam.Services;
+namespace OsuSv;
 
 /// <summary>
 /// 变速（SV）评估：把谱面的滚动速度变化拆成四个可算的量。
@@ -24,7 +23,7 @@ namespace OsuRoam.Services;
 ///
 /// 只处理 mania（键型分析也只做 mania）；不做 DT/HT/键数转换。
 /// </summary>
-public static class SvEvaluator
+public static class Evaluator
 {
     /// <summary>lazer <c>DrawableScrollingRuleset.MAX_TIME_RANGE</c>：一屏对应的毫秒·倍率。</summary>
     public const double MaxTimeRange = 11485;

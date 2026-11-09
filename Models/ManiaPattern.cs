@@ -40,9 +40,9 @@ public sealed class ManiaPattern
 
     /// <summary>
     /// 变速（SV）评估：等时性 / 舒适度 / 背谱 / 强度 四个量的原始值。
-    /// 口径见 <see cref="Services.SvEvaluator"/>；null 表示没算（旧缓存或非 mania）。
+    /// 口径见 <see cref="OsuSv.Evaluator"/>；null 表示没算（旧缓存或非 mania）。
     /// </summary>
-    public SvMetrics? Sv { get; set; }
+    public OsuSv.SvMetrics? Sv { get; set; }
 
     /// <summary>核心型时长占比（0–1，按匹配时长归一）。</summary>
     public Dictionary<string, double> CoreShares { get; set; } = [];

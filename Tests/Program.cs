@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
+using OsuSv;
 using OsuRoam.Services;
 using OsuRoam.Models;
 
@@ -3226,7 +3227,7 @@ static void testManiaStarRatingScalesWithDensity()
 /// <summary>匀速谱：四个量都该落在「稳」那一端。</summary>
 static void testSvEvaluatorOnSteadyChartIsClean()
 {
-    SvMetrics? steady = SvEvaluator.Compute(syntheticSvChart(bpm: 180, seconds: 30, sv: null));
+    SvMetrics? steady = Evaluator.Compute(syntheticSvChart(bpm: 180, seconds: 30, sv: null));
     assertTrue(steady is not null, "带时间点的合成谱应能算出 SV 指标");
     assertTrue(steady!.Irregularity < 0.05, $"匀速谱的等时性应该接近满格：{steady.Irregularity:0.000}");
     assertTrue(steady.Discomfort < 0.01, $"匀速谱不该有不适：{steady.Discomfort:0.000}");
@@ -3234,8 +3235,8 @@ static void testSvEvaluatorOnSteadyChartIsClean()
     assertTrue(steady.Memorization < 0.05, $"匀速谱不该背谱：{steady.Memorization:0.000}");
     assertTrue(steady.Isochrony > 0.95 && steady.Comfort > 0.99, "界面量：等时性/舒适度都应接近 1");
 
-    assertTrue(SvEvaluator.Compute("") is null, "空文本不应给 SV 指标");
-    assertTrue(SvEvaluator.Compute(syntheticManiaChart(keys: 4, bpm: 180, notes: 400, everyNthIsHold: 0)) is null,
+    assertTrue(Evaluator.Compute("") is null, "空文本不应给 SV 指标");
+    assertTrue(Evaluator.Compute(syntheticManiaChart(keys: 4, bpm: 180, notes: 400, everyNthIsHold: 0)) is null,
         "没有 [TimingPoints] 的文本算不出 SV");
 }
 
@@ -3247,8 +3248,8 @@ static void testSvEvaluatorPunishesBaselineJumps()
     for (int index = 0; index < 8; index++)
         sv.Add((index * 4000, (index + 1) * 4000, index % 2 == 0 ? 1.0 : 2.0));
 
-    SvMetrics? jumpy = SvEvaluator.Compute(syntheticSvChart(bpm: 180, seconds: 34, sv: sv));
-    SvMetrics? steady = SvEvaluator.Compute(syntheticSvChart(bpm: 180, seconds: 34, sv: null));
+    SvMetrics? jumpy = Evaluator.Compute(syntheticSvChart(bpm: 180, seconds: 34, sv: sv));
+    SvMetrics? steady = Evaluator.Compute(syntheticSvChart(bpm: 180, seconds: 34, sv: null));
 
     assertTrue(jumpy is not null && steady is not null, "两张合成谱都应算得出来");
     assertTrue(jumpy!.Irregularity > 0.3, $"来回跳变应判成结构不稳：{jumpy.Irregularity:0.000}");
@@ -3272,8 +3273,8 @@ static void testSvEvaluatorExaggerationNeedsMidFlightChange()
         sv.Add((from + beat / 2, from + beat, 2.0));
     }
 
-    SvMetrics? chopped = SvEvaluator.Compute(syntheticSvChart(bpm: 180, seconds: 42, sv: sv));
-    SvMetrics? steady = SvEvaluator.Compute(syntheticSvChart(bpm: 180, seconds: 42, sv: null));
+    SvMetrics? chopped = Evaluator.Compute(syntheticSvChart(bpm: 180, seconds: 42, sv: sv));
+    SvMetrics? steady = Evaluator.Compute(syntheticSvChart(bpm: 180, seconds: 42, sv: null));
 
     assertTrue(chopped is not null && steady is not null, "两张合成谱都应算得出来");
     assertTrue(chopped!.Exaggeration > 0.2, $"飞行途中反复变速应算夸张：{chopped.Exaggeration:0.000}");

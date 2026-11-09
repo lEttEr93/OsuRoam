@@ -18,6 +18,12 @@ keep roaming without touching it.
 | `osu-roam-1.5.6.1-portable.zip` | follows the system language | sayobot mirrors (China) |
 | `osu-roam-1.5.6.1-en-portable.zip` | English | catboy / beatconnect (international) |
 
+**Companion packages:** [`OsuSv`](https://www.nuget.org/packages/OsuSv) /
+[`OsuSv.Cli`](https://www.nuget.org/packages/OsuSv.Cli) — the scroll-velocity (SV) analysis used by Roam, shipped as a
+standalone library and command line tool (`dotnet tool install --global OsuSv.Cli`, or grab the single-file exe from the
+`sv-*` release). Feed it `.osu` text, get irregularity / extremeness / memorization / discomfort / exaggeration back;
+see [`docs/1.5.3-SV评估算法.md`](docs/1.5.3-SV评估算法.md) for the model. Sources live in `src/OsuSv` and `src/OsuSv.Cli`, MIT.
+
 The .NET runtime and `tosu.exe` are already inside the archive — extract and run. Each build keeps its own `data`
 folder, so **do not install one over the other**.  A fresh folder inherits the analysed-pattern library from a
 neighbouring `osu-roam*` install, so pattern data does not start from zero.
@@ -150,6 +156,11 @@ osu! 谱面漫游推荐工具，Windows / WPF / .NET 8。读你的成绩样本�
 |---|---|---|
 | `osu-roam-1.5.6.1-portable.zip` | 跟随系统 | sayobot 镜像（国内） |
 | `osu-roam-1.5.6.1-en-portable.zip` | 英文 | catboy / beatconnect（国际） |
+
+**附带产品：[`OsuSv`](https://www.nuget.org/packages/OsuSv) / [`OsuSv.Cli`](https://www.nuget.org/packages/OsuSv.Cli)** —— 谱面变速（SV）评估算法单独出的库
+和命令行（`dotnet tool install --global OsuSv.Cli`，或下 Release 里的单文件 exe）。输入 .osu 文本，输出
+不等时 / 极端度 / 背谱度 / 不适度 / 夸张度五个量，口径见 [`docs/1.5.3-SV评估算法.md`](docs/1.5.3-SV评估算法.md)。
+源码在 `src/OsuSv`、`src/OsuSv.Cli`，许可证 MIT。
 
 ## 1.5.6.1 新增
 

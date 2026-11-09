@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <AssemblyName>osu-sv</AssemblyName>
+    <RootNamespace>OsuSv.Cli</RootNamespace>
+    <InvariantGlobalization>true</InvariantGlobalization>
+
+    <!-- dotnet tool（osu-sv）+ 单文件 exe 两个形态；Release 里挂 win-x64 / linux-x64 的 exe。 -->
+    <PackAsTool>true</PackAsTool>
+    <ToolCommandName>osu-sv</ToolCommandName>
+    <PackageId>OsuSv.Cli</PackageId>
+    <Version>0.1.0</Version>
+    <Authors>lEttEr93</Authors>
+    <Description>osu-sv 命令行：算 osu! mania 谱面的 SV 评估量（osu-sv compute chart.osu --json）。</Description>
+    <PackageTags>osu;osu!mania;sv;scroll-velocity;cli</PackageTags>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <RepositoryUrl>https://github.com/lEttEr93/OsuRoam</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\OsuSv\OsuSv.csproj" />
+  </ItemGroup>
+</Project>

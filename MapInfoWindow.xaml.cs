@@ -3,6 +3,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
+using OsuSv;
 using OsuRoam.Controls;
 using OsuRoam.Models;
 using OsuRoam.Services;
@@ -553,7 +554,7 @@ public partial class MapInfoWindow : Window
 
     /// <summary>
     /// SV 四个小环：等时性 / 舒适度（越高越好）、背谱 / 强度（越高越差）。
-    /// 口径见 <see cref="SvEvaluator"/>，确切数值走 tooltip —— 卡片里没地方写四位数。
+    /// 口径见 <see cref="Evaluator"/>，确切数值走 tooltip —— 卡片里没地方写四位数。
     /// </summary>
     private void buildSvRings(ManiaPattern pattern)
     {

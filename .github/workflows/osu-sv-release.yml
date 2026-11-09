@@ -1,0 +1,129 @@
+name: osu-sv release
+
+# 打 tag（sv-v0.1.0）时：
+#   1) 编译 + 跑库自己的冒烟测试
+#   2) 推 NuGet：OsuSv（库）、OsuSv.Cli（dotnet tool）
+#   3) 编 win-x64 / linux-x64 单文件 exe，挂到同名 GitHub Release
+#
+# 需要仓库 secret NUGET_API_KEY（nuget.org push key，scope: Push new packages and package versions）。
+
+on:
+  push:
+    tags: ['sv-v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: smoke test
+        run: dotnet run --project src/OsuSv.Tests/OsuSv.Tests.csproj -c Release
+
+  nuget:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: pack
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#sv-v}"
+          echo "packing $version"
+          dotnet pack src/OsuSv/OsuSv.csproj -c Release -o nupkg -p:Version="$version"
+          dotnet pack src/OsuSv.Cli/OsuSv.Cli.csproj -c Release -o nupkg -p:Version="$version"
+          ls -l nupkg
+      - name: push to nuget.org
+        env:
+          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "${NUGET_API_KEY:-}" ]; then
+            echo "::error::缺 NUGET_API_KEY —— 在 Settings → Secrets and variables → Actions 加 nuget.org 的 push key"
+            exit 1
+          fi
+          for package in nupkg/*.nupkg; do
+            dotnet nuget push "$package" \
+              --api-key "$NUGET_API_KEY" \
+              --source https://api.nuget.org/v3/index.json \
+              --skip-duplicate
+          done
+
+  cli:
+    needs: test
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - rid: win-x64
+            ext: '.exe'
+          - rid: linux-x64
+            ext: ''
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: publish single file
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#sv-v}"
+          dotnet publish src/OsuSv.Cli/OsuSv.Cli.csproj -c Release -r ${{ matrix.rid }} \
+            --self-contained true -p:PublishSingleFile=true -p:Version="$version" \
+            -o "out/${{ matrix.rid }}"
+          mv "out/${{ matrix.rid }}/osu-sv${{ matrix.ext }}" \
+             "out/osu-sv-${GITHUB_REF_NAME}-${{ matrix.rid }}${{ matrix.ext }}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: osu-sv-${{ matrix.rid }}
+          path: out/osu-sv-*
+          if-no-files-found: error
+
+  release:
+    needs: [nuget, cli]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: assets
+          merge-multiple: true
+      - name: create or update the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#sv-v}"
+          cat > notes.md <<EOF
+          osu! Roam 的附带产品：osu! mania 谱面的 **SV 评估库** 和命令行工具。
+
+          ## 安装
+
+          \`\`\`bash
+          dotnet tool install --global OsuSv.Cli   # 命令行
+          dotnet add package OsuSv                 # 库
+          \`\`\`
+
+          也可以直接下这里的单文件 exe（win-x64 / linux-x64），不需要装 .NET：
+
+          \`\`\`bash
+          osu-sv compute chart.osu --scroll 25 --json
+          \`\`\`
+
+          算法口径见仓库里的 [\`docs/1.5.3-SV评估算法.md\`](https://github.com/${GITHUB_REPOSITORY}/blob/main/docs/1.5.3-SV%E8%AF%84%E4%BC%B0%E7%AE%97%E6%B3%95.md)，许可 MIT。
+          EOF
+          if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release edit "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --notes-file notes.md
+          else
+            gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" \
+              --title "OsuSv $version" --notes-file notes.md
+          fi
+          gh release upload "$GITHUB_REF_NAME" assets/* --repo "$GITHUB_REPOSITORY" --clobber

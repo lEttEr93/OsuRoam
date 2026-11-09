@@ -1,0 +1,36 @@
+name: osu-sv ci
+
+# OsuSv（SV 评估库）和 osu-sv（命令行）的编译 + 冒烟测试。
+# 这两个项目是纯 net8.0、不依赖 WPF，所以可以在 Linux 上跑；本体（WPF）的流水线不在这里。
+# 发布走 osu-sv-release.yml（tag sv-v* 触发）。
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/OsuSv/**'
+      - 'src/OsuSv.Cli/**'
+      - 'src/OsuSv.Tests/**'
+      - '.github/workflows/osu-sv-*.yml'
+  pull_request:
+    paths:
+      - 'src/OsuSv/**'
+      - 'src/OsuSv.Cli/**'
+      - 'src/OsuSv.Tests/**'
+      - '.github/workflows/osu-sv-*.yml'
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: build library
+        run: dotnet build src/OsuSv/OsuSv.csproj -c Release
+      - name: build cli
+        run: dotnet build src/OsuSv.Cli/OsuSv.Cli.csproj -c Release
+      - name: smoke test
+        run: dotnet run --project src/OsuSv.Tests/OsuSv.Tests.csproj -c Release
