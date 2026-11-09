@@ -20,9 +20,40 @@ public sealed class TopmostKeeper : IDisposable
     private bool failureLogged;
     private int suspensionCount;
 
+    /// <summary>
+    /// 正在显示的浮层数量（提示气泡、下拉列表这类 WPF 弹窗）。
+    /// 它们不是置顶窗口：这里再踢一次 TOPMOST，气泡就被自己的主窗盖住了。
+    /// 所以有浮层时先别踢，等最后一个关掉再补一次。
+    /// </summary>
+    private static int openPopups;
+    private static readonly List<TopmostKeeper> keepers = [];
+
+    public static int OpenPopups => openPopups;
+
+    /// <summary>浮层打开。</summary>
+    public static void PopupOpened()
+    {
+        openPopups++;
+        if (openPopups == 20)
+            AppLog.Info("置顶浮层计数偏高，可能有没配对的关闭通知。");
+    }
+
+    /// <summary>浮层关闭：最后一个关掉时立刻把置顶补回来，不用等下一拍。</summary>
+    public static void PopupClosed()
+    {
+        if (openPopups > 0)
+            openPopups--;
+        if (openPopups > 0)
+            return;
+
+        foreach (TopmostKeeper keeper in keepers.ToArray())
+            keeper.forceTopmost();
+    }
+
     public TopmostKeeper(Window window)
     {
         this.window = window;
+        keepers.Add(this);
         timer = new DispatcherTimer(DispatcherPriority.Background, window.Dispatcher)
         {
             Interval = TimeSpan.FromMilliseconds(750)
@@ -56,7 +87,8 @@ public sealed class TopmostKeeper : IDisposable
 
     private void forceTopmost()
     {
-        if (disposed || suspensionCount > 0 || handle == IntPtr.Zero || !window.IsVisible || window.WindowState == WindowState.Minimized)
+        if (disposed || suspensionCount > 0 || openPopups > 0 ||
+            handle == IntPtr.Zero || !window.IsVisible || window.WindowState == WindowState.Minimized)
             return;
 
         window.Topmost = true;
@@ -88,6 +120,7 @@ public sealed class TopmostKeeper : IDisposable
         if (disposed)
             return;
         disposed = true;
+        keepers.Remove(this);
         timer.Stop();
         timer.Tick -= Timer_Tick;
         window.SourceInitialized -= Window_SourceInitialized;

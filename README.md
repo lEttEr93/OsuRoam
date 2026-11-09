@@ -36,6 +36,17 @@ The 1.5.6fix baseline plus four interface changes from the maintenance list:
 - **Preview speed is entered as the in-game scroll speed**: speed × milliseconds = 11485, so the field reads
   something like `9.19` and the milliseconds per screen are printed underneath.
 
+Also in this version:
+
+- **The new controls animate**: switching the mode gives the icon a short pop and slides the key-count picker in
+  and out; switching a range tab fades the tab colour over and eases the panel in (the panel is laid out first, so
+  the fade is not eaten by the layout cost of the Tag page).
+- **The range block no longer changes width**: the scrollbar is always reserved, so switching from *Basic* to
+  *Tag* (the tall one) does not shift everything by 9 px, and the thumbnail is hidden while nothing scrolls.
+- **"Suggest" sits on the star-rating row**, right-aligned, next to the range label.
+- **Tooltips are no longer covered**: the topmost keeper skips its 750 ms kick while a tooltip or a dropdown is
+  open and re-asserts right after it closes.
+
 ## What's new in 1.5.6fix
 
 This is the **maintenance baseline**: everything from 1.5.5, plus the fixes below.
@@ -153,6 +164,15 @@ osu! 谱面漫游推荐工具，Windows / WPF / .NET 8。读你的成绩样本�
   选中时用这一行右边的空位选键数，不再单独占一行。
 - **「预览流速」改成填游戏里的滚动速度**：速度 × 毫秒数 = 11485，所以框里是 `9.19` 这样的数，
   下面一行显示换算出来的「≈ 1250 毫秒/屏」。
+
+这个版本里还修了这些：
+
+- **新控件补上了动画**：切模式时图标会轻微弹一下、mania 的键数选择滑进滑出；切推荐范围标签页时标签底色
+  渐变过去、整页淡入上浮（新页先跑完布局再淡入，否则 Tag 页的布局开销会把动画时间吃掉，看着还是硬切）。
+- **推荐范围的宽度不再变**：滚动条改成常驻占位，所以从「基本」切到最长的「Tag」不会整块左右抖 9px；
+  内容放得下时滑块本身隐藏，只留下透明的空位。
+- **「建议星级」挪到「难度星级」那一行的最右边**，左边标签、右边区间提示 + 按钮。
+- **提示气泡不再被置顶行为盖住**：气泡或下拉展开期间，置顶保持会跳过这一拍，关掉后立刻补回来。
 
 ## 1.5.6fix 新增（维护基线）
 

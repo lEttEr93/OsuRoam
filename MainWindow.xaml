@@ -111,7 +111,9 @@
                 </StackPanel>
             </Grid>
 
-            <ScrollViewer x:Name="MainContent" Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
+            <!-- VerticalScrollBarVisibility 固定成 Visible：换成 Auto 时，内容一长一短
+                 （比如推荐范围的三个标签页）滚动条会忽隐忽现，整块内容就跟着左右抖 9px。 -->
+            <ScrollViewer x:Name="MainContent" Grid.Row="1" VerticalScrollBarVisibility="Visible" HorizontalScrollBarVisibility="Disabled"
                           controls:SmoothScroll.IsEnabled="True">
                 <StackPanel Margin="14,12,14,16">
                     <Grid Margin="0,0,0,10">
@@ -396,15 +398,6 @@
 
                     <Expander x:Name="RangeExpander" Header="{DynamicResource L.section.range}" IsExpanded="True" Margin="0,8,0,0">
                         <StackPanel Margin="0,10,0,4">
-                            <!-- 建议星级是整块的入口，放标签页上方 -->
-                            <Grid Margin="0,0,0,10">
-                                <Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
-                                <Button x:Name="SuggestDifficultyButton" Content="{DynamicResource L.btn.suggest}"
-                                        HorizontalAlignment="Left" Padding="10,4" Click="SuggestDifficultyButton_Click" />
-                                <TextBlock x:Name="DifficultyProfileText" Grid.Column="1" HorizontalAlignment="Right" VerticalAlignment="Center"
-                                           Foreground="{StaticResource SecondaryBrush}" FontSize="11" TextTrimming="CharacterEllipsis" />
-                            </Grid>
-
                             <!-- 基本 / tag / 键型：一次只显示一个，点标签切换 -->
                             <UniformGrid x:Name="RangeTabBar" Rows="1" Columns="3">
                                 <Button x:Name="RangeBasicTab" Tag="basic" Content="{DynamicResource L.tab.rangebasic}"
@@ -429,7 +422,21 @@
                                 </Grid.RowDefinitions>
                                 <Grid Grid.ColumnSpan="3">
                                     <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="42" /></Grid.RowDefinitions>
-                                    <TextBlock Text="{DynamicResource L.label.stars}" Foreground="{StaticResource MutedTextBrush}" FontSize="11" />
+                                    <!-- 难度星级这一行：左边标签，右边「哪一组区间」+ 建议星级按钮 -->
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Text="{DynamicResource L.label.stars}" Foreground="{StaticResource MutedTextBrush}"
+                                                   FontSize="11" VerticalAlignment="Center" />
+                                        <TextBlock x:Name="DifficultyProfileText" Grid.Column="1" HorizontalAlignment="Right" VerticalAlignment="Center"
+                                                   Margin="8,0,8,0" Foreground="{StaticResource SecondaryBrush}" FontSize="11"
+                                                   TextTrimming="CharacterEllipsis" />
+                                        <Button x:Name="SuggestDifficultyButton" Grid.Column="2" Content="{DynamicResource L.btn.suggest}"
+                                                Padding="9,2" FontSize="11" VerticalAlignment="Center" Click="SuggestDifficultyButton_Click" />
+                                    </Grid>
                                     <Grid x:Name="StarRangeControl" Grid.Row="1" Height="42" SizeChanged="StarRangeControl_SizeChanged">
                                         <Canvas x:Name="StarRangeCanvas" Background="Transparent" MouseLeftButtonDown="StarRangeTrack_MouseLeftButtonDown" MouseMove="StarRangeCanvas_MouseMove" MouseLeftButtonUp="StarRangeCanvas_MouseLeftButtonUp">
                                             <Border x:Name="StarRangeTrack" Canvas.Top="15" Height="12" BorderBrush="#3F4951" BorderThickness="1" CornerRadius="4">

@@ -15,6 +15,15 @@ public partial class App : Application
     private bool ownsSingleInstance;
     private EventWaitHandle? activateEvent;
 
+    /// <summary>
+    /// 提示气泡出现了 / 收起来了。气泡不是置顶窗口，主窗的周期性置顶会把它盖住，
+    /// 所以这两个回调只是去让 TopmostKeeper 那一拍让路。
+    /// 处理函数必须在本类里：事件绑定写在 App.xaml 的 Style 里。
+    /// </summary>
+    private void ToolTip_Opened(object sender, RoutedEventArgs e) => TopmostKeeper.PopupOpened();
+
+    private void ToolTip_Closed(object sender, RoutedEventArgs e) => TopmostKeeper.PopupClosed();
+
     [System.Runtime.InteropServices.DllImport("user32.dll")]
     private static extern bool AllowSetForegroundWindow(int processId);
 

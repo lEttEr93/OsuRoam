@@ -1,9 +1,12 @@
 <Application x:Class="OsuRoam.App"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:controls="clr-namespace:OsuRoam.Controls"
              StartupUri="MainWindow.xaml">
     <Application.Resources>
         <BooleanToVisibilityConverter x:Key="BoolToVis" />
+        <!-- 滚动条常驻是为了宽度稳定，内容放得下时按这个转换器把滑块藏掉。 -->
+        <controls:ScrollableToVisibilityConverter x:Key="ScrollableToVis" />
         <!-- 界面字体：默认系统字体，启动时由 Services\Typography.cs 换成内置的
              Outfit（Fonts\，见 ATTRIBUTION.md）。
              这里不能直接写 pack://application:,,,/Fonts/#Outfit —— 字符串形式的
@@ -29,6 +32,10 @@
             <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
             <Setter Property="Background" Value="{StaticResource SurfaceRaisedBrush}" />
             <Setter Property="BorderBrush" Value="{StaticResource BorderBrush}" />
+            <!-- 气泡是普通（非置顶）窗口，而主窗每 750ms 会把自己踢到最顶层一次，
+                 顺手就把气泡盖住了。开合时通知 TopmostKeeper 让路，见 Services\TopmostKeeper.cs。 -->
+            <EventSetter Event="Opened" Handler="ToolTip_Opened" />
+            <EventSetter Event="Closed" Handler="ToolTip_Closed" />
         </Style>
         <Style TargetType="Button">
             <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
@@ -271,7 +278,11 @@
                                     <RepeatButton Command="{x:Static ScrollBar.PageUpCommand}" Style="{StaticResource ScrollBarButtonStyle}" />
                                 </Track.DecreaseRepeatButton>
                                 <Track.Thumb>
-                                    <Thumb Style="{StaticResource ScrollThumbStyle}" MinHeight="28" />
+                                    <!-- 内容放得下时滑块会撑满整条轨道，看着像一根竖线，这时藏掉。
+                                         滚动条本身仍常驻，宽度才不会跟着内容长短抖。 -->
+                                    <Thumb Style="{StaticResource ScrollThumbStyle}" MinHeight="28"
+                                           Visibility="{Binding Maximum, RelativeSource={RelativeSource AncestorType=ScrollBar},
+                                                                Converter={StaticResource ScrollableToVis}}" />
                                 </Track.Thumb>
                                 <Track.IncreaseRepeatButton>
                                     <RepeatButton Command="{x:Static ScrollBar.PageDownCommand}" Style="{StaticResource ScrollBarButtonStyle}" />

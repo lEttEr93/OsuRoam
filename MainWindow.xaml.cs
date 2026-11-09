@@ -68,6 +68,11 @@ public partial class MainWindow : Window
     private bool miniNextBusy;
     /// <summary>推荐范围当前显示哪个标签页：basic / tag / pattern（只记在内存里，不写配置）。</summary>
     private string rangeTab = "basic";
+    /// <summary>标签页按钮各自的可变画刷，用来做颜色过渡（见 tabBrushes）。</summary>
+    private readonly Dictionary<Button, TabBrushes> rangeTabBrushes = [];
+    /// <summary>mania 键数选择当前是不是显示着（显隐要带动画，得自己记状态）。</summary>
+    private bool maniaKeysShown;
+    private int maniaKeysToken;
     private bool settingsControlsReady;
     /// <summary>
     /// 推荐池的代次：每建一次池 +1。后台的键型验证发现代次变了就停手，
@@ -605,23 +610,38 @@ public partial class MainWindow : Window
             return;
         }
 
-        seedDiagnosticCards();
-        await Task.Delay(1800);
+        // 开发用：--empty 不要示例卡片，截空池状态（也能量出「内容放得下时」的宽度）。
+        if (!Environment.GetCommandLineArgs().Any(arg => arg == "--empty"))
+        {
+            seedDiagnosticCards();
+            await Task.Delay(1800);
+        }
 
         // 开发用：--rangetab=tag|pattern 先把推荐范围切到那个标签页，--mode=mania 让键数选择露出来，
         // 这样一张截图就能核对三个标签页和模式按钮的选中态。
+        // --anim-delay=毫秒 把切换后的等待时间改小，就能拍到动画中途的那一帧。
+        // 注意：--mode 走的是真正的点击处理，会改动（并可能落盘）data\settings.json 里的模式与星级区间。
+        int settleDelay = 300;
+        if (Environment.GetCommandLineArgs().FirstOrDefault(arg => arg.StartsWith("--anim-delay=", StringComparison.OrdinalIgnoreCase))
+            is { } animDelayArg)
+            settleDelay = Math.Clamp(int.TryParse(animDelayArg[(animDelayArg.IndexOf('=') + 1)..], out int parsedDelay) ? parsedDelay : 300, 0, 3000);
+
         if (Environment.GetCommandLineArgs().FirstOrDefault(arg => arg.StartsWith("--rangetab=", StringComparison.OrdinalIgnoreCase))
             is { } rangeTabArg)
         {
             applyRangeTab(rangeTabArg[(rangeTabArg.IndexOf('=') + 1)..].Trim().ToLowerInvariant());
-            await Task.Delay(300);
+            await Task.Delay(settleDelay);
         }
         if (Environment.GetCommandLineArgs().FirstOrDefault(arg => arg.StartsWith("--mode=", StringComparison.OrdinalIgnoreCase))
             is { } modeArg)
         {
-            settings.Mode = modeArg[(modeArg.IndexOf('=') + 1)..].Trim().ToLowerInvariant();
-            updateDifficultyControls();
-            await Task.Delay(300);
+            // 走真正的点击处理，反馈动画和实际点击走的是同一条路。
+            string wanted = modeArg[(modeArg.IndexOf('=') + 1)..].Trim().ToLowerInvariant();
+            Button? target = modeButtons()
+                .FirstOrDefault(entry => string.Equals(entry.Mode, wanted, StringComparison.OrdinalIgnoreCase)).Button;
+            if (target is not null)
+                ModeButton_Click(target, new RoutedEventArgs());
+            await Task.Delay(settleDelay);
         }
 
         // 开发用：--expand 展开所有设置分组，方便一次截完整个设置区
@@ -645,7 +665,28 @@ public partial class MainWindow : Window
             await Task.Delay(400);
         }
 
+        // 开发用：--tooltip-probe 手动开一个提示气泡，检查 TopmostKeeper 确实让路了
+        // （气泡是普通窗口，主窗每 750ms 的置顶会把它盖住）。
+        if (Environment.GetCommandLineArgs().Any(arg => arg == "--tooltip-probe"))
+        {
+            ToolTip probe = new()
+            {
+                Content = "置顶气泡探针：这条应该盖在主窗上面",
+                PlacementTarget = StartButton,
+                Placement = System.Windows.Controls.Primitives.PlacementMode.Bottom,
+                IsOpen = true,
+            };
+            await Task.Delay(250);
+            AppLog.Info($"气泡探针：打开后浮层计数 {TopmostKeeper.OpenPopups}（应为 1）");
+            probe.IsOpen = false;
+            await Task.Delay(200);
+            AppLog.Info($"气泡探针：关闭后浮层计数 {TopmostKeeper.OpenPopups}（应为 0）");
+        }
+
         RenderDiagnostics.CaptureWindow(this, path);
+        AppLog.Info($"截图尺寸（标签页 {rangeTab}）：窗口 {ActualWidth:0.#}｜内容 {MainContent.ActualWidth:0.#}｜" +
+            $"范围块 {RangeExpander.ActualWidth:0.#}｜标签条 {RangeTabBar.ActualWidth:0.#}｜" +
+            $"可滚高度 {MainContent.ScrollableHeight:0.#}｜滚动条 {MainContent.ComputedVerticalScrollBarVisibility}");
         Close();
     }
 
@@ -3515,51 +3556,163 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
         }
 
         // 键数只在 mania 下有意义，放在这一行右边的空位上，不额外占高度。
-        ManiaKeysPanel.Visibility = settings.Mode == "mania" ? Visibility.Visible : Visibility.Collapsed;
+        setManiaKeysVisible(settings.Mode == "mania");
     }
 
     private void ModeButton_Click(object sender, RoutedEventArgs e)
     {
-        if (!settingsControlsReady)
+        if (sender is not Button button)
             return;
 
-        string mode = (sender as Button)?.Tag?.ToString() ?? "osu";
+        string mode = button.Tag?.ToString() ?? "osu";
         if (string.Equals(mode, settings.Mode, StringComparison.OrdinalIgnoreCase))
+        {
+            // 点已经选中的那个也给一下反馈，不然会觉得没反应。
+            playButtonPop(button);
+            return;
+        }
+
+        if (!settingsControlsReady)
             return;
 
         saveCurrentDifficultyRange();
         settings.Mode = mode;
         updateDifficultyControls();
+        playButtonPop(button);
+    }
+
+    /// <summary>
+    /// 按钮的按下反馈：轻微放大再回位。缩放用运行时新建的 Transform
+    /// （模板/数据模板里声明的 Transform 会被冻结，挂不上动画）。
+    /// </summary>
+    private void playButtonPop(FrameworkElement element)
+    {
+        if (!Controls.Motion.Enabled)
+            return;
+        try
+        {
+            ScaleTransform scale = element.RenderTransform as ScaleTransform;
+            if (scale is null)
+            {
+                scale = new ScaleTransform(1, 1);
+                element.RenderTransformOrigin = new Point(0.5, 0.5);
+                element.RenderTransform = scale;
+            }
+
+            DoubleAnimationUsingKeyFrames animation = new() { FillBehavior = FillBehavior.Stop };
+            animation.KeyFrames.Add(new EasingDoubleKeyFrame(1.09,
+                KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(70)),
+                new CubicEase { EasingMode = EasingMode.EaseOut }));
+            animation.KeyFrames.Add(new EasingDoubleKeyFrame(1.0,
+                KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(230)),
+                new CubicEase { EasingMode = EasingMode.EaseOut }));
+            scale.BeginAnimation(ScaleTransform.ScaleXProperty, animation, HandoffBehavior.SnapshotAndReplace);
+            scale.BeginAnimation(ScaleTransform.ScaleYProperty, animation, HandoffBehavior.SnapshotAndReplace);
+        }
+        catch (Exception exception)
+        {
+            // 反馈动画是装饰性的，失败不能连累点击本身。
+            AppLog.Error("按钮反馈动画失败", exception);
+        }
+    }
+
+    /// <summary>mania 的键数选择：出现时从右边滑进来，离开时淡出再折叠。</summary>
+    private void setManiaKeysVisible(bool visible)
+    {
+        if (maniaKeysShown == visible)
+            return;
+        maniaKeysShown = visible;
+        int token = ++maniaKeysToken;
+
+        if (ManiaKeysPanel.RenderTransform is not TranslateTransform slide)
+        {
+            slide = new TranslateTransform();
+            ManiaKeysPanel.RenderTransform = slide;
+        }
+        ManiaKeysPanel.BeginAnimation(UIElement.OpacityProperty, null);
+        slide.BeginAnimation(TranslateTransform.XProperty, null);
+        ManiaKeysPanel.Opacity = 1;
+        slide.X = 0;
+
+        if (!Controls.Motion.Enabled)
+        {
+            ManiaKeysPanel.Visibility = visible ? Visibility.Visible : Visibility.Collapsed;
+            return;
+        }
+
+        if (visible)
+        {
+            ManiaKeysPanel.Visibility = Visibility.Visible;
+            ManiaKeysPanel.BeginAnimation(UIElement.OpacityProperty, Controls.Motion.tween(0, 1, 150));
+            slide.BeginAnimation(TranslateTransform.XProperty, Controls.Motion.tween(9, 0, 150));
+            return;
+        }
+
+        // 淡出用的是 HoldEnd：动画值停在 0，等收起后再把基值复位。
+        DoubleAnimation fade = Controls.Motion.tween(1, 0, 90);
+        fade.FillBehavior = FillBehavior.HoldEnd;
+        fade.Completed += (_, _) =>
+        {
+            // 期间又切回 mania 就别折叠了。
+            if (token != maniaKeysToken)
+                return;
+            ManiaKeysPanel.BeginAnimation(UIElement.OpacityProperty, null);
+            ManiaKeysPanel.Opacity = 1;
+            ManiaKeysPanel.Visibility = Visibility.Collapsed;
+        };
+        ManiaKeysPanel.BeginAnimation(UIElement.OpacityProperty, fade);
+        slide.BeginAnimation(TranslateTransform.XProperty, Controls.Motion.tween(0, 9, 90));
     }
 
     /// <summary>推荐范围的三个标签页：一次只显示一个，选中的那个染色。</summary>
     private void RangeTab_Click(object sender, RoutedEventArgs e)
     {
-        if (sender is Button { Tag: string tag })
+        if (sender is Button { Tag: string tag } && tag != rangeTab)
             applyRangeTab(tag);
     }
 
     private void applyRangeTab(string tag)
     {
         rangeTab = tag;
-        Brush accent = (Brush)FindResource("AccentBrush");
-        Brush surface = (Brush)FindResource("SurfaceRaisedBrush");
-        Brush border = (Brush)FindResource("BorderBrush");
-        Brush muted = (Brush)FindResource("MutedTextBrush");
-        Brush onAccent = (Brush)FindResource("BackgroundBrush");
 
-        foreach ((Button button, string value, FrameworkElement panel) in rangeTabs())
+        // 1) 只切显隐，先不做动画。
+        FrameworkElement? incoming = null;
+        foreach ((Button _, string value, FrameworkElement panel) in rangeTabs())
         {
             bool selected = value == tag;
-            button.Background = selected ? accent : surface;
-            button.BorderBrush = selected ? accent : border;
-            button.Foreground = selected ? onAccent : muted;
             panel.Visibility = selected ? Visibility.Visible : Visibility.Collapsed;
+            if (selected)
+                incoming = panel;
         }
 
         // 星级滑块是手画的 Canvas：藏起来时宽度是 0，重新显示后要量一次才放得对。
         if (tag == "basic")
             updateStarRangeVisual();
+
+        // 2) 把新页的布局一次跑完再开始动画。Tag 页元素多，首次布局要几十毫秒；
+        //    如果边布局边淡入，动画的时间会全被布局吃掉，看起来就是硬切。
+        if (incoming is not null)
+            UpdateLayout();
+
+        // 3) 上色 + 淡入。
+        Color accent = colorOf("AccentBrush");
+        Color surface = colorOf("SurfaceRaisedBrush");
+        Color border = colorOf("BorderBrush");
+        Color muted = colorOf("MutedTextBrush");
+        Color onAccent = colorOf("BackgroundBrush");
+
+        foreach ((Button button, string value, FrameworkElement _) in rangeTabs())
+        {
+            bool selected = value == tag;
+            // 每页用自己的一组可变画刷：共享的静态画刷是冻结的，动不了颜色。
+            TabBrushes brushes = tabBrushes(button);
+            animateColor(brushes.Background, selected ? accent : surface, 150);
+            animateColor(brushes.Border, selected ? accent : border, 150);
+            animateColor(brushes.Foreground, selected ? onAccent : muted, 150);
+        }
+
+        if (incoming is not null)
+            animatePanelEntrance(incoming);
     }
 
     private IEnumerable<(Button Button, string Tag, FrameworkElement Panel)> rangeTabs()
@@ -3567,6 +3720,85 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
         yield return (RangeBasicTab, "basic", RangeBasicPanel);
         yield return (RangeTagTab, "tag", RangeTagPanel);
         yield return (RangePatternTab, "pattern", RangePatternPanel);
+    }
+
+    /// <summary>标签页自己的可变画刷（能对 Color 做动画）。</summary>
+    private sealed class TabBrushes
+    {
+        public SolidColorBrush Background { get; } = new();
+        public SolidColorBrush Border { get; } = new();
+        public SolidColorBrush Foreground { get; } = new();
+    }
+
+    private TabBrushes tabBrushes(Button button)
+    {
+        if (rangeTabBrushes.TryGetValue(button, out TabBrushes? brushes))
+            return brushes;
+
+        brushes = new TabBrushes();
+        brushes.Background.Color = (button.Background as SolidColorBrush)?.Color ?? Colors.Transparent;
+        brushes.Border.Color = (button.BorderBrush as SolidColorBrush)?.Color ?? Colors.Transparent;
+        brushes.Foreground.Color = (button.Foreground as SolidColorBrush)?.Color ?? Colors.White;
+        button.Background = brushes.Background;
+        button.BorderBrush = brushes.Border;
+        button.Foreground = brushes.Foreground;
+        rangeTabBrushes[button] = brushes;
+        return brushes;
+    }
+
+    private Color colorOf(string resourceKey) =>
+        FindResource(resourceKey) is SolidColorBrush brush ? brush.Color : Colors.Transparent;
+
+    /// <summary>颜色渐变到目标值，结束后把基值也改过去（否则动画会被 Base 值弹回去）。</summary>
+    private static void animateColor(SolidColorBrush brush, Color target, double milliseconds)
+    {
+        if (!Controls.Motion.Enabled)
+        {
+            brush.BeginAnimation(SolidColorBrush.ColorProperty, null);
+            brush.Color = target;
+            return;
+        }
+
+        ColorAnimation animation = new(target, TimeSpan.FromMilliseconds(milliseconds))
+        {
+            EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut },
+            FillBehavior = FillBehavior.HoldEnd
+        };
+        animation.Completed += (_, _) =>
+        {
+            brush.BeginAnimation(SolidColorBrush.ColorProperty, null);
+            brush.Color = target;
+        };
+        brush.BeginAnimation(SolidColorBrush.ColorProperty, animation, HandoffBehavior.SnapshotAndReplace);
+    }
+
+    /// <summary>切到某个标签页时，让这一页淡入并轻轻上浮，别硬切。</summary>
+    private void animatePanelEntrance(FrameworkElement panel)
+    {
+        if (!Controls.Motion.Enabled)
+        {
+            panel.Opacity = 1;
+            return;
+        }
+
+        try
+        {
+            if (panel.RenderTransform is not TranslateTransform slide)
+            {
+                slide = new TranslateTransform();
+                panel.RenderTransform = slide;
+            }
+            panel.BeginAnimation(UIElement.OpacityProperty, null);
+            slide.BeginAnimation(TranslateTransform.YProperty, null);
+            panel.Opacity = 1;
+            slide.Y = 0;
+            panel.BeginAnimation(UIElement.OpacityProperty, Controls.Motion.tween(0, 1, 190));
+            slide.BeginAnimation(TranslateTransform.YProperty, Controls.Motion.tween(7, 0, 190));
+        }
+        catch (Exception exception)
+        {
+            AppLog.Error("标签页切换动画失败", exception);
+        }
     }
 
     private void ManiaKeysBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
