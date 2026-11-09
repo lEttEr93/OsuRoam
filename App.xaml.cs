@@ -49,6 +49,22 @@ public partial class App : Application
 
         singleInstance = new Mutex(true, mutexName, out bool createdNew);
         ownsSingleInstance = createdNew;
+        // 提权重启：旧实例「先拉起新的、再退出」，所以新实例一上来会看到锁还没释放。
+        // 这里等它一会儿，否则会把自己当成第二个实例、去叫醒那个马上就要退出的窗口。
+        if (!createdNew && e.Args.Any(argument => argument == "--elevated-restart"))
+        {
+            AppLog.Info("提权重启：等待旧实例释放单实例锁");
+            for (int attempt = 0; attempt < 60 && !createdNew; attempt++)
+            {
+                Thread.Sleep(200);
+                singleInstance.Dispose();
+                singleInstance = new Mutex(true, mutexName, out createdNew);
+            }
+
+            ownsSingleInstance = createdNew;
+            AppLog.Info($"提权重启：{(createdNew ? "已接管" : "等不到旧实例，按第二个实例处理")}");
+        }
+
         AppLog.Info($"单实例锁：{(createdNew ? "获得" : "已被占用")}（{mutexName}）");
         if (!createdNew)
         {

@@ -21,6 +21,7 @@ public static class LocTable
         ["btn.refresh"] = "刷新",
         ["btn.detail"] = "详情",
         ["btn.redetect"] = "重新检测",
+        ["btn.elevate"] = "以管理员重启",
         ["btn.back"] = "‹ 返回",
         ["btn.include"] = "加入推荐标签",
         ["btn.exclude"] = "排除这些标签",
@@ -39,6 +40,7 @@ public static class LocTable
         ["tip.detail"] = "详情",
         ["tip.taginclude"] = "双击加入包含标签",
         ["tip.status"] = "可选中并复制完整状态",
+        ["tip.elevate"] = "用管理员权限重新打开 Roam：tosu 必须和游戏同一权限（或更高）才读得到内存",
         ["tip.embeddedfont"] = "数字和英文字母用内置的 Outfit；关掉回退系统字体",
         ["tip.mapinfo"] = "在迷你播放器下方弹出谱面详情（雷达图 / CS·OD·AR·物件数），开局时自动关闭",
         ["tip.showinfo"] = "呼出谱面信息栏",
@@ -52,6 +54,10 @@ public static class LocTable
         ["profile.samples"] = "{0} 个成绩样本",
         ["empty.pool"] = "推荐池为空",
         ["status.ready"] = "就绪",
+        ["status.elevation"] = "osu! 权限比 Roam 高（多半是加速器启动的），读不到游戏状态 —— 点右边「以管理员重启」",
+        ["status.gameblocked"] = "osu! 拒绝内存读取（可能被反作弊保护），Roam 读不到游戏状态",
+        ["status.elevate.failed"] = "以管理员重启失败；请手动右键 Roam → 以管理员身份运行",
+        ["status.elevate.cancelled"] = "已取消提权：读不到游戏状态，加速器启动的游戏需要管理员权限",
 
         // 分组标题
         ["section.next"] = "下一首",
@@ -314,6 +320,7 @@ public static class LocTable
         ["btn.refresh"] = "Refresh",
         ["btn.detail"] = "Details",
         ["btn.redetect"] = "Detect again",
+        ["btn.elevate"] = "Run as admin",
         ["btn.back"] = "‹ Back",
         ["btn.include"] = "Include tags",
         ["btn.exclude"] = "Exclude tags",
@@ -332,6 +339,7 @@ public static class LocTable
         ["tip.detail"] = "Show the details",
         ["tip.taginclude"] = "Double-click to include this tag",
         ["tip.status"] = "Click to select and copy the whole status",
+        ["tip.elevate"] = "Relaunch Roam as administrator: tosu needs the same (or higher) privilege level as the game to read its memory",
         ["tip.embeddedfont"] = "Digits and Latin letters use the bundled Outfit; turn it off to fall back to the system font",
         ["tip.mapinfo"] = "Pops the beatmap details up under the mini player (radar, CS/OD/AR, object counts) and closes itself when a play starts",
         ["tip.showinfo"] = "Show the beatmap info panel",
@@ -345,6 +353,10 @@ public static class LocTable
         ["profile.samples"] = "{0} score samples",
         ["empty.pool"] = "The recommendation pool is empty",
         ["status.ready"] = "Ready",
+        ["status.elevation"] = "osu! runs with higher privileges (usually launched by an accelerator), so Roam cannot read it. Click “Run as admin”.",
+        ["status.gameblocked"] = "osu! refuses memory reads (likely anti-cheat protected); Roam cannot read the game state",
+        ["status.elevate.failed"] = "Could not relaunch elevated; right-click Roam → Run as administrator",
+        ["status.elevate.cancelled"] = "Elevation cancelled — a game launched by an accelerator needs administrator rights",
 
         // 分组标题（现在是底部标签条的文案：4 个标签要塞进 430 宽的窗口，英文必须短）
         ["section.next"] = "Up next",

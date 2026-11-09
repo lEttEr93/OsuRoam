@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using System.ComponentModel;
+using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Net.Http;
@@ -76,6 +77,8 @@ public partial class MainWindow : Window
     private bool maniaKeysShown;
     private int maniaKeysToken;
     private bool settingsControlsReady;
+    /// <summary>「游戏提权运行、Roam 读不到」这件事已经提示过（只提示一次，别每次心跳都刷）。</summary>
+    private bool elevationHintShown;
     /// <summary>
     /// 推荐池的代次：每建一次池 +1。后台的键型验证发现代次变了就停手，
     /// 免得把上一轮的验证结果贴到新池子上。
@@ -2700,6 +2703,11 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
         {
             if (!tosu.Connected || emptyStateSince == default)
                 return;
+
+            // 权限不够的话，重启 tosu 一万次也读不到：先看看游戏进程是不是我们打不开的那个。
+            if ((DateTime.UtcNow - emptyStateSince).TotalSeconds >= 6 && warnIfGameNotReadable())
+                return;
+
             if ((DateTime.UtcNow - emptyStateSince).TotalSeconds < 20)
                 return;
             if ((DateTime.UtcNow - lastTosuRestartAt).TotalSeconds < 120)
@@ -2720,6 +2728,73 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
         catch (Exception exception)
         {
             AppLog.Error("重启 tosu 失败", exception);
+        }
+    }
+
+    /// <summary>
+    /// osu! 在跑、但进程读不到内存（现场：UU 加速器用管理员权限把游戏拉起来，
+    /// 普通权限的 tosu 只会一直报 "failed to query the process"）。
+    /// 这时把原因说清楚，并给一个「以管理员重启」的按钮；重启 tosu 是白费力气。
+    /// 返回 true 表示已经识别成权限问题（调用方不该再重启 tosu）。
+    /// </summary>
+    private bool warnIfGameNotReadable()
+    {
+        if (elevationHintShown)
+            return true;
+
+        GameProcessAccess access = GameProcess.Probe(out int gamePid, out string? gamePath);
+        if (access != GameProcessAccess.Denied)
+            return false;
+
+        elevationHintShown = true;
+        AppLog.Info($"osu! 进程 {gamePid}（{gamePath ?? "路径未知"}）拒绝内存读取；" +
+                    $"Roam 提权={GameProcess.IsElevated}，tosu 已连接={tosu.Connected}");
+
+        if (GameProcess.IsElevated)
+        {
+            // 已经是管理员还读不到：多半被反作弊之类保护，没有可点的补救动作。
+            setStatusText(Loc.T("status.gameblocked"));
+            return true;
+        }
+
+        setStatusText(Loc.T("status.elevation"));
+        ElevateButton.Visibility = Visibility.Visible;
+        return true;
+    }
+
+    /// <summary>以管理员权限重启自己（拉起的 tosu 会跟着提权，才能读游戏内存）。</summary>
+    private void ElevateButton_Click(object sender, RoutedEventArgs e)
+    {
+        string? executable = Environment.ProcessPath;
+        if (string.IsNullOrWhiteSpace(executable))
+        {
+            setStatusText(Loc.T("status.elevate.failed"));
+            return;
+        }
+
+        try
+        {
+            Process.Start(new ProcessStartInfo(executable)
+            {
+                UseShellExecute = true,
+                Verb = "runas",
+                Arguments = "--elevated-restart",
+                WorkingDirectory = AppContext.BaseDirectory
+            });
+            AppLog.Info($"已请求以管理员权限重启：{executable}");
+            Application.Current.Shutdown();
+        }
+        catch (Win32Exception exception) when (exception.NativeErrorCode == 1223)
+        {
+            // 用户点了 UAC 的「否」。
+            AppLog.Info("用户取消提权");
+            ElevateButton.Visibility = Visibility.Collapsed;
+            setStatusText(Loc.T("status.elevate.cancelled"));
+        }
+        catch (Exception exception)
+        {
+            AppLog.Error("以管理员重启失败", exception);
+            setStatusText(Loc.T("status.elevate.failed"));
         }
     }
 

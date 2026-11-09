@@ -701,12 +701,16 @@
             </UniformGrid>
 
             <Grid x:Name="Footer" Grid.Row="4" Background="{StaticResource SurfaceBrush}">
-                <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /><ColumnDefinition Width="Auto" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
                 <TextBox x:Name="StatusText" Text="{DynamicResource L.status.ready}" Margin="14,6,8,6" VerticalContentAlignment="Center"
                          IsReadOnly="True" IsTabStop="True" TextWrapping="Wrap" AcceptsReturn="True"
                          BorderThickness="0" Background="Transparent" ToolTip="{DynamicResource L.tip.status}" />
-                <Button Grid.Column="1" Content="{DynamicResource L.btn.copy}" Margin="0,6,6,6" Padding="10,0" Click="CopyStatusButton_Click" />
-                <Button Grid.Column="2" Content="{DynamicResource L.btn.refresh}" Margin="0,6,8,6" Padding="12,0" Click="RefreshButton_Click" />
+                <!-- 只在「osu! 提权运行、Roam 读不到内存」时出现：加速器拉起的游戏就是这种情况 -->
+                <Button x:Name="ElevateButton" Grid.Column="1" Visibility="Collapsed"
+                        Content="{DynamicResource L.btn.elevate}" ToolTip="{DynamicResource L.tip.elevate}"
+                        Margin="0,6,6,6" Padding="10,0" Click="ElevateButton_Click" />
+                <Button Grid.Column="2" Content="{DynamicResource L.btn.copy}" Margin="0,6,6,6" Padding="10,0" Click="CopyStatusButton_Click" />
+                <Button Grid.Column="3" Content="{DynamicResource L.btn.refresh}" Margin="0,6,8,6" Padding="12,0" Click="RefreshButton_Click" />
             </Grid>
         </Grid>
     </Border>

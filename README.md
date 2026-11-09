@@ -76,6 +76,13 @@ go through DWM composition, which occasionally holds a frame for an extra refres
 p95 8.3 ms, versus 4.21 ms for osu!lazer's independent flip). Queue depth, submission rate, both GPUs and a
 compositor-animated tile renderer were all tried without removing it.
 
+**Games launched by an accelerator (UU etc.) are unreadable:** these launchers start the game with administrator
+rights (the game's parent process really is `uu.exe`), so from a normal-privilege process
+`OpenProcess(PROCESS_VM_READ)` fails with `ERROR_ACCESS_DENIED` — and tosu reads the game from memory, which shows up
+as Roam never seeing the game while `tosu stderr: failed to query the process` repeats every second.
+Roam now detects this: the status bar explains it and a **Run as admin** button appears (the tosu it spawns inherits
+the elevation). You can also right-click → Run as administrator.
+
 ## Quick start
 
 1. Extract and run `OsuRoam.exe`.
@@ -204,6 +211,12 @@ osu! 谱面漫游推荐工具，Windows / WPF / .NET 8。读你的成绩样本�
 **已知限制（不修）**：预览仍有轻微周期性抖动。逐像素透明必须走 DWM 合成，它会偶尔把一帧多留一个刷新周期
 （实测显示间隔 p95 8.3 ms，而 osu!lazer 的独立翻转是 4.21 ms）。排队深度、提交频率、两块 GPU、
 图块 + 合成器动画都试过，没能消除。
+
+**用加速器（UU 等）启动 osu! 时读不到游戏状态**：这类加速器会用管理员权限把游戏拉起来（实测 osu! 的父进程
+就是 `uu.exe`），普通权限下 `OpenProcess(PROCESS_VM_READ)` 直接 `ERROR_ACCESS_DENIED`，而 tosu 靠读内存拿状态
+—— 表现就是 Roam 一直「认不出游戏」，日志里每秒刷 `tosu stderr: failed to query the process`。
+Roam 现在会检测到这种情况：状态栏说明原因，右边出现「以管理员重启」，点它即可（Roam 拉起的 tosu 会跟着提权）。
+也可以手动右键 → 以管理员身份运行。
 
 .NET 运行时和 `tosu.exe` 都在包里，解压即用。两版各有自己的 `data` 目录，**不要覆盖安装**。
 
