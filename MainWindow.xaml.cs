@@ -3670,7 +3670,7 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
             return;
         try
         {
-            ScaleTransform scale = element.RenderTransform as ScaleTransform;
+            ScaleTransform? scale = element.RenderTransform as ScaleTransform;
             if (scale is null)
             {
                 scale = new ScaleTransform(1, 1);

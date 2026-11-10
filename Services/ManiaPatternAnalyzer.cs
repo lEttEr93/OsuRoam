@@ -87,7 +87,6 @@ public static class ManiaPatternAnalyzer
             Category = buildCategory(coreShares, specificShares, matches),
             Source = PatternSource.Osu,
             AnalyzerVersion = Version,
-            RiceStarRating = ManiaStarRating.Compute(osuText, stripHolds: true) ?? 0,
             Sv = Evaluator.Compute(osuText)
         };
         pattern.SkillAxes = buildSkillAxes(pattern);

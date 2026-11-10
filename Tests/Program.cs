@@ -87,7 +87,7 @@ testDownloadCancelRuleUsesMembershipNotQueue();
 testCandidateAdmissionJudgesByVerifiedPattern();
 testLnThresholdCountsAsFaceChart();
 testLnTriangleFillsCircleWhenBalancedAtFullLn();
-testLnTriangleScalesWithStarDelta();
+testLnTriangleScalesWithLnRatioAndShares();
 testManiaStarRatingHandlesHolds();
 testManiaStarRatingScalesWithDensity();
 testSvEvaluatorOnSteadyChartIsClean();
@@ -3137,68 +3137,49 @@ static void testLnThresholdCountsAsFaceChart()
 
 static void testLnTriangleFillsCircleWhenBalancedAtFullLn()
 {
-    // 锚点：ΔSR/SR 达到 0.30 时填满；三项等分时三个顶点都贴到外接圆（长度 1.0）。
+    // 锚点：LN 100% + 三项等分 ⇒ 三个顶点都贴到外接圆（长度 1.0）。
     ManiaPattern pattern = new()
     {
         LnRatio = 1.0,
-        RiceStarRating = 4.2,
         CoreShares = new() { ["Coordination"] = 0.3, ["Density"] = 0.3, ["Wildcard"] = 0.3 }
     };
 
-    double[]? lens = LnRadarBuilder.Build(pattern, officialStarRating: 6.0);
-    assertTrue(lens is { Length: 3 }, "ΔSR/SR 到锚点且三项等分时应有三个顶点");
+    double[]? lens = LnRadarBuilder.Build(pattern);
+    assertTrue(lens is { Length: 3 }, "LN 100% 且三项等分应给出三个顶点");
     assertNear(1.0, lens![0], "协调顶点应贴外接圆");
     assertNear(1.0, lens[1], "密度顶点应贴外接圆");
     assertNear(1.0, lens[2], "杂项顶点应贴外接圆");
-
-    // 超过锚点按满格截断，不会溢出。
-    ManiaPattern heavy = new()
-    {
-        LnRatio = 1.0,
-        RiceStarRating = 2.0,
-        CoreShares = new() { ["Coordination"] = 0.3, ["Density"] = 0.3, ["Wildcard"] = 0.3 }
-    };
-    double[]? clipped = LnRadarBuilder.Build(heavy, 6.0);
-    assertNear(1.0, clipped![1], "ΔSR/SR 超过锚点时应截断到 1.0");
 }
 
-static void testLnTriangleScalesWithStarDelta()
+static void testLnTriangleScalesWithLnRatioAndShares()
 {
-    // ΔSR/SR = (6 − 5.1)/6 = 0.15，正好是锚点的一半 ⇒ 整体缩放 0.5。
+    // 份额按最大项归一，整体再乘 f(LN) = 2·LN/(1+LN)。
     ManiaPattern pattern = new()
     {
         LnRatio = 0.5,
-        RiceStarRating = 5.1,
         CoreShares = new() { ["Coordination"] = 0.2, ["Density"] = 0.4, ["Wildcard"] = 0.1 }
     };
 
-    double[]? lens = LnRadarBuilder.Build(pattern, 6.0);
+    double[]? lens = LnRadarBuilder.Build(pattern);
     assertTrue(lens is { Length: 3 }, "份额合法时应给出三个顶点");
-    // ΔSR/SR = 0.15 是锚点的一半，开方后缩放 = √0.5 ≈ 0.7071
-    double expected = Math.Sqrt(0.5);
-    assertNear(expected, lens![1], "最大份额那根应等于 √(0.15/0.30)");
-    assertNear(expected * 0.5, lens[0], "协调 = 0.2/0.4 × 缩放");
-    assertNear(expected * 0.25, lens[2], "杂项 = 0.1/0.4 × 缩放");
+    assertNear(2.0 / 3.0, lens![1], "最大份额那根应等于 f(0.5) = 2/3");
+    assertNear(1.0 / 3.0, lens[0], "协调 = 0.2/0.4 × f");
+    assertNear(1.0 / 6.0, lens[2], "杂项 = 0.1/0.4 × f");
 
-    // 长条越难，三角越大。
-    ManiaPattern harder = new()
+    // LN 占比越高三角越大（单调）。
+    ManiaPattern lighter = new()
     {
-        LnRatio = 0.5,
-        RiceStarRating = 4.5,
+        LnRatio = 0.25,
         CoreShares = new() { ["Coordination"] = 0.2, ["Density"] = 0.4, ["Wildcard"] = 0.1 }
     };
-    double[]? harderLens = LnRadarBuilder.Build(harder, 6.0);
-    assertTrue(harderLens![1] > lens[1], "米线星数更低（长条更吃难度）时三角应更大");
+    double[]? lighterLens = LnRadarBuilder.Build(lighter);
+    assertTrue(lighterLens![1] < lens[1], "LN 25% 的三角应小于 LN 50%");
 
-    // 缺数据时不该画。
-    assertTrue(LnRadarBuilder.Build(new ManiaPattern { RiceStarRating = 5, CoreShares = new() { ["Coordination"] = 0.4 } }, 6) is not null,
-        "三项里只有协调也应能画");
-    assertTrue(LnRadarBuilder.Build(new ManiaPattern { RiceStarRating = 0, CoreShares = new() { ["Coordination"] = 0.4 } }, 6) is null,
-        "没算过米线星数时不画三角");
-    assertTrue(LnRadarBuilder.Build(new ManiaPattern { RiceStarRating = 5, CoreShares = new() { ["Coordination"] = 0.4 } }, 0) is null,
-        "官方星数缺失时不画三角");
-    assertTrue(LnRadarBuilder.Build(new ManiaPattern { RiceStarRating = 7, CoreShares = new() { ["Coordination"] = 0.4 } }, 6) is null,
-        "米线星数比原谱还高时不画（不该出现）");
+    // 没有长条、或者三个 LN 核心型都没命中时不该画。
+    assertTrue(LnRadarBuilder.Build(new ManiaPattern { LnRatio = 0, CoreShares = new() { ["Coordination"] = 0.4 } }) is null,
+        "LN 为 0 时不画三角");
+    assertTrue(LnRadarBuilder.Build(new ManiaPattern { LnRatio = 0.6, CoreShares = new() { ["Stream"] = 1 } }) is null,
+        "三个 LN 核心型全为 0 时不画三角");
 }
 
 static void testManiaStarRatingHandlesHolds()

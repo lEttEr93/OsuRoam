@@ -32,13 +32,6 @@ public sealed class ManiaPattern
     public double SvAmount { get; set; }
 
     /// <summary>
-    /// 「长条压成单点」之后的星数（本地算，见 <see cref="Services.ManiaStarRating"/>）。
-    /// 原谱星数用 osu! API 给的值，两者之差除以原谱星数就是长条贡献的难度占比 —— 信息窗三角的大小。
-    /// 0 表示还没算过（旧缓存），此时不画三角。
-    /// </summary>
-    public double RiceStarRating { get; set; }
-
-    /// <summary>
     /// 变速（SV）评估：等时性 / 舒适度 / 背谱 / 强度 四个量的原始值。
     /// 口径见 <see cref="OsuSv.Evaluator"/>；null 表示没算（旧缓存或非 mania）。
     /// </summary>

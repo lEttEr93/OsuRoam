@@ -488,7 +488,7 @@ public partial class MapInfoWindow : Window
         if (pattern.SkillAxes.Length == ManiaPattern.SkillPatterns.Length)
         {
             RadarPanel.Visibility = Visibility.Visible;
-            double[]? overlay = pattern.IsLnChart ? LnRadarBuilder.Build(pattern, item.Stars) : null;
+            double[]? overlay = pattern.IsLnChart ? LnRadarBuilder.Build(pattern) : null;
             Radar.SetData(
                 Loc.SkillPatternLabels(),
                 pattern.SkillAxes,
