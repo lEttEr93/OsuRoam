@@ -1,9 +1,9 @@
 @echo off
 rem ============================================================================
 rem  Build the SAME thing the released package contains, as an unzipped folder.
-rem  Default target: D:\osu-roam-1.5.6.1-local
+rem  Default target: D:\osu-roam-1.5.6.2-local
 rem
-rem    pack-unzipped.cmd                 -> D:\osu-roam-1.5.6.1-local
+rem    pack-unzipped.cmd                 -> D:\osu-roam-1.5.6.2-local
 rem    pack-unzipped.cmd D:\some\folder  -> any other folder
 rem
 rem  Two steps on purpose:
@@ -19,7 +19,7 @@ rem ============================================================================
 setlocal
 set "ROOT=%~dp0"
 set "TARGET=%~1"
-if not defined TARGET set "TARGET=D:\osu-roam-1.5.6.1-local"
+if not defined TARGET set "TARGET=D:\osu-roam-1.5.6.2-local"
 set "STAGE=%ROOT%bin\local-publish"
 set "LOG=%ROOT%bin\pack.log"
 
@@ -58,7 +58,9 @@ if errorlevel 1 (
     goto fail
 )
 
-if exist "%STAGE%\OsuRoam.pdb" del /q "%STAGE%\OsuRoam.pdb"
+rem drop symbols: OsuRoam.pdb and OsuSv.pdb (the split library) plus its xml doc
+for %%F in ("%STAGE%\*.pdb") do del /q "%%F"
+if exist "%STAGE%\OsuSv.xml" del /q "%STAGE%\OsuSv.xml"
 if not exist "%STAGE%\tosu.exe" for /d %%D in ("%ROOT%bin\v*") do (
     if exist "%%~D\tosu.exe" if not exist "%STAGE%\tosu.exe" copy /y "%%~D\tosu.exe" "%STAGE%\tosu.exe" >nul
 )
