@@ -4615,6 +4615,10 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
             UpdateService.UpdatePlan plan = UpdateService.Prepare(zip, installRoot);
             AppLog.Info($"更新包已就绪：{release.Tag} → {installRoot}");
 
+            // 退出前先把界面上的配置落盘：更新会重启进程，没存的东西统统丢
+            //（1.5.6.1 的实测反馈：改了「下载与高级设置」里的值，更新完就没了）。
+            await persistSettingsQuietlyAsync("更新前");
+
             setUpdateStatus("update.applying");
             UpdateService.Launch(plan, Environment.ProcessId);
 
@@ -4647,6 +4651,28 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
         catch (Exception exception)
         {
             AppLog.Error("更新探测失败", exception);
+        }
+    }
+
+    /// <summary>
+    /// 把当前界面上的值写回配置并落盘，失败只记日志。
+    /// 复用 <see cref="readSettingsFromControls"/> 的校验（用户名 / URL 没填时它会抛），
+    /// 所以这里必须吞掉异常：用户还没填完就点更新，不该弹东西，也不该把别的设置写坏。
+    /// </summary>
+    private async Task persistSettingsQuietlyAsync(string why)
+    {
+        if (!settingsControlsReady)
+            return;
+
+        try
+        {
+            settings = readSettingsFromControls();
+            await settingsStore.SaveAsync(settings);
+            AppLog.Info($"配置已保存（{why}）");
+        }
+        catch (Exception exception)
+        {
+            AppLog.Info($"配置自动保存失败（{why}）：{conciseMessage(exception)}");
         }
     }
 
