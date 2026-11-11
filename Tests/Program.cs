@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.IO.Compression;
 using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
@@ -90,6 +91,9 @@ testLnTriangleFillsCircleWhenBalancedAtFullLn();
 testLnTriangleScalesWithLnRatioAndShares();
 testManiaStarRatingHandlesHolds();
 testManiaStarRatingScalesWithDensity();
+testUpdateVersionOrdering();
+testUpdateReleaseSelection();
+testUpdatePrepareStagesPackage();
 testSvEvaluatorOnSteadyChartIsClean();
 testSvEvaluatorPunishesBaselineJumps();
 testSvEvaluatorExaggerationNeedsMidFlightChange();
@@ -3180,6 +3184,121 @@ static void testLnTriangleScalesWithLnRatioAndShares()
         "LN 为 0 时不画三角");
     assertTrue(LnRadarBuilder.Build(new ManiaPattern { LnRatio = 0.6, CoreShares = new() { ["Stream"] = 1 } }) is null,
         "三个 LN 核心型全为 0 时不画三角");
+}
+
+static void testUpdateVersionOrdering()
+{
+    static UpdateService.UpdateVersion V(string text) => UpdateService.UpdateVersion.Parse(text);
+
+    assertTrue(V("v1.5.6.2") > V("1.5.6fix"), "补丁版要排在 fix 之后");
+    assertTrue(V("1.5.6fix") > V("1.5.6"), "fix 要排在正式版之后");
+    assertTrue(V("1.5.6") > V("1.5.3-beta2"), "正式版要排在 beta 之后");
+    assertTrue(V("1.5.6.10") > V("1.5.6.9"), "数字段按数值比，不能按字符串比");
+    assertTrue(V("1.5.6.1") > V("1.5.6"), "多一段数字算更新");
+    assertTrue(V("v1.5.6") == V("1.5.6"), "tag 前面的 v 不算差异");
+    assertTrue(!UpdateService.UpdateVersion.TryParse("sv-v0.1.0", out _), "不是版本号开头的 tag 要拒绝");
+    assertTrue(!UpdateService.UpdateVersion.TryParse("", out _), "空字符串要拒绝");
+}
+
+static void testUpdateReleaseSelection()
+{
+    // 三条 release：别的产品（只有 exe 资源）、草稿、预发布 —— 都不该被选中。
+    const string json = """
+    [
+      {"tag_name":"sv-v0.1.0","name":"OsuSv 0.1.0","draft":false,"prerelease":false,
+       "published_at":"2026-11-09T12:38:25Z","html_url":"https://github.com/x/y/releases/tag/sv-v0.1.0",
+       "assets":[{"name":"osu-sv-0.1.0-win-x64.exe","size":1,"browser_download_url":"https://example.com/sv.exe","digest":null}]},
+      {"tag_name":"v1.5.6.2","name":"osu! Roam 1.5.6.2","draft":false,"prerelease":false,
+       "published_at":"2026-11-10T00:00:00Z","html_url":"https://github.com/x/y/releases/tag/v1.5.6.2",
+       "assets":[
+         {"name":"osu-roam-1.5.6.2-en-portable.zip","size":100,"browser_download_url":"https://example.com/en.zip","digest":"sha256:AABB"},
+         {"name":"osu-roam-1.5.6.2-portable.zip","size":200,"browser_download_url":"https://example.com/zh.zip","digest":null},
+         {"name":"osu-roam-v1.5.6.2-source.zip","size":10,"browser_download_url":"https://example.com/src.zip","digest":null}]},
+      {"tag_name":"v1.5.7","name":"草稿","draft":true,"prerelease":false,
+       "published_at":"2026-11-11T00:00:00Z","html_url":"https://github.com/x/y/releases/tag/v1.5.7",
+       "assets":[{"name":"osu-roam-1.5.7-portable.zip","size":1,"browser_download_url":"https://example.com/d.zip","digest":null}]},
+      {"tag_name":"v1.5.8-beta","name":"预发布","draft":false,"prerelease":true,
+       "published_at":"2026-11-12T00:00:00Z","html_url":"https://github.com/x/y/releases/tag/v1.5.8-beta",
+       "assets":[{"name":"osu-roam-1.5.8-beta-portable.zip","size":1,"browser_download_url":"https://example.com/b.zip","digest":null}]}
+    ]
+    """;
+
+    UpdateService.UpdateRelease? zh = UpdateService.ParseReleases(json, english: false);
+    assertTrue(zh is not null, "应该挑出一个可用于更新的 release");
+    assertText("v1.5.6.2", zh!.Tag, "选中的 release");
+    assertText("osu-roam-1.5.6.2-portable.zip", zh.Asset.Name, "中文版应拿不带 -en 的那个包");
+    assertTrue(zh.Asset.Size == 200, "包大小要读出来");
+    assertTrue(zh.Asset.Sha256 is null, "没给 digest 时不该编一个校验值");
+
+    UpdateService.UpdateRelease? en = UpdateService.ParseReleases(json, english: true);
+    assertText("osu-roam-1.5.6.2-en-portable.zip", en!.Asset.Name, "英文版应拿 -en-portable 那个包");
+    assertText("aabb", en.Asset.Sha256!, "digest 要转小写并去掉 sha256: 前缀");
+
+    // 只有别的产品（比如 OsuSv）的 release 时，不能误判成「有更新」。
+    const string onlyOther = """
+    [{"tag_name":"sv-v0.1.0","name":"OsuSv","draft":false,"prerelease":false,"published_at":"2026-11-09T12:38:25Z",
+      "html_url":"https://github.com/x/y/releases/tag/sv-v0.1.0",
+      "assets":[{"name":"osu-sv-0.1.0-win-x64.exe","size":1,"browser_download_url":"https://example.com/sv.exe","digest":null}]}]
+    """;
+    assertTrue(UpdateService.ParseReleases(onlyOther, english: false) is null, "没有便携包的 release 不算更新");
+}
+
+static void testUpdatePrepareStagesPackage()
+{
+    string temp = Path.Combine(Path.GetTempPath(), $"roam-update-test-{Guid.NewGuid():N}");
+    string package = Path.Combine(temp, "package");
+    string work = Path.Combine(temp, "work");
+    Directory.CreateDirectory(Path.Combine(package, "Assets"));
+    File.WriteAllText(Path.Combine(package, "OsuRoam.exe"), "new exe");
+    File.WriteAllText(Path.Combine(package, "Assets", "marker.txt"), "new asset");
+
+    string zip = Path.Combine(temp, "update.zip");
+    try
+    {
+        ZipFile.CreateFromDirectory(package, zip);
+        UpdateService.UpdatePlan plan = UpdateService.Prepare(zip, temp, work);
+
+        assertTrue(File.Exists(Path.Combine(plan.StagedRoot, "OsuRoam.exe")), "暂存区里应有 exe");
+        assertTrue(File.Exists(Path.Combine(plan.StagedRoot, "Assets", "marker.txt")), "资源也要解出来");
+
+        byte[] script = File.ReadAllBytes(plan.Script);
+        assertTrue(script.All(value => value < 128), "更新脚本必须是纯 ASCII");
+        string text = Encoding.ASCII.GetString(script);
+        assertTrue(text.Contains("\r\n", StringComparison.Ordinal), "更新脚本必须是 CRLF");
+        assertTrue(text.Contains("ROAM_UPDATE_PID", StringComparison.Ordinal), "脚本要从环境变量取参数");
+        assertTrue(text.Contains("robocopy", StringComparison.Ordinal), "脚本要用 robocopy 覆盖");
+
+        // 带一层顶层目录的包也要能找到 exe 那一层。
+        string wrapped = Path.Combine(temp, "wrapped");
+        string inner = Path.Combine(wrapped, "osu-roam-1.5.6.2");
+        Directory.CreateDirectory(inner);
+        File.WriteAllText(Path.Combine(inner, "OsuRoam.exe"), "wrapped exe");
+        string wrappedZip = Path.Combine(temp, "wrapped.zip");
+        ZipFile.CreateFromDirectory(wrapped, wrappedZip);
+        UpdateService.UpdatePlan nested = UpdateService.Prepare(wrappedZip, temp, Path.Combine(temp, "work2"));
+        assertTrue(File.Exists(Path.Combine(nested.StagedRoot, "OsuRoam.exe")), "带顶层目录的包也要定位到 exe");
+
+        // 没有 exe 的包要明确报错，别写脚本。
+        string bad = Path.Combine(temp, "bad");
+        Directory.CreateDirectory(bad);
+        File.WriteAllText(Path.Combine(bad, "readme.txt"), "no exe here");
+        string badZip = Path.Combine(temp, "bad.zip");
+        ZipFile.CreateFromDirectory(bad, badZip);
+        bool threw = false;
+        try
+        {
+            UpdateService.Prepare(badZip, temp, Path.Combine(temp, "work3"));
+        }
+        catch (InvalidOperationException)
+        {
+            threw = true;
+        }
+        assertTrue(threw, "包里没有 OsuRoam.exe 时必须报错");
+    }
+    finally
+    {
+        try { Directory.Delete(temp, true); } catch (IOException) { }
+    }
 }
 
 static void testManiaStarRatingHandlesHolds()

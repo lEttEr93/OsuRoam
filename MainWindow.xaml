@@ -683,6 +683,25 @@
                             </WrapPanel>
                             <TextBlock Text="{DynamicResource L.label.tosupath}" Foreground="{StaticResource MutedTextBrush}" FontSize="11" Margin="0,9,0,0" />
                             <TextBox x:Name="TosuPathBox" />
+
+                            <!-- 版本与更新：查 GitHub release，直接换掉程序目录里的文件（data\ 不动） -->
+                            <TextBlock Text="{DynamicResource L.section.update}" FontSize="12" FontWeight="SemiBold"
+                                       Foreground="{StaticResource SecondaryBrush}" Margin="0,14,0,6" />
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock x:Name="UpdateVersionText" FontSize="11" VerticalAlignment="Center"
+                                           Foreground="{StaticResource MutedTextBrush}" TextTrimming="CharacterEllipsis" />
+                                <Button x:Name="CheckUpdateButton" Grid.Column="1" Content="{DynamicResource L.btn.checkupdate}"
+                                        Padding="10,3" FontSize="11" Click="CheckUpdateButton_Click" />
+                            </Grid>
+                            <TextBlock x:Name="UpdateStatusText" FontSize="10" Margin="0,4,0,0" TextWrapping="Wrap"
+                                       Foreground="{StaticResource MutedTextBrush}" />
+                            <Button x:Name="ApplyUpdateButton" Content="{DynamicResource L.btn.applyupdate}"
+                                    HorizontalAlignment="Left" Margin="0,6,0,0" Padding="10,3" FontSize="11"
+                                    Visibility="Collapsed" Click="ApplyUpdateButton_Click" />
                         </StackPanel>
                     </Grid>
                 </ScrollViewer>

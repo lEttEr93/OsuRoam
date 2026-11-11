@@ -25,6 +25,24 @@ public static class LocTable
         ["btn.back"] = "‹ 返回",
         ["btn.include"] = "加入推荐标签",
         ["btn.exclude"] = "排除这些标签",
+        ["btn.checkupdate"] = "检查更新",
+        ["btn.applyupdate"] = "下载并更新",
+
+        // 版本与更新
+        ["section.update"] = "版本与更新",
+        ["label.version"] = "当前版本 {0}",
+        ["update.checking"] = "正在检查更新…",
+        ["update.latest"] = "已是最新（{0}）",
+        ["update.available"] = "发现新版本 {0}（{1}），可以直接下载并替换",
+        ["update.downloading"] = "正在下载 {0:0.0} / {1:0.0} MB",
+        ["update.downloadingunknown"] = "正在下载 {0:0.0} MB",
+        ["update.preparing"] = "正在解包…",
+        ["update.applying"] = "正在替换文件，程序马上重启…",
+        ["update.failed"] = "更新失败：{0}",
+        ["update.nowritable"] = "程序目录不可写，没法就地更新：请到 {0} 手动下载便携包",
+        ["update.done"] = "已更新到 {0}",
+        ["update.lastfailed"] = "上次更新没成功（{0}），当前还是 {1}",
+        ["update.confirm"] = "从 {0} 更新到 {1}？\n\n会下载新版本、替换程序文件，data 目录（配置 / 谱面缓存 / 日志）保持不动，完成后自动重启。",
 
         // 提示气泡
         ["tip.next"] = "下载并导入下一首",
@@ -324,6 +342,24 @@ public static class LocTable
         ["btn.back"] = "‹ Back",
         ["btn.include"] = "Include tags",
         ["btn.exclude"] = "Exclude tags",
+        ["btn.checkupdate"] = "Check for updates",
+        ["btn.applyupdate"] = "Download and update",
+
+        // 版本与更新
+        ["section.update"] = "Version & updates",
+        ["label.version"] = "Current version {0}",
+        ["update.checking"] = "Checking for updates…",
+        ["update.latest"] = "Up to date ({0})",
+        ["update.available"] = "New version {0} ({1}) — you can download and swap it in place",
+        ["update.downloading"] = "Downloading {0:0.0} / {1:0.0} MB",
+        ["update.downloadingunknown"] = "Downloading {0:0.0} MB",
+        ["update.preparing"] = "Unpacking…",
+        ["update.applying"] = "Replacing files — the app restarts in a moment…",
+        ["update.failed"] = "Update failed: {0}",
+        ["update.nowritable"] = "The program folder is not writable, so it cannot update itself here: download the portable package from {0}",
+        ["update.done"] = "Updated to {0}",
+        ["update.lastfailed"] = "The last update did not finish ({0}); still on {1}",
+        ["update.confirm"] = "Update from {0} to {1}?\n\nThe new version is downloaded and the program files are replaced. The data folder (settings / beatmap cache / logs) is left alone, and the app restarts when done.",
 
         // 提示气泡
         ["tip.next"] = "Download and import the next beatmap",

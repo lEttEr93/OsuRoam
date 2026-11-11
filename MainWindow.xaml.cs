@@ -172,6 +172,12 @@ public partial class MainWindow : Window
     private DateTime emptyStateSince;
     private DateTime lastTosuRestartAt;
     private bool restoreHistoryAfterPlay;
+    /// <summary>检查到的可用更新；null = 没有（或还没查过）。</summary>
+    private UpdateService.UpdateRelease? pendingUpdate;
+    private bool updateBusy;
+    private string? updateStatusKey;
+    private object?[]? updateStatusArgs;
+    private string? updateStatusRaw;
 
     public MainWindow()
     {
@@ -255,6 +261,9 @@ public partial class MainWindow : Window
         }
         await patternLibrary.LoadAsync();
         await archiveStore.LoadAsync();
+        UpdateService.CleanupStaging();
+        reportLastUpdateResult();
+        UpdateVersionText.Text = Loc.F("label.version", AppVersion.Display);
         // 扫一遍已安装谱面（lazer 的内容寻址仓库要遍历两万个文件，放后台，别挡启动）
         _ = refreshInstalledLibraryAsync();
         AppLog.Info($"键型库：{patternLibrary.ParsedCount} 条真实解析 / {patternLibrary.Count} 条总计");
@@ -264,6 +273,14 @@ public partial class MainWindow : Window
                 argument.StartsWith("--experiment", StringComparison.OrdinalIgnoreCase)))
         {
             await runExperimentAsync();
+            Close();
+            return;
+        }
+
+        // 开发用：--update-check 查一次更新、写日志后退出（不弹窗、不改文件）。
+        if (Environment.GetCommandLineArgs().Any(argument => argument == "--update-check"))
+        {
+            await runUpdateProbeAsync();
             Close();
             return;
         }
@@ -659,6 +676,16 @@ public partial class MainWindow : Window
         {
             applySectionTab(sectionArg[(sectionArg.IndexOf('=') + 1)..].Trim().ToLowerInvariant());
             await Task.Delay(settleDelay);
+        }
+
+        // 开发用：--update-ui 截图前跑一次真的检查更新，好把「已是最新 / 发现新版本」的状态拍下来。
+        if (Environment.GetCommandLineArgs().Any(arg => arg == "--update-ui"))
+        {
+            CheckUpdateButton_Click(CheckUpdateButton, new RoutedEventArgs());
+            await Task.Delay(3000);
+            // 更新块在「下载与高级设置」的最下面，抽屉里要滚到底才看得见。
+            SectionScroll.ScrollToEnd();
+            await Task.Delay(300);
         }
 
         // 开发用：--scroll-bottom 先把主内容滚到底，方便截设置区；
@@ -2612,6 +2639,8 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
                 : $"{currentRoamItem.DifficultyName} · {currentRoamItem.DifficultySummary}";
         ConnectionText.Text = lastSnapshot is null ? Loc.T("conn.idle") : connectionTextFor(lastSnapshot);
         renderStatus();
+        UpdateVersionText.Text = Loc.F("label.version", AppVersion.Display);
+        renderUpdateStatus();
         foreach (RecommendationItem item in recommendations)
             item.NotifyLanguage();
         foreach (SimpleFilterOption option in statusFilterOptions) option.NotifyLanguage();
@@ -4374,6 +4403,163 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
         OsuDetectText.Foreground = (Brush)FindResource("MutedTextBrush");
         if (logToFile)
             AppLog.Info($"重新检测 osu!：{installation.ClientName} → {installation.Executable}（来源：{installation.Source}）");
+    }
+
+    // ================= 检查更新 =================
+
+    private void setUpdateStatus(string key, params object?[] args)
+    {
+        updateStatusKey = key;
+        updateStatusArgs = args;
+        updateStatusRaw = null;
+        UpdateStatusText.Text = Loc.F(key, args);
+    }
+
+    private void setUpdateStatusText(string text)
+    {
+        updateStatusKey = null;
+        updateStatusArgs = null;
+        updateStatusRaw = text;
+        UpdateStatusText.Text = text;
+    }
+
+    private void renderUpdateStatus()
+    {
+        if (updateStatusKey is not null)
+            UpdateStatusText.Text = Loc.F(updateStatusKey, updateStatusArgs ?? []);
+        else if (updateStatusRaw is not null)
+            UpdateStatusText.Text = updateStatusRaw;
+    }
+
+    /// <summary>上一次更新脚本留下的结果：成功就报版本，失败就把原因留在状态栏。</summary>
+    private void reportLastUpdateResult()
+    {
+        string? result = UpdateService.ReadLastResult();
+        if (string.IsNullOrWhiteSpace(result))
+            return;
+
+        UpdateService.ClearLastResult();
+        if (result.StartsWith("ok", StringComparison.OrdinalIgnoreCase))
+        {
+            AppLog.Info($"上次就地更新已完成，当前版本 {AppVersion.Display}");
+            setStatus("update.done", AppVersion.Display);
+        }
+        else
+        {
+            AppLog.Info($"上次就地更新失败：{result}");
+            setStatus("update.lastfailed", result, AppVersion.Display);
+        }
+    }
+
+    private async void CheckUpdateButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (updateBusy)
+            return;
+
+        updateBusy = true;
+        pendingUpdate = null;
+        ApplyUpdateButton.Visibility = Visibility.Collapsed;
+        CheckUpdateButton.IsEnabled = false;
+        setUpdateStatus("update.checking");
+
+        try
+        {
+            UpdateService.UpdateRelease? release = await UpdateService.CheckAsync(Flavor.IsEnglish, CancellationToken.None);
+            if (release is null)
+            {
+                setUpdateStatus("update.latest", AppVersion.Display);
+                AppLog.Info($"检查更新：已是最新（{AppVersion.Display}）");
+            }
+            else
+            {
+                pendingUpdate = release;
+                setUpdateStatus("update.available", release.Tag,
+                    release.PublishedAt?.ToLocalTime().ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) ?? "-");
+                ApplyUpdateButton.Visibility = Visibility.Visible;
+                AppLog.Info($"检查更新：发现 {release.Tag}（{release.Asset.Name}，{release.Asset.Size / 1048576.0:0.0} MB）");
+            }
+        }
+        catch (Exception exception)
+        {
+            AppLog.Error("检查更新失败", exception);
+            setUpdateStatus("update.failed", conciseMessage(exception));
+        }
+        finally
+        {
+            updateBusy = false;
+            CheckUpdateButton.IsEnabled = true;
+        }
+    }
+
+    private async void ApplyUpdateButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (updateBusy || pendingUpdate is not { } release)
+            return;
+
+        string installRoot = AppContext.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        if (!UpdateService.InstallDirectoryWritable(installRoot))
+        {
+            setUpdateStatus("update.nowritable", "https://github.com/" + UpdateService.Repository + "/releases");
+            return;
+        }
+
+        MessageBoxResult confirm = MessageBox.Show(this,
+            Loc.F("update.confirm", AppVersion.Display, release.Tag),
+            "osu! Roam", MessageBoxButton.YesNo, MessageBoxImage.Question);
+        if (confirm != MessageBoxResult.Yes)
+            return;
+
+        updateBusy = true;
+        ApplyUpdateButton.IsEnabled = false;
+        CheckUpdateButton.IsEnabled = false;
+
+        long total = release.Asset.Size;
+        try
+        {
+            setUpdateStatus(total > 0 ? "update.downloading" : "update.downloadingunknown", 0.0, total / 1048576.0);
+            Progress<long> progress = new(bytes => setUpdateStatus(
+                total > 0 ? "update.downloading" : "update.downloadingunknown",
+                bytes / 1048576.0,
+                total / 1048576.0));
+
+            string zip = await UpdateService.DownloadAsync(release.Asset, progress, CancellationToken.None);
+            setUpdateStatus("update.preparing");
+            UpdateService.UpdatePlan plan = UpdateService.Prepare(zip, installRoot);
+            AppLog.Info($"更新包已就绪：{release.Tag} → {installRoot}");
+
+            setUpdateStatus("update.applying");
+            UpdateService.Launch(plan, Environment.ProcessId);
+
+            // 交给脚本了：先把跟着主窗浮着的窗口收掉，再退出，让脚本能覆盖 exe。
+            dismissPreview();
+            dismissMapInfo();
+            Application.Current.Shutdown();
+        }
+        catch (Exception exception)
+        {
+            AppLog.Error("更新失败", exception);
+            setUpdateStatus("update.failed", conciseMessage(exception));
+            ApplyUpdateButton.IsEnabled = true;
+            CheckUpdateButton.IsEnabled = true;
+            updateBusy = false;
+        }
+    }
+
+    /// <summary>开发用：--update-check 只查一次更新、写日志后退出（不弹窗、不改文件）。</summary>
+    private async Task runUpdateProbeAsync()
+    {
+        try
+        {
+            UpdateService.UpdateRelease? release = await UpdateService.CheckAsync(Flavor.IsEnglish, CancellationToken.None);
+            AppLog.Info(release is null
+                ? $"更新探测：已是最新（{AppVersion.Display}）"
+                : $"更新探测：发现 {release.Tag}｜{release.Asset.Name}｜{release.Asset.Size / 1048576.0:0.0} MB｜" +
+                  $"{release.PublishedAt?.ToLocalTime():yyyy-MM-dd}｜sha256={(release.Asset.Sha256 is null ? "无" : "有")}");
+        }
+        catch (Exception exception)
+        {
+            AppLog.Error("更新探测失败", exception);
+        }
     }
 
     private string difficultyProfileLabel() => settings.Mode switch
