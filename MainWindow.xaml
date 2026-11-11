@@ -605,13 +605,16 @@
                         </StackPanel>
                         <StackPanel x:Name="AdvancedSectionPanel" Visibility="Collapsed" Margin="0,0,0,6">
                             <WrapPanel Margin="0,0,0,9">
-                                <CheckBox x:Name="ExcludeRecentCheck" Content="{DynamicResource L.check.excluderecent}" Margin="0,0,18,0" />
+                                <CheckBox x:Name="ExcludeRecentCheck" Content="{DynamicResource L.check.excluderecent}" Margin="0,0,18,0"
+                                          Click="SettingsControl_Changed" />
                                 <CheckBox x:Name="ExcludeInstalledCheck" Content="{DynamicResource L.check.excludeinstalled}"
                                           ToolTip="{DynamicResource L.tip.excludeinstalled}" Click="ExcludeInstalledCheck_Click" />
                             </WrapPanel>
                             <WrapPanel Margin="0,0,0,9">
-                                <CheckBox x:Name="AutoDownloadCheck" Content="{DynamicResource L.check.autodownload}" Margin="0,0,18,0" />
-                                <CheckBox x:Name="AutoImportCheck" Content="{DynamicResource L.check.autoimport}" />
+                                <CheckBox x:Name="AutoDownloadCheck" Content="{DynamicResource L.check.autodownload}" Margin="0,0,18,0"
+                                          Click="SettingsControl_Changed" />
+                                <CheckBox x:Name="AutoImportCheck" Content="{DynamicResource L.check.autoimport}"
+                                          Click="SettingsControl_Changed" />
                             </WrapPanel>
                             <WrapPanel Margin="0,0,0,9">
                                 <CheckBox x:Name="EmbeddedFontCheck" Content="{DynamicResource L.check.embeddedfont}" Click="EmbeddedFontCheck_Click"
@@ -664,25 +667,28 @@
                             <TextBlock x:Name="OsuDetectText" FontSize="10" Margin="0,4,0,6"
                                        TextWrapping="Wrap" Foreground="{StaticResource MutedTextBrush}" />
                             <TextBlock Text="{DynamicResource L.label.poolsize}" Foreground="{StaticResource MutedTextBrush}" FontSize="11" />
-                            <ComboBox x:Name="PoolSizeBox" SelectedIndex="2"
+                            <ComboBox x:Name="PoolSizeBox" SelectedIndex="2" SelectionChanged="SettingsControl_Changed"
                                       DropDownOpened="ComboBox_DropDownOpened" DropDownClosed="ComboBox_DropDownClosed">
                                 <ComboBoxItem Content="3" /><ComboBoxItem Content="4" /><ComboBoxItem Content="5" />
                                 <ComboBoxItem Content="6" /><ComboBoxItem Content="8" /><ComboBoxItem Content="10" />
                             </ComboBox>
                             <TextBlock Text="{DynamicResource L.label.cachelimit}" Foreground="{StaticResource MutedTextBrush}" FontSize="11" Margin="0,9,0,0" />
-                            <TextBox x:Name="CacheLimitBox" />
+                            <TextBox x:Name="CacheLimitBox" LostFocus="SettingsControl_LostFocus" />
                             <TextBlock Text="{DynamicResource L.label.osupath}" Foreground="{StaticResource MutedTextBrush}" FontSize="11" Margin="0,9,0,0" />
-                            <TextBox x:Name="OsuPathBox" />
+                            <TextBox x:Name="OsuPathBox" LostFocus="SettingsControl_LostFocus" />
                             <TextBlock Text="{DynamicResource L.label.mirrors}" Foreground="{StaticResource MutedTextBrush}" FontSize="11" Margin="0,9,0,0" />
-                            <TextBox x:Name="DownloadTemplateBox" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="64" VerticalScrollBarVisibility="Auto" />
+                            <TextBox x:Name="DownloadTemplateBox" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="64" VerticalScrollBarVisibility="Auto"
+                                     LostFocus="SettingsControl_LostFocus" />
                             <TextBlock Text="tosu WebSocket" Foreground="{StaticResource MutedTextBrush}" FontSize="11" Margin="0,9,0,0" />
-                            <TextBox x:Name="TosuUrlBox" />
+                            <TextBox x:Name="TosuUrlBox" LostFocus="SettingsControl_LostFocus" />
                             <WrapPanel Margin="0,9,0,0">
-                                <CheckBox x:Name="AutoStartTosuCheck" Content="{DynamicResource L.check.autotosu}" Margin="0,0,18,0" />
-                                <CheckBox x:Name="StopManagedTosuCheck" Content="{DynamicResource L.check.stoptosu}" />
+                                <CheckBox x:Name="AutoStartTosuCheck" Content="{DynamicResource L.check.autotosu}" Margin="0,0,18,0"
+                                          Click="SettingsControl_Changed" />
+                                <CheckBox x:Name="StopManagedTosuCheck" Content="{DynamicResource L.check.stoptosu}"
+                                          Click="SettingsControl_Changed" />
                             </WrapPanel>
                             <TextBlock Text="{DynamicResource L.label.tosupath}" Foreground="{StaticResource MutedTextBrush}" FontSize="11" Margin="0,9,0,0" />
-                            <TextBox x:Name="TosuPathBox" />
+                            <TextBox x:Name="TosuPathBox" LostFocus="SettingsControl_LostFocus" />
 
                             <!-- 版本与更新：查 GitHub release，直接换掉程序目录里的文件（data\ 不动） -->
                             <TextBlock Text="{DynamicResource L.section.update}" FontSize="12" FontWeight="SemiBold"

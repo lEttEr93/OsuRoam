@@ -325,6 +325,17 @@ public partial class MainWindow : Window
         applySettingsToControls();
         uiMs = startup.ElapsedMilliseconds - settingsMs - patternMs - archiveMs;
         await yieldForInputAsync();
+
+        // 开发用：--persist-test 验证「改完就存」这条路（改两个值、写完读回文件、再还原），
+        // 复现 1.5.6.1 那个「改完直接更新，配置全丢」的问题。
+        // 放在 applySettingsToControls 之后：控件填好了 settingsControlsReady 才是 true。
+        if (Environment.GetCommandLineArgs().Any(argument => argument == "--persist-test"))
+        {
+            await runPersistProbeAsync();
+            Close();
+            return;
+        }
+
         if (!double.IsNaN(settings.WindowLeft) && !double.IsNaN(settings.WindowTop))
         {
             Left = settings.WindowLeft;
@@ -4663,6 +4674,8 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
         if (!exitAnimationDone && !exitWithoutAnimation && Controls.Motion.Enabled && IsVisible)
         {
             e.Cancel = true;
+            // 退出动画这 170ms 顺便把配置落盘（写临时文件再原子替换，写不完也不会把旧配置弄坏）。
+            _ = persistSettingsQuietlyAsync("退出前");
             playExitAnimation();
             return;
         }
@@ -4694,6 +4707,76 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
             AppLog.Error("退出动画失败", exception);
             exitAnimationDone = true;
             Close();
+        }
+    }
+
+    /// <summary>
+    /// 「下载与高级设置」里那些原来**只有点「开始漫游/刷新」才写盘**的控件：
+    /// 改成编辑完就存（文本框失焦、勾选框点击、下拉选择）。否则改完直接关程序或点更新，
+    /// 这些值全丢 —— 1.5.6.1 实机更新时就踩到过。
+    /// </summary>
+    private async void SettingsControl_LostFocus(object sender, RoutedEventArgs e) =>
+        await persistSettingsQuietlyAsync("高级设置失焦");
+
+    private async void SettingsControl_Changed(object sender, RoutedEventArgs e) =>
+        await persistSettingsQuietlyAsync("高级设置改动");
+
+    /// <summary>
+    /// 开发用：--persist-test。
+    /// 把两个**只在「下载与高级设置」里**的值改掉 → 走一遍保存 → 直接从文件里读回来核对 → 还原。
+    /// 这两个值是 1.5.6.1 实测丢配置时最典型的代表（都没有独立的保存回调）。
+    /// </summary>
+    private async Task runPersistProbeAsync()
+    {
+        int originalLimit = settings.CacheLimitMegabytes;
+        bool originalExclude = settings.ExcludeRecentlyPlayed;
+
+        try
+        {
+            CacheLimitBox.Text = "2345";
+            ExcludeRecentCheck.IsChecked = !originalExclude;
+            await persistSettingsQuietlyAsync("持久化自检");
+
+            string json = File.Exists(settingsStore.SettingsPathForDisplay)
+                ? await File.ReadAllTextAsync(settingsStore.SettingsPathForDisplay)
+                : string.Empty;
+            bool limitSaved = json.Contains("\"CacheLimitMegabytes\": 2345", StringComparison.Ordinal);
+            bool excludeSaved = json.Contains($"\"ExcludeRecentlyPlayed\": {(!originalExclude).ToString().ToLowerInvariant()}",
+                StringComparison.Ordinal);
+            AppLog.Info($"持久化自检：上限写入={limitSaved}｜开关写入={excludeSaved}｜文件={settingsStore.SettingsPathForDisplay}");
+        }
+        catch (Exception exception)
+        {
+            AppLog.Error("持久化自检失败", exception);
+        }
+        finally
+        {
+            // 还原，别把用户的配置留在测试值上。
+            CacheLimitBox.Text = originalLimit.ToString();
+            ExcludeRecentCheck.IsChecked = originalExclude;
+            await persistSettingsQuietlyAsync("持久化自检还原");
+        }
+    }
+
+    /// <summary>
+    /// 把当前界面上的值写回配置并落盘，失败只记日志。
+    /// 复用 <see cref="readSettingsFromControls"/> 的校验（用户名 / URL 没填时它会抛），
+    /// 所以这里必须吞掉异常：用户还没填完就切走，不该弹东西，也不该把别的设置写坏。
+    /// </summary>
+    private async Task persistSettingsQuietlyAsync(string why)
+    {
+        if (!settingsControlsReady)
+            return;
+
+        try
+        {
+            settings = readSettingsFromControls();
+            await settingsStore.SaveAsync(settings);
+            AppLog.Info($"配置已保存（{why}）");
+        }
+        catch (Exception exception)
+        {
+            AppLog.Info($"配置自动保存失败（{why}）：{conciseMessage(exception)}");
         }
     }
 
@@ -4775,6 +4858,10 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
             setUpdateStatus("update.preparing");
             UpdateService.UpdatePlan plan = UpdateService.Prepare(zip, installRoot);
             AppLog.Info($"更新包已就绪：{release.Tag} → {installRoot}");
+
+            // 退出前先把界面上的配置落盘：更新会重启进程，没存的东西统统丢
+            //（1.5.6.1 的实测反馈：改了「下载与高级设置」里的值，更新完就没了）。
+            await persistSettingsQuietlyAsync("更新前");
 
             setUpdateStatus("update.applying");
             UpdateService.Launch(plan, Environment.ProcessId);
