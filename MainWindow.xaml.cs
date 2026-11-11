@@ -178,6 +178,11 @@ public partial class MainWindow : Window
     private string? updateStatusKey;
     private object?[]? updateStatusArgs;
     private string? updateStatusRaw;
+    /// <summary>启动后多久做第一次自动检查：太早会和启动阶段的配置读取/tosu 启动抢时间。</summary>
+    private static readonly TimeSpan AutoUpdateDelay = TimeSpan.FromSeconds(20);
+    /// <summary>启动后自动检查更新的一次性计时器（推迟到启动 20 秒之后）。</summary>
+    private System.Windows.Threading.DispatcherTimer? autoUpdateTimer;
+    private int autoUpdateAttempts;
 
     public MainWindow()
     {
@@ -366,6 +371,18 @@ public partial class MainWindow : Window
         // 界面等半天也没有预览（那正是这两个功能的主场）。
         if (startupWebSocket)
             tosu.Start(settings.TosuWebSocketUrl);
+
+        // 自动检查更新排在最后：它自己的计时器还会再等 20 秒，
+        // 免得和读配置 / 起 tosu / 扫已安装谱面抢这几秒。
+        // 开发用：--update-auto-test 把 20 秒压成 2 秒，跑完就退出，用来验这条链路。
+        bool autoUpdateTest = Environment.GetCommandLineArgs().Any(arg => arg == "--update-auto-test");
+        scheduleAutoUpdateCheck(autoUpdateTest ? TimeSpan.FromSeconds(2) : null);
+        if (autoUpdateTest)
+        {
+            await Task.Delay(7000);
+            Close();
+            return;
+        }
 
         if (Environment.GetCommandLineArgs().Any(arg => arg == "--diagnose"))
             await runDiagnosticsAsync();
@@ -2885,6 +2902,7 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
         value.AutoImport = AutoImportCheck.IsChecked == true;
         value.UseEmbeddedFont = EmbeddedFontCheck.IsChecked == true;
         value.ShowMapInfo = MapInfoCheck.IsChecked == true;
+        value.CheckUpdatesOnStartup = AutoUpdateCheck.IsChecked == true;
         value.MapInfoSource = (MapInfoSourceBox.SelectedItem as ComboBoxItem)?.Tag?.ToString() ?? MapInfoSources.Imported;
         value.Language = (LanguageBox.SelectedItem as ComboBoxItem)?.Tag?.ToString() ?? Loc.AutoTag;
         value.OsuClient = OsuLocator.NormalizeClient((OsuClientBox.SelectedItem as ComboBoxItem)?.Tag?.ToString());
@@ -2920,6 +2938,7 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
         EmbeddedFontCheck.IsChecked = settings.UseEmbeddedFont;
         MapInfoCheck.IsChecked = settings.ShowMapInfo;
         PreviewCheck.IsChecked = settings.ShowPreview;
+        AutoUpdateCheck.IsChecked = settings.CheckUpdatesOnStartup;
         TagSubmitCheck.IsChecked = settings.TagSubmitEnabled;
         foreach ((CheckBox? box, string name) in patternBoxes())
         {
@@ -4451,7 +4470,13 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
         }
     }
 
-    private async void CheckUpdateButton_Click(object sender, RoutedEventArgs e)
+    private async void CheckUpdateButton_Click(object sender, RoutedEventArgs e) => await checkForUpdatesAsync(silent: false);
+
+    /// <summary>
+    /// 查一次更新。<paramref name="silent"/> 为 true 时是启动后的自动检查：
+    /// 不写「正在检查」、没有更新或查失败都只记日志，只有「真的发现新版本」才动界面。
+    /// </summary>
+    private async Task checkForUpdatesAsync(bool silent)
     {
         if (updateBusy)
             return;
@@ -4460,15 +4485,17 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
         pendingUpdate = null;
         ApplyUpdateButton.Visibility = Visibility.Collapsed;
         CheckUpdateButton.IsEnabled = false;
-        setUpdateStatus("update.checking");
+        if (!silent)
+            setUpdateStatus("update.checking");
 
         try
         {
             UpdateService.UpdateRelease? release = await UpdateService.CheckAsync(Flavor.IsEnglish, CancellationToken.None);
             if (release is null)
             {
-                setUpdateStatus("update.latest", AppVersion.Display);
-                AppLog.Info($"检查更新：已是最新（{AppVersion.Display}）");
+                if (!silent)
+                    setUpdateStatus("update.latest", AppVersion.Display);
+                AppLog.Info($"检查更新：已是最新（{AppVersion.Display}）{(silent ? "［自动］" : string.Empty)}");
             }
             else
             {
@@ -4476,19 +4503,80 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
                 setUpdateStatus("update.available", release.Tag,
                     release.PublishedAt?.ToLocalTime().ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) ?? "-");
                 ApplyUpdateButton.Visibility = Visibility.Visible;
-                AppLog.Info($"检查更新：发现 {release.Tag}（{release.Asset.Name}，{release.Asset.Size / 1048576.0:0.0} MB）");
+                AppLog.Info($"检查更新：发现 {release.Tag}（{release.Asset.Name}，{release.Asset.Size / 1048576.0:0.0} MB）" +
+                            $"{(silent ? "［自动］" : string.Empty)}");
             }
         }
         catch (Exception exception)
         {
-            AppLog.Error("检查更新失败", exception);
-            setUpdateStatus("update.failed", conciseMessage(exception));
+            AppLog.Error($"检查更新失败{(silent ? "（自动）" : string.Empty)}", exception);
+            if (!silent)
+                setUpdateStatus("update.failed", conciseMessage(exception));
         }
         finally
         {
             updateBusy = false;
             CheckUpdateButton.IsEnabled = true;
         }
+    }
+
+    private async void AutoUpdateCheck_Click(object sender, RoutedEventArgs e)
+    {
+        if (!settingsControlsReady)
+            return;
+
+        settings.CheckUpdatesOnStartup = AutoUpdateCheck.IsChecked == true;
+        try
+        {
+            await settingsStore.SaveAsync(settings);
+        }
+        catch (Exception exception)
+        {
+            AppLog.Error("保存自动检查更新设置失败", exception);
+        }
+    }
+
+    /// <summary>
+    /// 启动后自动查一次更新。故意晚一点：刚起来的十几秒里要读配置、连 tosu、扫已安装谱面，
+    /// 这时候插一次网络请求既抢 UI 线程，也容易和 tosu 抢磁盘/网络。
+    /// 到点时如果正在建推荐池或正在更新，就再往后挪 20 秒（最多挪 15 次）。
+    /// </summary>
+    private void scheduleAutoUpdateCheck(TimeSpan? delay = null)
+    {
+        if (!settings.CheckUpdatesOnStartup)
+            return;
+        // 截图 / 开发探针模式不打扰：它们本来就是短命进程。
+        if (snapshotPath() is not null ||
+            Environment.GetCommandLineArgs().Any(argument => argument == "--update-check"))
+            return;
+
+        TimeSpan wait = delay ?? AutoUpdateDelay;
+        autoUpdateAttempts = 0;
+        autoUpdateTimer = new System.Windows.Threading.DispatcherTimer(
+            wait, System.Windows.Threading.DispatcherPriority.Background, (_, _) => autoUpdateTickAsync(), Dispatcher);
+        autoUpdateTimer.Start();
+        AppLog.Info($"已安排启动后自动检查更新（{wait.TotalSeconds:0} 秒后）");
+    }
+
+    private async void autoUpdateTickAsync()
+    {
+        autoUpdateTimer?.Stop();
+        autoUpdateTimer = null;
+
+        if (isBusy || updateBusy || !IsLoaded)
+        {
+            if (++autoUpdateAttempts >= 15)
+            {
+                AppLog.Info("自动检查更新：一直有操作在进行，这次跳过");
+                return;
+            }
+            autoUpdateTimer = new System.Windows.Threading.DispatcherTimer(
+                TimeSpan.FromSeconds(20), System.Windows.Threading.DispatcherPriority.Background, (_, _) => autoUpdateTickAsync(), Dispatcher);
+            autoUpdateTimer.Start();
+            return;
+        }
+
+        await checkForUpdatesAsync(silent: true);
     }
 
     private async void ApplyUpdateButton_Click(object sender, RoutedEventArgs e)

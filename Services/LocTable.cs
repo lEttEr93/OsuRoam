@@ -43,6 +43,8 @@ public static class LocTable
         ["update.done"] = "已更新到 {0}",
         ["update.lastfailed"] = "上次更新没成功（{0}），当前还是 {1}",
         ["update.confirm"] = "从 {0} 更新到 {1}？\n\n会下载新版本、替换程序文件，data 目录（配置 / 谱面缓存 / 日志）保持不动，完成后自动重启。",
+        ["check.autoupdate"] = "启动后自动检查更新",
+        ["tip.autoupdate"] = "启动 20 秒后查一次（只查不下载，发现新版本会在这块里提示）；刚启动那几秒还要读配置、连 tosu，不抢这段时间",
 
         // 提示气泡
         ["tip.next"] = "下载并导入下一首",
@@ -360,6 +362,8 @@ public static class LocTable
         ["update.done"] = "Updated to {0}",
         ["update.lastfailed"] = "The last update did not finish ({0}); still on {1}",
         ["update.confirm"] = "Update from {0} to {1}?\n\nThe new version is downloaded and the program files are replaced. The data folder (settings / beatmap cache / logs) is left alone, and the app restarts when done.",
+        ["check.autoupdate"] = "Check for updates after startup",
+        ["tip.autoupdate"] = "Runs 20 seconds after startup (check only, nothing is downloaded). The first seconds are kept free for loading settings, tosu and the installed beatmap scan.",
 
         // 提示气泡
         ["tip.next"] = "Download and import the next beatmap",

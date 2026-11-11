@@ -699,6 +699,9 @@
                             </Grid>
                             <TextBlock x:Name="UpdateStatusText" FontSize="10" Margin="0,4,0,0" TextWrapping="Wrap"
                                        Foreground="{StaticResource MutedTextBrush}" />
+                            <CheckBox x:Name="AutoUpdateCheck" Content="{DynamicResource L.check.autoupdate}"
+                                      Margin="0,6,0,0" Click="AutoUpdateCheck_Click"
+                                      ToolTip="{DynamicResource L.tip.autoupdate}" />
                             <Button x:Name="ApplyUpdateButton" Content="{DynamicResource L.btn.applyupdate}"
                                     HorizontalAlignment="Left" Margin="0,6,0,0" Padding="10,3" FontSize="11"
                                     Visibility="Collapsed" Click="ApplyUpdateButton_Click" />

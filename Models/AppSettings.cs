@@ -83,6 +83,11 @@ public sealed class AppSettings
     public string MapInfoSource { get; set; } = MapInfoSources.Imported;
     /// <summary>选歌界面里再开一个谱面预览窗，跟着游戏里的预览音频滚 mania 谱面。</summary>
     public bool ShowPreview { get; set; } = true;
+    /// <summary>
+    /// 启动后过一会儿自动查一次更新（只查、不下载）。默认开；
+    /// 查的时间点往后挪是因为刚启动那几秒还要读配置、连 tosu、扫已安装谱面。
+    /// </summary>
+    public bool CheckUpdatesOnStartup { get; set; } = true;
     /// <summary>预览流速：一屏覆盖多少秒谱面（越小滚得越快）。目标是与玩家游戏内流速一致。</summary>
     public double PreviewScrollSeconds { get; set; } = 1.25;
 
