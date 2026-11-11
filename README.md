@@ -1,4 +1,4 @@
-# osu! Roam v1.5.6.1
+# osu! Roam v1.5.6.2
 
 [English](#english) · [中文](#中文)
 
@@ -15,8 +15,8 @@ keep roaming without touching it.
 
 | Package | UI language | Default download source |
 |---|---|---|
-| `osu-roam-1.5.6.1-portable.zip` | follows the system language | sayobot mirrors (China) |
-| `osu-roam-1.5.6.1-en-portable.zip` | English | catboy / beatconnect (international) |
+| `osu-roam-1.5.6.2-portable.zip` | follows the system language | sayobot mirrors (China) |
+| `osu-roam-1.5.6.2-en-portable.zip` | English | catboy / beatconnect (international) |
 
 **Companion packages:** [`OsuSv`](https://www.nuget.org/packages/OsuSv) /
 [`OsuSv.Cli`](https://www.nuget.org/packages/OsuSv.Cli) — the scroll-velocity (SV) analysis used by Roam, shipped as a
@@ -27,6 +27,22 @@ see [`docs/1.5.3-SV评估算法.md`](docs/1.5.3-SV评估算法.md) for the model
 The .NET runtime and `tosu.exe` are already inside the archive — extract and run. Each build keeps its own `data`
 folder, so **do not install one over the other**.  A fresh folder inherits the analysed-pattern library from a
 neighbouring `osu-roam*` install, so pattern data does not start from zero.
+
+## What's new in 1.5.6.2
+
+- **The app updates itself.** Settings → *Downloads & advanced* → “Version & updates” shows the current version,
+  looks up the newest release and, when there is one, downloads the portable package and swaps the program files
+  in place. `data\` (settings / beatmap cache / logs) is never touched, and the app restarts into the new version
+  by itself. A check also runs 20 seconds after startup (can be switched off) — check only, nothing is downloaded
+  until you press the button. If the proxy's exit IP has used up GitHub's anonymous 60-per-hour quota (the normal
+  case behind a game accelerator), the check retries over a direct connection.
+- **Edits under “Downloads & advanced” are stored right away** — text boxes on focus loss, checkboxes and the
+  pool-size picker on change, plus one more save just before quitting for an update. Previously that page was only
+  written when you pressed “Start roaming”, so changing something and then updating threw it away.
+- **The LN triangle draws itself** in the beatmap info panel: the outline traces around in 320 ms, then the fill
+  fades in. The finished picture is pixel-identical to before.
+- **Startup and exit animations**, and the startup work is split into four phases with a dispatcher yield between
+  them, so clicking a button right after launch no longer queues behind config/pattern parsing.
 
 ## What's new in 1.5.6.1
 
@@ -161,13 +177,25 @@ osu! 谱面漫游推荐工具，Windows / WPF / .NET 8。读你的成绩样本�
 
 | 包 | 界面语言 | 默认下载源 |
 |---|---|---|
-| `osu-roam-1.5.6.1-portable.zip` | 跟随系统 | sayobot 镜像（国内） |
-| `osu-roam-1.5.6.1-en-portable.zip` | 英文 | catboy / beatconnect（国际） |
+| `osu-roam-1.5.6.2-portable.zip` | 跟随系统 | sayobot 镜像（国内） |
+| `osu-roam-1.5.6.2-en-portable.zip` | 英文 | catboy / beatconnect（国际） |
 
 **附带产品：[`OsuSv`](https://www.nuget.org/packages/OsuSv) / [`OsuSv.Cli`](https://www.nuget.org/packages/OsuSv.Cli)** —— 谱面变速（SV）评估算法单独出的库
 和命令行（`dotnet tool install --global OsuSv.Cli`，或下 Release 里的单文件 exe）。输入 .osu 文本，输出
 不等时 / 极端度 / 背谱度 / 不适度 / 夸张度五个量，口径见 [`docs/1.5.3-SV评估算法.md`](docs/1.5.3-SV评估算法.md)。
 源码在 `src/OsuSv`、`src/OsuSv.Cli`，许可证 MIT。
+
+## 1.5.6.2 新增
+
+- **软件能自己更新了**：设置 →「下载与高级设置」→「版本与更新」显示当前版本，查 GitHub 上最新的 release，
+  有新版就下载便携包、就地替换程序文件（`data\` 里的配置 / 谱面缓存 / 日志不动），完成后自动重启到新版本。
+  启动 20 秒后还会静默查一次（可关）：只查不下载，要点了按钮才下。代理出口把 GitHub 匿名额度（60 次/小时）
+  用光时（国内开着加速器的常态）会自动改直连再试一次。
+- **「下载与高级设置」里的改动立刻落盘**：文本框失焦、勾选框和推荐池大小选择即存，点更新前再存一次。
+  以前这一页只在点「开始漫游」时才写盘，改完直接更新就会把设置丢掉。
+- **LN 三角会“画”出来**：信息窗里那条粉色三角先按周长描边（320ms），描边过半后再淡入填充；
+  画完的静止画面与之前逐像素一致。
+- **启动 / 退出动画**，并且把启动阶段切成四段、段间让出调度 —— 刚启动就连点按钮不再排在配置/键型解析后面。
 
 ## 1.5.6.1 新增
 
