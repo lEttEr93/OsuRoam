@@ -232,9 +232,14 @@ public static class UpdateService
 
     // ---- 检查 ----
 
-    private static HttpClient createClient()
+    private static HttpClient createClient(bool bypassProxy = false)
     {
-        HttpClient client = new() { Timeout = TimeSpan.FromSeconds(20) };
+        HttpClientHandler handler = new();
+        // 直连模式：连系统代理都不看，用来绕开「加速器出口 IP 被别人把额度用光」。
+        if (bypassProxy)
+            handler.UseProxy = false;
+
+        HttpClient client = new(handler) { Timeout = TimeSpan.FromSeconds(20) };
         client.DefaultRequestHeaders.UserAgent.ParseAdd(AppVersion.UserAgent);
         client.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/vnd.github+json"));
         return client;
@@ -243,14 +248,49 @@ public static class UpdateService
     /// <summary>
     /// 查最新版本。返回 null = 已经是最新；抛异常 = 查不到（网络 / 限流 / 没有可用的包）。
     /// </summary>
+    /// <summary>代理出口被 GitHub 限流了（403/429）。只在内部用来触发「改直连再试一次」。</summary>
+    private sealed class ThrottledException : Exception
+    {
+        public ThrottledException() : base("GitHub 接口限流") { }
+    }
+
+    /// <summary>
+    /// 查最新版本。返回 null = 已经是最新；抛异常 = 查不到（网络 / 限流 / 没有可用的包）。
+    ///
+    /// 先走系统代理（国内基本都开着加速器），被限流就**直连再试一次** ——
+    /// 加速器的出口 IP 是很多人共用的，60 次/小时的匿名额度经常被别人用光，
+    /// 而直连是从自己的 IP 走，通常还有额度。这个坑在 1.5.6.1 实测过：
+    /// 经代理 0/60、直连 60/60。
+    /// </summary>
     public static async Task<UpdateRelease?> CheckAsync(bool english, CancellationToken token)
     {
-        using HttpClient client = createClient();
+        try
+        {
+            return await checkOnceAsync(english, bypassProxy: false, token).ConfigureAwait(false);
+        }
+        catch (ThrottledException)
+        {
+            AppLog.Info("更新检查：代理出口被限流，改成直连再试一次");
+            try
+            {
+                return await checkOnceAsync(english, bypassProxy: true, token).ConfigureAwait(false);
+            }
+            catch (ThrottledException)
+            {
+                throw new InvalidOperationException(
+                    "GitHub 接口限流了（匿名每小时 60 次，代理和直连的额度都用光了），过一会儿再试");
+            }
+        }
+    }
+
+    private static async Task<UpdateRelease?> checkOnceAsync(bool english, bool bypassProxy, CancellationToken token)
+    {
+        using HttpClient client = createClient(bypassProxy);
         using HttpResponseMessage response = await client.GetAsync(ReleasesApi, token).ConfigureAwait(false);
 
         if (response.StatusCode == System.Net.HttpStatusCode.Forbidden ||
             response.StatusCode == System.Net.HttpStatusCode.TooManyRequests)
-            throw new InvalidOperationException("GitHub 接口限流了（每小时 60 次），过一会儿再试");
+            throw new ThrottledException();
 
         if (!response.IsSuccessStatusCode)
             throw new InvalidOperationException($"GitHub 返回 {(int)response.StatusCode} {response.ReasonPhrase}");
