@@ -33,6 +33,8 @@ public partial class MainWindow : Window
     private RecommendationItem? ingameInfoItem;
     /// <summary>窗口整体的淡入淡出位移，运行时创建（模板里的 Freezable 会被冻结）。</summary>
     private readonly TranslateTransform rootSlide = new();
+    /// <summary>启动 / 退出动画用的缩放（和 rootSlide 一起挂在 RootCard 的 TransformGroup 里）。</summary>
+    private readonly ScaleTransform rootScale = new(1, 1);
     private readonly TopmostKeeper topmostKeeper;
     private readonly ObservableCollection<RecommendationItem> recommendations = [];
     private readonly HashSet<int> sessionImportedBeatmapsetIds = [];
@@ -187,7 +189,18 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
-        RootCard.RenderTransform = rootSlide;
+        // 根卡片同时要位移和缩放：退出/隐藏动画动的是 rootSlide.Y，启动动画还要一点点放大。
+        RootCard.RenderTransform = new TransformGroup { Children = { rootScale, rootSlide } };
+        RootCard.RenderTransformOrigin = new Point(0.5, 0.5);
+        // 启动动画的起点：先藏着，Loaded 里再淡入 —— 否则窗口会先整块出现再跳一下。
+        // 截图/探针模式不玩这个：它们要在几百毫秒内就抓到完整画面。
+        if (Controls.Motion.Enabled && snapshotPath() is null)
+        {
+            RootCard.Opacity = 0;
+            rootSlide.Y = 14;
+            rootScale.ScaleX = 0.985;
+            rootScale.ScaleY = 0.985;
+        }
         MiniTitleText.Text = Loc.T("mini.nobeatmap");
         refreshMiniNextLabel();
         applyRangeTab(rangeTab);
@@ -251,11 +264,16 @@ public partial class MainWindow : Window
 
     private async void MainWindow_Loaded(object sender, RoutedEventArgs e)
     {
+        Stopwatch startup = Stopwatch.StartNew();
+        long settingsMs = 0, patternMs = 0, archiveMs = 0, uiMs = 0;
+
+        playStartupEntrance();
         AppLog.Info("osu! Roam 启动");
         AppLog.Info($"日志文件：{AppLog.CurrentPath}");
         RenderDiagnostics.LogEnvironment();
         if (StoragePaths.Note is not null)
             AppLog.Info($"存储位置：{StoragePaths.Note}");
+
         settings = await settingsStore.LoadAsync();
         if (settingsStore.LoadFailure is not null)
         {
@@ -264,8 +282,17 @@ public partial class MainWindow : Window
             setStatus("status.readfail");
             MessageBox.Show(message, "osu! Roam", MessageBoxButton.OK, MessageBoxImage.Warning);
         }
+        settingsMs = startup.ElapsedMilliseconds;
+        await yieldForInputAsync();
+
         await patternLibrary.LoadAsync();
+        patternMs = startup.ElapsedMilliseconds - settingsMs;
+        await yieldForInputAsync();
+
         await archiveStore.LoadAsync();
+        archiveMs = startup.ElapsedMilliseconds - settingsMs - patternMs;
+        await yieldForInputAsync();
+
         UpdateService.CleanupStaging();
         reportLastUpdateResult();
         UpdateVersionText.Text = Loc.F("label.version", AppVersion.Display);
@@ -294,7 +321,10 @@ public partial class MainWindow : Window
         // tag 池：先用内置/缓存的，后台再拉一次公开仓库的（失败不影响任何功能）。
         TagCatalog.Changed += onTagCatalogChanged;
         _ = refreshTagCatalogAsync();
+        await yieldForInputAsync();
         applySettingsToControls();
+        uiMs = startup.ElapsedMilliseconds - settingsMs - patternMs - archiveMs;
+        await yieldForInputAsync();
         if (!double.IsNaN(settings.WindowLeft) && !double.IsNaN(settings.WindowTop))
         {
             Left = settings.WindowLeft;
@@ -371,6 +401,12 @@ public partial class MainWindow : Window
         // 界面等半天也没有预览（那正是这两个功能的主场）。
         if (startupWebSocket)
             tosu.Start(settings.TosuWebSocketUrl);
+
+        // 启动各阶段的耗时：启动期「点了没反应」基本都出在这里的某一段上，
+        // 有了这一行才好判断是不是又变慢了。
+        AppLog.Info($"启动耗时：设置 {settingsMs}ms｜键型库 {patternMs}ms｜历史 {archiveMs}ms｜" +
+                    $"界面 {uiMs}ms｜tosu {startup.ElapsedMilliseconds - settingsMs - patternMs - archiveMs - uiMs}ms｜" +
+                    $"合计 {startup.ElapsedMilliseconds}ms");
 
         // 自动检查更新排在最后：它自己的计时器还会再等 20 秒，
         // 免得和读配置 / 起 tosu / 扫已安装谱面抢这几秒。
@@ -862,6 +898,22 @@ public partial class MainWindow : Window
         catch (Exception exception)
         {
             AppLog.Error("截图模式解析缓存谱面失败", exception);
+        }
+
+        // 开发用：--snapshot-ln 把截图条目改成面谱，用来核对 LN 三角的形状/大小/绘制动画。
+        if (Environment.GetCommandLineArgs().Any(arg => arg == "--snapshot-ln") && item.Pattern is { } face)
+        {
+            face.LnRatio = 0.36;
+            face.CoreShares = new Dictionary<string, double>
+            {
+                ["Stream"] = 0.15,
+                ["Chordstream"] = 0.10,
+                ["Jacks"] = 0.09,
+                ["Coordination"] = 0.26,
+                ["Density"] = 0.19,
+                ["Wildcard"] = 0.21
+            };
+            item.ApplyPattern(face);
         }
 
         item.ApplyDetail(item.Detail ?? new BeatmapDetail
@@ -4537,6 +4589,115 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
     }
 
     /// <summary>
+    /// 让出一次调度：启动阶段把活切成几段，排队的鼠标/键盘输入和绘制先跑。
+    /// 不加这个的话，窗口一出现就忙着读配置、建控件，用户「立刻点一下」要排队一两秒才响应。
+    /// </summary>
+    private static async Task yieldForInputAsync() =>
+        await System.Windows.Threading.Dispatcher.Yield(System.Windows.Threading.DispatcherPriority.Background);
+
+    /// <summary>
+    /// 启动动画：淡入 + 从下方轻推上来 + 0.985 → 1 的放大。
+    /// 窗口在 Loaded 之前就已经显示（否则启动那一下是空窗），所以起点在构造函数里设好。
+    /// </summary>
+    private void playStartupEntrance()
+    {
+        if (!Controls.Motion.Enabled)
+        {
+            RootCard.Opacity = 1;
+            rootSlide.Y = 0;
+            rootScale.ScaleX = rootScale.ScaleY = 1;
+            return;
+        }
+
+        try
+        {
+            DoubleAnimation fade = Controls.Motion.tween(0, 1, 300);
+            fade.FillBehavior = FillBehavior.HoldEnd;
+            fade.Completed += (_, _) =>
+            {
+                RootCard.BeginAnimation(UIElement.OpacityProperty, null);
+                RootCard.Opacity = 1;
+            };
+            RootCard.BeginAnimation(UIElement.OpacityProperty, fade);
+
+            DoubleAnimation slide = Controls.Motion.tween(14, 0, 320);
+            slide.FillBehavior = FillBehavior.HoldEnd;
+            slide.Completed += (_, _) =>
+            {
+                rootSlide.BeginAnimation(TranslateTransform.YProperty, null);
+                rootSlide.Y = 0;
+            };
+            rootSlide.BeginAnimation(TranslateTransform.YProperty, slide);
+
+            DoubleAnimation grow = Controls.Motion.tween(0.985, 1, 340);
+            grow.FillBehavior = FillBehavior.HoldEnd;
+            grow.Completed += (_, _) =>
+            {
+                rootScale.BeginAnimation(ScaleTransform.ScaleXProperty, null);
+                rootScale.BeginAnimation(ScaleTransform.ScaleYProperty, null);
+                rootScale.ScaleX = rootScale.ScaleY = 1;
+            };
+            rootScale.BeginAnimation(ScaleTransform.ScaleXProperty, grow);
+            rootScale.BeginAnimation(ScaleTransform.ScaleYProperty, grow);
+        }
+        catch (Exception exception)
+        {
+            AppLog.Error("启动动画失败", exception);
+            RootCard.Opacity = 1;
+            rootSlide.Y = 0;
+            rootScale.ScaleX = rootScale.ScaleY = 1;
+        }
+    }
+
+    /// <summary>退出动画播完了没有；为 true 时再 Close 就真的关。</summary>
+    private bool exitAnimationDone;
+    /// <summary>就地更新这类「必须马上让出 exe」的退出，不要等动画。</summary>
+    private bool exitWithoutAnimation;
+
+    /// <summary>
+    /// 退出动画：淡出 + 轻微下沉 + 缩到 0.985，然后才真正关闭。
+    /// 就地更新时走 <see cref="exitWithoutAnimation"/> 直接关（脚本在等着覆盖 exe）。
+    /// </summary>
+    protected override void OnClosing(CancelEventArgs e)
+    {
+        if (!exitAnimationDone && !exitWithoutAnimation && Controls.Motion.Enabled && IsVisible)
+        {
+            e.Cancel = true;
+            playExitAnimation();
+            return;
+        }
+
+        base.OnClosing(e);
+    }
+
+    private void playExitAnimation()
+    {
+        int token = ++playVisibilityToken;
+        try
+        {
+            DoubleAnimation fade = Controls.Motion.tween(1, 0, 170);
+            fade.FillBehavior = FillBehavior.HoldEnd;
+            fade.Completed += (_, _) =>
+            {
+                if (token != playVisibilityToken)
+                    return;
+                exitAnimationDone = true;
+                Close();
+            };
+            RootCard.BeginAnimation(UIElement.OpacityProperty, fade);
+            rootSlide.BeginAnimation(TranslateTransform.YProperty, Controls.Motion.tween(0, 10, 190));
+            rootScale.BeginAnimation(ScaleTransform.ScaleXProperty, Controls.Motion.tween(1, 0.985, 190));
+            rootScale.BeginAnimation(ScaleTransform.ScaleYProperty, Controls.Motion.tween(1, 0.985, 190));
+        }
+        catch (Exception exception)
+        {
+            AppLog.Error("退出动画失败", exception);
+            exitAnimationDone = true;
+            Close();
+        }
+    }
+
+    /// <summary>
     /// 启动后自动查一次更新。故意晚一点：刚起来的十几秒里要读配置、连 tosu、扫已安装谱面，
     /// 这时候插一次网络请求既抢 UI 线程，也容易和 tosu 抢磁盘/网络。
     /// 到点时如果正在建推荐池或正在更新，就再往后挪 20 秒（最多挪 15 次）。
@@ -4619,6 +4780,8 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
             UpdateService.Launch(plan, Environment.ProcessId);
 
             // 交给脚本了：先把跟着主窗浮着的窗口收掉，再退出，让脚本能覆盖 exe。
+            // 更新时不等退出动画 —— 脚本正等着这个进程结束。
+            exitWithoutAnimation = true;
             dismissPreview();
             dismissMapInfo();
             Application.Current.Shutdown();

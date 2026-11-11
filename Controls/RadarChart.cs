@@ -68,6 +68,14 @@ public sealed class RadarChart : FrameworkElement
         new FrameworkPropertyMetadata(1.0, FrameworkPropertyMetadataOptions.AffectsRender));
 
     /// <summary>
+    /// 粉色三角的「绘制」进度，0→1：先按周长把描边一段段画出来，再让填充淡入。
+    /// 1 表示画完（静止状态）。
+    /// </summary>
+    private static readonly DependencyProperty OverlayDrawProperty = DependencyProperty.Register(
+        "OverlayDraw", typeof(double), typeof(RadarChart),
+        new FrameworkPropertyMetadata(1.0, FrameworkPropertyMetadataOptions.AffectsRender));
+
+    /// <summary>
     /// 标签字体。XAML 里用 <c>{DynamicResource UiFont}</c> 绑定，
     /// 这样设置面板切换 osu! 字体时这里的标签也会跟着换（改了要丢缓存重排）。
     /// </summary>
@@ -174,6 +182,9 @@ public sealed class RadarChart : FrameworkElement
         cachedRings = null;
         cachedAxes = null;
         beginGrowth(values);
+        // 批量赋值期间 onOverlayChanged 被 batching 挡住，这里补一次三角的绘制动画。
+        if (HasOverlay)
+            beginOverlayDraw();
     }
 
     private static void onLabelsChanged(DependencyObject target, DependencyPropertyChangedEventArgs e)
@@ -210,8 +221,45 @@ public sealed class RadarChart : FrameworkElement
         else
         {
             chart.Cursor = Cursors.Hand;
+            if (!chart.batching)
+                chart.beginOverlayDraw();
         }
     }
+
+    /// <summary>
+    /// 三角的绘制动画：描边按周长画一圈（约 300ms），填充在后 40% 里淡入。
+    /// 只在叠加层数值真的变了时重放 —— 悬停切换标签不重画。
+    /// </summary>
+    private void beginOverlayDraw()
+    {
+        if (!Motion.Enabled)
+        {
+            BeginAnimation(OverlayDrawProperty, null);
+            SetCurrentValue(OverlayDrawProperty, 1.0);
+            return;
+        }
+
+        try
+        {
+            BeginAnimation(OverlayDrawProperty, null);
+            SetCurrentValue(OverlayDrawProperty, 1.0);
+            DoubleAnimation animation = new(0.0, 1.0, TimeSpan.FromMilliseconds(OverlayDrawMilliseconds))
+            {
+                EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut },
+                FillBehavior = FillBehavior.Stop
+            };
+            BeginAnimation(OverlayDrawProperty, animation, HandoffBehavior.SnapshotAndReplace);
+        }
+        catch (Exception exception)
+        {
+            Services.AppLog.Error("LN 三角绘制动画失败", exception);
+            BeginAnimation(OverlayDrawProperty, null);
+            SetCurrentValue(OverlayDrawProperty, 1.0);
+        }
+    }
+
+    /// <summary>三角描边画完要多久。</summary>
+    private const double OverlayDrawMilliseconds = 320.0;
 
     /// <summary>
     /// 叠加层存在时，把整个雷达圆盘（而非只是粉色三角）当作可命中区域：
@@ -409,22 +457,56 @@ public sealed class RadarChart : FrameworkElement
             // 直接按外接圆半径画，正下那个顶点会戳到七边形的边外面（视觉上像画崩了），
             // 所以乘上七边形的内切圆系数 cos(π/n)：满格时正好贴住格线。
             double overlayRadius = radius * Math.Cos(Math.PI / count);
+            Point[] vertices = new Point[3];
+            for (int index = 0; index < 3; index++)
+            {
+                double value = OverlayValues![index];
+                double scaled = double.IsFinite(value) ? Math.Clamp(value, 0, 1) : 0;
+                vertices[index] = pointAt(center, overlayRadius * scaled, OverlayAngles[index] * Math.PI / 180);
+            }
+
             StreamGeometry overlayShape = new();
             using (StreamGeometryContext geometry = overlayShape.Open())
             {
-                for (int index = 0; index < 3; index++)
-                {
-                    double value = OverlayValues![index];
-                    double scaled = double.IsFinite(value) ? Math.Clamp(value, 0, 1) : 0;
-                    Point vertex = pointAt(center, overlayRadius * scaled, OverlayAngles[index] * Math.PI / 180);
-                    if (index == 0)
-                        geometry.BeginFigure(vertex, true, true);
-                    else
-                        geometry.LineTo(vertex, true, false);
-                }
+                geometry.BeginFigure(vertices[0], true, true);
+                geometry.LineTo(vertices[1], true, false);
+                geometry.LineTo(vertices[2], true, false);
             }
             overlayShape.Freeze();
-            context.DrawGeometry(ShowOverlayLabels ? OverlayFillActiveBrush : OverlayFillBrush, OverlayPen, overlayShape);
+
+            double draw = Math.Clamp((double)GetValue(OverlayDrawProperty), 0, 1);
+            Brush fill = ShowOverlayLabels ? OverlayFillActiveBrush : OverlayFillBrush;
+
+            if (draw >= 0.999)
+            {
+                context.DrawGeometry(fill, OverlayPen, overlayShape);
+            }
+            else
+            {
+                // 描边：把三角形周长当成一条线，按进度用虚线露出一段。
+                // WPF 的 DashStyle 单位是「笔宽的倍数」，所以周长和偏移都要先除以笔宽。
+                double perimeter = distance(vertices[0], vertices[1]) +
+                                   distance(vertices[1], vertices[2]) +
+                                   distance(vertices[2], vertices[0]);
+                if (perimeter > 0.01)
+                {
+                    double unit = Math.Max(0.5, OverlayPen.Thickness);
+                    double dash = perimeter / unit;
+                    Pen pen = OverlayPen.Clone();
+                    pen.DashStyle = new DashStyle([dash, dash], dash * (1 - draw));
+                    pen.DashCap = PenLineCap.Round;
+                    context.DrawGeometry(null, pen, overlayShape);
+                }
+
+                // 填充等描边过半再淡入，看起来是「画完再上色」。
+                double fillOpacity = Math.Clamp((draw - 0.55) / 0.45, 0, 1);
+                if (fillOpacity > 0.01)
+                {
+                    context.PushOpacity(fillOpacity);
+                    context.DrawGeometry(fill, null, overlayShape);
+                    context.Pop();
+                }
+            }
         }
 
         if (ShowOverlayLabels)
@@ -572,6 +654,13 @@ public sealed class RadarChart : FrameworkElement
 
     private static Point pointAt(Point center, double radius, double angleRadians) =>
         new(center.X + radius * Math.Cos(angleRadians), center.Y + radius * Math.Sin(angleRadians));
+
+    private static double distance(Point a, Point b)
+    {
+        double dx = a.X - b.X;
+        double dy = a.Y - b.Y;
+        return Math.Sqrt(dx * dx + dy * dy);
+    }
 
     private FormattedText format(string text, double pixelsPerDip) =>
         new(text, CultureInfo.CurrentUICulture, FlowDirection.LeftToRight,
