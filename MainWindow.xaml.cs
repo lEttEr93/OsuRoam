@@ -134,6 +134,13 @@ public partial class MainWindow : Window
     /// </summary>
     private static readonly TimeSpan PoolPublishInterval = TimeSpan.FromMilliseconds(1500);
 
+    /// <summary>
+    /// 候选池的水位：够格的「还没给过」候选攒到这里就不再烧预算。
+    /// 以前是池大小 × 2（5 张池子 = 10 首），点十来次下一首就见底；现在按池大小放大，
+    /// 但夹在 20–60 之间 —— 每首都要抓一份 .osu 解析，水位太高会让后台一直跑。
+    /// </summary>
+    private int candidateWaterLevel() => Math.Clamp(Math.Max(1, settings.PoolSize) * 6, 20, 60);
+
     /// <summary>准入每批的抓取预算（水位驱动的补给循环一批一批地跑）。</summary>
     private const int AdmissionBudgetPerRound = 12;
     /// <summary>准入每批的截止秒数。</summary>
@@ -597,7 +604,7 @@ public partial class MainWindow : Window
                 candidateIds.Add(item.BeatmapsetId);
         }
 
-        List<PoolRow> candidates = [];
+        List<PoolRow> candidateRows = [];
         foreach (int setId in candidateIds)
         {
             bool inPool = poolById.TryGetValue(setId, out RecommendationItem? pooled);
@@ -629,15 +636,32 @@ public partial class MainWindow : Window
             string state = inPool
                 ? (pooled!.IsFallback ? "补位" : "推荐中")
                 : consumed.Contains(setId) ? "已给过" : "候选";
-            candidates.Add(new PoolRow(title, subtitle, starText, tagLine, reason, state, setId.ToString()));
+            candidateRows.Add(new PoolRow(title, subtitle, starText, tagLine, reason, state, setId.ToString()));
         }
 
-        // 推荐池里的卡片排最前面（顺序和主窗一致），其余按星级从近到远。
-        candidates.Sort((left, right) =>
+        // 顺序 = 主窗的推荐池顺序（前几张）+ 引擎对「候选池」的真实排序（后面的）。
+        // 以前后面那截没排，用的是 HashSet 的遍历顺序 —— 看起来就是「排序不行」。
+        HashSet<int> poolOrder = [.. recommendations.Select(item => item.BeatmapsetId)];
+        List<int> lowerPriority =
+        [
+            .. settings.RecommendationHistory.Where(id => !poolOrder.Contains(id)),
+            .. sessionImportedBeatmapsetIds.Where(id => !poolOrder.Contains(id))
+        ];
+        Dictionary<int, int> rankOf = [];
+        List<OsuBeatmapset> freshSets = [.. candidates.Where(set => !consumed.Contains(set.Id) && !poolOrder.Contains(set.Id))];
+        IReadOnlyList<RecommendationItem> ranked = rankPool(
+            freshSets, lowerPriority, relaxed: false, limit: Math.Max(20, candidateWaterLevel() + 20));
+        for (int index = 0; index < ranked.Count; index += 1)
+            rankOf[ranked[index].BeatmapsetId] = index;
+        candidateRows.Sort((left, right) =>
         {
             int leftRank = indexOfPoolRow(left, poolById);
             int rightRank = indexOfPoolRow(right, poolById);
-            return leftRank != rightRank ? leftRank.CompareTo(rightRank) : 0;
+            if (leftRank != rightRank)
+                return leftRank.CompareTo(rightRank);
+            int leftScore = int.TryParse(left.Key, out int leftId) && rankOf.TryGetValue(leftId, out int lr) ? lr : int.MaxValue;
+            int rightScore = int.TryParse(right.Key, out int rightId) && rankOf.TryGetValue(rightId, out int rr) ? rr : int.MaxValue;
+            return leftScore.CompareTo(rightScore);
         });
 
         // ---- 推荐池：正式卡片 + 引擎给的推荐理由 ----
@@ -656,16 +680,17 @@ public partial class MainWindow : Window
 
         int judged = judgedSetCount();
         string header = $"总池 {searchResults.Count}｜已判 {judged}（达标 {admittedSetIds.Count}，"
-                        + $"不达标 {patternMismatchSetIds.Count}）｜未消费达标 {freshQualifiedCandidates()}"
+                        + $"不达标 {patternMismatchSetIds.Count}）｜未消费达标 {freshQualifiedCandidates()}/{candidateWaterLevel()}（水位）"
                         + $"｜推荐池 {recommendations.Count}/{Math.Max(1, settings.PoolSize)}"
                         + $"｜键型闸门 {(usesPatternGate() ? "开" : "关")}";
         string totalNote = $"总池：{searchResults.Count} 个谱面集（未判 {Math.Max(0, searchResults.Count - judged)} 个）";
-        string candidateNote = $"候选：达标 {admittedSetIds.Count}，其中未消费 {freshQualifiedCandidates()}，"
+        string candidateNote = $"候选：达标 {admittedSetIds.Count}，其中未消费 {freshQualifiedCandidates()}"
+                               + $"（水位 {candidateWaterLevel()}，到水位就暂停判键型），"
                                + $"已给过 {admittedSetIds.Count(id => consumed.Contains(id))}；"
                                + $"补位卡 {recommendations.Count(item => item.IsFallback)}";
         string recommendedNote = $"推荐池：{recommendations.Count}/{Math.Max(1, settings.PoolSize)} 张"
                                  + (candidateSupplyRunning ? "｜候选补给进行中" : string.Empty);
-        return new PoolsSnapshot(header, total, candidates, recommended, totalNote, candidateNote, recommendedNote);
+        return new PoolsSnapshot(header, total, candidateRows, recommended, totalNote, candidateNote, recommendedNote);
     }
 
     /// <summary>候选池里显示用的那一条：从当前候选/搜索结果里按 id 找回来。</summary>
@@ -1480,7 +1505,7 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
         candidateSupplyRunning = true;
         try
         {
-            int wanted = Math.Max(1, settings.PoolSize) * 2;
+            int wanted = candidateWaterLevel();
             // 上限只是防逻辑出错时空转，正常情况远用不到。
             for (int guard = 0; guard < 400; guard += 1)
             {
@@ -1562,7 +1587,7 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
         int generation = poolGeneration;
         try
         {
-            int wanted = Math.Max(1, settings.PoolSize) * 2;
+            int wanted = candidateWaterLevel();
             Progress<(int Verified, int Hits)> progress = new(value =>
             {
                 if (generation == poolGeneration)
@@ -1848,7 +1873,7 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
         schedulePoolDownloads();
 
         // 水位不够（池里还有补位/给过的卡片）就继续从总池筛，这一条是「点下一首不再原地打转」的关键。
-        if (usesPatternGate() && isRunning && freshQualifiedCandidates() < Math.Max(1, settings.PoolSize) * 2)
+        if (usesPatternGate() && isRunning && freshQualifiedCandidates() < candidateWaterLevel())
             startAdmission();
     }
 
@@ -1866,9 +1891,10 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
         bool relaxed,
         IReadOnlyList<RecommendationItem>? alreadyPicked = null,
         bool relaxInstalledExclusion = false,
-        IReadOnlySet<int>? excludeSetIds = null)
+        IReadOnlySet<int>? excludeSetIds = null,
+        int? limit = null)
     {
-        int wanted = Math.Max(1, settings.PoolSize) - (alreadyPicked?.Count ?? 0);
+        int wanted = limit ?? Math.Max(1, settings.PoolSize) - (alreadyPicked?.Count ?? 0);
         if (wanted <= 0 || pool.Count == 0)
             return [];
         HashSet<int> excluded = [.. alreadyPicked?.Select(item => item.BeatmapsetId) ?? []];
