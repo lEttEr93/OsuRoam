@@ -134,12 +134,18 @@ public partial class MainWindow : Window
     /// </summary>
     private static readonly TimeSpan PoolPublishInterval = TimeSpan.FromMilliseconds(1500);
 
-    /// <summary>准入最多跑几轮（每轮最多 AdmissionBudgetPerRound 次抓取）。</summary>
-    private const int AdmissionRounds = 3;
-    /// <summary>准入每轮的抓取预算。</summary>
+    /// <summary>准入每批的抓取预算（水位驱动的补给循环一批一批地跑）。</summary>
     private const int AdmissionBudgetPerRound = 12;
-    /// <summary>准入每轮的截止秒数。</summary>
+    /// <summary>准入每批的截止秒数。</summary>
     private const int AdmissionSecondsPerRound = 8;
+    /// <summary>总池扩充时每次换搜索翻几页（新谱面集靠它持续进货）。</summary>
+    private const int TopUpSearchPages = 3;
+    /// <summary>候选补给循环在跑（同一时刻只允许一个）。</summary>
+    private bool candidateSupplyRunning;
+    /// <summary>扩充总池的搜索在跑。</summary>
+    private bool topUpSearchBusy;
+    /// <summary>上次「总池挖空」的时间：一分钟内不再重试，避免空转发搜索结果。</summary>
+    private DateTime supplyGiveUpUtc = DateTime.MinValue;
     /// <summary>流式发布间隔：验证过程中每隔这么久重排一次池子。</summary>
     private static readonly TimeSpan StreamingPublishInterval = TimeSpan.FromMilliseconds(400);
     private readonly ObservableCollection<string> visibleTags = [];
@@ -325,6 +331,15 @@ public partial class MainWindow : Window
         applySettingsToControls();
         uiMs = startup.ElapsedMilliseconds - settingsMs - patternMs - archiveMs;
         await yieldForInputAsync();
+
+        // 开发用：--pool-probe 跑一遍「搜索 → 候选补给 → 排池」，把漏斗写进日志后退出。
+        // 用来验证「候选池会一直从总池进货」这条路（不进 osu!，不导入任何谱面）。
+        if (Environment.GetCommandLineArgs().Any(argument => argument == "--pool-probe"))
+        {
+            await runPoolProbeAsync();
+            Close();
+            return;
+        }
 
         // 开发用：--persist-test 验证「改完就存」这条路（改两个值、写完读回文件、再还原），
         // 复现 1.5.6.1 那个「改完直接更新，配置全丢」的问题。
@@ -1103,6 +1118,8 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
             poolGeneration += 1;
             recommendationSeed = Random.Shared.Next();
             keywordBeatmapsetIds.Clear();
+            // 新一轮「开始漫游」：之前那次挖空不再算数，允许立刻重新补给。
+            supplyGiveUpUtc = DateTime.MinValue;
             refreshTagList();
 
             HashSet<int> candidateIds = [];
@@ -1224,80 +1241,192 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
     /// <summary>
     /// 候选准入：**先判键型，再决定要不要进候选**。
     ///
-    /// 流程：搜索结果先进 <see cref="searchResults"/>（全部待判），这里逐张抓 `.osu`、解析键型，
-    /// 占比达标的进候选（`admittedSetIds`），不达标的记为备用（`patternMismatchSetIds`），
-    /// 严格池不够时才会用备用。够格候选攒到 `PoolSize × 2` 就停手，不再烧预算。
+    /// 流程：搜索结果先进 <see cref="searchResults"/>（总池，全部待判），这里逐张抓 `.osu`、解析键型，
+    /// 占比达标的进候选（`admittedSetIds`），不达标的记为备用（`patternMismatchSetIds`）。
+    ///
+    /// 1.5.6.3 起改成**水位驱动、可以反复续命**（以前是最多 3 轮、某一轮没找到达标就收工，
+    /// 现场表现为：700 个候选只判了 30 多张就关闸，推荐池永远在十几首里循环）：
+    /// 水位 = 「还没给过玩家的达标候选数」，目标 <see cref="PoolSize"/> × 2；
+    /// 一批一批地判，判到水位够了才停；总池里没判过的判完了就换一轮搜索继续扩总池。
+    /// 只有「总池挖空 + 换搜索也拿不到新谱面」才收手，并明确说一声。
     /// </summary>
-    private void startAdmission()
+    private void startAdmission() => _ = ensureCandidateSupplyAsync();
+
+    private async Task ensureCandidateSupplyAsync()
     {
-        if (!usesPatternGate() || admitting || searchResults.Count == 0)
+        if (!usesPatternGate() || candidateSupplyRunning || profile is null)
             return;
         if (sessionCancellation.IsCancellationRequested)
             return;
-        admitting = true;
-        _ = admitPatternsAsync(poolGeneration);
-    }
+        // 刚放弃过就别立刻重来：否则「补给→重排→再补给」会在总池真挖空时原地打转，
+        // 每次都要发一轮搜索请求。一分钟后再试。
+        if (DateTime.UtcNow - supplyGiveUpUtc < TimeSpan.FromMinutes(1))
+            return;
 
-    private async Task admitPatternsAsync(int generation)
-    {
+        candidateSupplyRunning = true;
         try
         {
             int wanted = Math.Max(1, settings.PoolSize) * 2;
-            System.Diagnostics.Stopwatch clock = System.Diagnostics.Stopwatch.StartNew();
-            for (int round = 0; round < AdmissionRounds; round += 1)
+            // 上限只是防逻辑出错时空转，正常情况远用不到。
+            for (int guard = 0; guard < 400; guard += 1)
             {
-                if (generation != poolGeneration || sessionCancellation.IsCancellationRequested)
+                // 这里不卡 isRunning：搜索流式回调就在 isRunning 置位之前开始补给了。
+                if (sessionCancellation.IsCancellationRequested)
                     return;
-                if (admittedSetIds.Count >= wanted || searchResults.Count == 0)
+                if (freshQualifiedCandidates() >= wanted)
                     return;
-                int before = admittedSetIds.Count;
-                Progress<(int Verified, int Hits)> progress = new(value =>
-                {
-                    if (generation == poolGeneration)
-                        setStatus("status.admitting", value.Verified, admittedSetIds.Count, wanted);
-                });
-                PrefetchResult result = await PatternPrefetcher.RunAsync(
-                    searchResults, settings, patternLibrary,
-                    (beatmapId, token) => osuFileFetcher.TryFetchAsync(beatmapId, token),
-                    AdmissionBudgetPerRound, TimeSpan.FromSeconds(AdmissionSecondsPerRound),
-                    progress, sessionCancellation.Token, keywordBeatmapsetIds,
-                    onIngested: admitJudgedChart, targetOverride: wanted);
-                if (result.Parsed > 0)
-                    await patternLibrary.SaveAsync();
-                if (admittedSetIds.Count == before)
-                {
-                    AppLog.Info($"候选准入：第 {round + 1} 轮没捞到达标候选（解析 {result.Parsed}），停止判定");
-                    return;
-                }
+
+                if (await admitOneBatchAsync())
+                    continue;
+
+                if (await extendTotalPoolAsync())
+                    continue;
+
+                int fresh = freshQualifiedCandidates();
+                supplyGiveUpUtc = DateTime.UtcNow;
+                AppLog.Info($"候选补给：总池挖完了（{searchResults.Count} 个谱面集，已判 {judgedSetCount()}，"
+                            + $"未消费达标 {fresh} 首），换搜索也没捞到新的");
+                setStatus("status.admissionempty", fresh);
+                return;
             }
-            clock.Stop();
-            AppLog.Info($"候选准入结束：达标 {admittedSetIds.Count} 个谱面集，备用 {patternMismatchSetIds.Count} 个（{clock.ElapsedMilliseconds} ms）");
         }
         catch (OperationCanceledException)
         {
         }
         catch (Exception exception)
         {
-            AppLog.Error("候选准入失败", exception);
+            AppLog.Error("候选补给失败", exception);
+        }
+        finally
+        {
+            candidateSupplyRunning = false;
+            rebuildCandidates();
+            await publishPoolAsync();
+            if (admittedSetIds.Count == 0 && patternMismatchSetIds.Count > 0 && recommendations.Count == 0)
+            {
+                AppLog.Info($"候选补给：判定 {patternMismatchSetIds.Count} 张都不达标，没有可用候选");
+                setStatus("status.admissionempty", patternMismatchSetIds.Count);
+            }
+            else if (settings.AutoDownload && currentRoamItem is null && playingItem is null &&
+                     preparedNextItem is null && recommendations.Count > 0)
+            {
+                // 补给比首曲预下载慢：这里补一次，否则池子填好了却没人开始下载。
+                _ = prepareFirstItemAsync();
+            }
+        }
+    }
+
+    /// <summary>已判定的谱面集数（达标 + 不达标）。</summary>
+    private int judgedSetCount() => admittedSetIds.Count + patternMismatchSetIds.Count;
+
+    /// <summary>「还没给过玩家」的达标候选：本次会话导入过的、玩过的都不算。</summary>
+    private int freshQualifiedCandidates()
+    {
+        HashSet<int> consumed = consumedSetIds();
+        return admittedSetIds.Count(id => !consumed.Contains(id));
+    }
+
+    /// <summary>本次会话已经给过玩家的（导入过、玩过）谱面集。候选池按它分「新的」和「给过的」两档。</summary>
+    private HashSet<int> consumedSetIds()
+    {
+        HashSet<int> consumed = [.. sessionImportedBeatmapsetIds];
+        if (profile is not null)
+            consumed.UnionWith(profile.PlayedBeatmapsetIds());
+        return consumed;
+    }
+
+    /// <summary>
+    /// 抓一批（最多 <see cref="AdmissionBudgetPerRound"/> 张）判键型，返回这一批有没有真的判到东西。
+    /// 判到的结果由 <see cref="admitJudgedChart"/> 异步灌进集合，所以这里只认「解析了几张」。
+    /// </summary>
+    private async Task<bool> admitOneBatchAsync()
+    {
+        if (admitting || searchResults.Count == 0)
+            return false;
+
+        admitting = true;
+        int generation = poolGeneration;
+        try
+        {
+            int wanted = Math.Max(1, settings.PoolSize) * 2;
+            Progress<(int Verified, int Hits)> progress = new(value =>
+            {
+                if (generation == poolGeneration)
+                    setStatus("status.admitting", value.Verified, admittedSetIds.Count, wanted);
+            });
+            PrefetchResult result = await PatternPrefetcher.RunAsync(
+                searchResults, settings, patternLibrary,
+                (beatmapId, token) => osuFileFetcher.TryFetchAsync(beatmapId, token),
+                AdmissionBudgetPerRound, TimeSpan.FromSeconds(AdmissionSecondsPerRound),
+                progress, sessionCancellation.Token, keywordBeatmapsetIds,
+                onIngested: admitJudgedChart, targetOverride: wanted);
+            if (result.Parsed > 0)
+                await patternLibrary.SaveAsync();
+
+            // admitJudgedChart 是往 UI 线程投的工作，让出一拍等它落袋，否则水位判断会读到旧值。
+            await System.Windows.Threading.Dispatcher.Yield(System.Windows.Threading.DispatcherPriority.Background);
+            return result.Parsed > 0;
         }
         finally
         {
             admitting = false;
-            if (generation == poolGeneration)
-            {
-                await publishPoolAsync();
-                if (admittedSetIds.Count == 0)
+        }
+    }
+
+    /// <summary>
+    /// 扩充总池：换一轮搜索再拿一批谱面集。
+    /// 总池<strong>不是</strong>固定的一批结果 —— rotation 变了排序和关键字提示就变，
+    /// 同一组筛选能捞到的谱面集会不断更新，所以「用完」是极端情况。
+    /// </summary>
+    private async Task<bool> extendTotalPoolAsync()
+    {
+        if (topUpSearchBusy || profile is null)
+            return false;
+
+        topUpSearchBusy = true;
+        try
+        {
+            HashSet<int> known = [.. searchResults.Select(set => set.Id)];
+            int added = 0;
+            settings.SearchRotation += 1;
+            await api.SearchCandidatesInBatchesAsync(
+                settings,
+                settings.MinimumStars,
+                settings.MaximumStars,
+                async (batch, fromKeyword) =>
                 {
-                    AppLog.Info($"候选准入：判定 {patternMismatchSetIds.Count} 张都不达标，没有可用候选");
-                    setStatus("status.admissionempty", patternMismatchSetIds.Count);
-                }
-                else if (settings.AutoDownload && playingItem is null && preparedNextItem is null &&
-                         recommendations.Count > 0)
-                {
-                    // 准入比首曲预下载慢：这里补一次，否则池子填好了却没人开始下载。
-                    _ = prepareFirstItemAsync();
-                }
-            }
+                    foreach (OsuBeatmapset set in batch)
+                    {
+                        if (!known.Add(set.Id))
+                            continue;
+                        searchResults.Add(set);
+                        added += 1;
+                        if (fromKeyword)
+                            keywordBeatmapsetIds.Add(set.Id);
+                    }
+                    rebuildCandidates();
+                    await Task.CompletedTask;
+                },
+                sessionCancellation.Token,
+                wantsMore: () => true,
+                maximumPages: TopUpSearchPages,
+                enoughStrictCandidates: () => false);
+            if (added > 0)
+                AppLog.Info($"候选补给：换一轮搜索（rotation={settings.SearchRotation}）→ 新增 {added} 个谱面集，总池 {searchResults.Count}");
+            return added > 0;
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception exception)
+        {
+            AppLog.Error("候选补给：扩充总池失败", exception);
+            return false;
+        }
+        finally
+        {
+            topUpSearchBusy = false;
         }
     }
 
@@ -1419,29 +1548,49 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
         if (settings.ExcludeRecentlyPlayed)
             lowerPriority.AddRange(profile.PlayedBeatmapsetIds().Where(id => !inPool.Contains(id)));
 
-        // 严格条件先排；不够再用「放宽」补位（够格的谱面永远排在补位的前面，
-        // 后续翻页/验证找到够格的就自然把它们替换掉）。
-        // 严格段只用「键型达标」的候选；备用（键型不达标）留给下面补位。
+        // 候选池按「还没给过 / 给过了」分两档（用户的设计）：
+        //   新的达标候选占候选池的位置，给过玩家的只排在最后当备用、不占位，
+        //   一旦有新的够格谱面就把它们挤掉。
+        HashSet<int> consumed = consumedSetIds();
+        List<OsuBeatmapset> fresh = [];
+        List<OsuBeatmapset> spent = [];
+        foreach (OsuBeatmapset set in candidates)
+            (consumed.Contains(set.Id) ? spent : fresh).Add(set);
+
+        // 严格条件先排「还没给过的」；不够再放宽 tag，再不够才动用已给过的。
+        //
+        // 注意：推荐池是「只加不换」的，所以前期用补位卡塞进去的坑位以后换不掉 ——
+        // 补给循环还在跑的时候只用新的够格候选填，等它把水加够（或确认总池挖空）再考虑补位。
+        bool supplyGrowing = candidateSupplyRunning;
         IReadOnlyList<RecommendationItem> desired = rankPool(
-            lowerPriority, relaxed: false, excludeSetIds: usesPatternGate() ? patternMismatchSetIds : null);
+            fresh, lowerPriority, relaxed: false, excludeSetIds: usesPatternGate() ? patternMismatchSetIds : null);
         bool relaxedInstalled = false;
-        if (desired.Count < Math.Max(1, settings.PoolSize))
+        if (!supplyGrowing)
         {
-            IReadOnlyList<RecommendationItem> filler = rankPool(lowerPriority, relaxed: true, alreadyPicked: desired);
-            if (filler.Count > 0)
-                desired = [.. desired, .. filler];
+            if (desired.Count < Math.Max(1, settings.PoolSize))
+                desired = [.. desired, .. rankPool(fresh, lowerPriority, relaxed: true, alreadyPicked: desired)];
+            if (desired.Count < Math.Max(1, settings.PoolSize))
+                desired = [.. desired, .. rankPool(spent, lowerPriority, relaxed: false, alreadyPicked: desired)];
+            if (desired.Count < Math.Max(1, settings.PoolSize))
+                desired = [.. desired, .. rankPool(spent, lowerPriority, relaxed: true, alreadyPicked: desired)];
         }
         // 一个都不剩、而「排除已安装谱面」正开着：这一步大概是元凶。
         // 与其给个空池子，不如放开这一条并明说 —— 已安装只是「下过」，不是「不喜欢」。
         if (desired.Count == 0 && settings.ExcludeInstalledBeatmaps && LocalBeatmapLibrary.HasData)
         {
-            desired = rankPool(lowerPriority, relaxed: true, relaxInstalledExclusion: true);
+            desired = rankPool(fresh, lowerPriority, relaxed: true, relaxInstalledExclusion: true);
+            if (desired.Count == 0)
+                desired = rankPool(spent, lowerPriority, relaxed: true, relaxInstalledExclusion: true);
             relaxedInstalled = desired.Count > 0;
         }
 
-        bool historyChanged = reconcilePool(desired);
+        bool historyChanged = fillPool(desired);
         updatePoolVisibility();
         int fallbackCount = recommendations.Count(item => item.IsFallback);
+        int freshInPool = recommendations.Count(item => !item.IsFallback && !consumed.Contains(item.BeatmapsetId));
+        AppLog.Info($"候选池：总池 {searchResults.Count}｜已判 {judgedSetCount()}（达标 {admittedSetIds.Count}）"
+                    + $"｜未消费达标 {freshQualifiedCandidates()}｜已给过 {recommendations.Count - freshInPool}"
+                    + $"｜推荐池 {recommendations.Count}/{Math.Max(1, settings.PoolSize)}｜补位 {fallbackCount}");
         // 池子空着但候选不为空：说明候选全被筛选条件挡掉了（最常见是「排除已安装谱面」）。
         // 这时候只说「没有候选谱面」等于把用户堵死，得把漏斗数字说出来。
         if (desired.Count == 0 && recommendations.Count == 0)
@@ -1483,17 +1632,22 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
         publishedLibraryRevision = patternLibrary.Revision;
         publishedPoolSignature = poolSignature();
         schedulePoolDownloads();
+
+        // 水位不够（池里还有补位/给过的卡片）就继续从总池筛，这一条是「点下一首不再原地打转」的关键。
+        if (usesPatternGate() && isRunning && freshQualifiedCandidates() < Math.Max(1, settings.PoolSize) * 2)
+            startAdmission();
     }
 
     /// <summary>
-    /// 按当前设置排一次池子。
+    /// 从给定的一批候选里排一次。
     ///
-    /// <paramref name="relaxed"/> = false 时是严格条件：白名单 tag 是硬筛、已推荐/已玩过的降权（通常直接排除）。
-    /// = true 时是「补位」条件：白名单 tag 降级成加权（tagFit 仍然加分）、允许已玩过的谱面上来，
-    /// 用来把凑不满的名额补上，并标记 <see cref="RecommendationItem.IsFallback"/> 以便后面替换。
+    /// <paramref name="pool"/> 由调用方按「新的 / 给过玩家的」分好档传进来（见 <see cref="publishPoolAsync"/>）。
+    /// <paramref name="relaxed"/> = false 是严格条件：白名单 tag 硬筛、已推荐过的降权；
+    /// = true 是补位：tag 降级成加权（tagFit 仍加分）、不再把历史当排除项，并标记 <see cref="RecommendationItem.IsFallback"/>。
     /// <paramref name="relaxInstalledExclusion"/> 进一步放开「排除已安装谱面」（只在严格条件一个都不剩时用）。
     /// </summary>
     private IReadOnlyList<RecommendationItem> rankPool(
+        IReadOnlyList<OsuBeatmapset> pool,
         List<int> lowerPriority,
         bool relaxed,
         IReadOnlyList<RecommendationItem>? alreadyPicked = null,
@@ -1501,13 +1655,13 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
         IReadOnlySet<int>? excludeSetIds = null)
     {
         int wanted = Math.Max(1, settings.PoolSize) - (alreadyPicked?.Count ?? 0);
-        if (wanted <= 0)
+        if (wanted <= 0 || pool.Count == 0)
             return [];
         HashSet<int> excluded = [.. alreadyPicked?.Select(item => item.BeatmapsetId) ?? []];
         if (excludeSetIds is not null)
             excluded.UnionWith(excludeSetIds);
         return recommendationEngine.RankAvoidingHistory(
-            candidates, profile!, settings, settings.MinimumStars, settings.MaximumStars,
+            pool, profile!, settings, settings.MinimumStars, settings.MaximumStars,
             excluded,
             // 补位时不再把「已推荐/已玩」当成排除项，否则候选不足时永远补不满。
             relaxed ? [] : lowerPriority,
@@ -1523,74 +1677,35 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
     }
 
     /// <summary>
-    /// 把池子对齐到新的排序。返回是否有卡片新进池（需要记历史 / 存设置）。
-    /// 已经加载过封面、展开过详情的同 id 卡片直接复用，避免重排时闪烁。
+    /// 把新排出来的候选**只往里加**，已有的卡片一张都不动（用户的设计：推荐池的内容不允许随意改变，
+    /// 候选池的顺序才可以随时变）。返回是否有卡片新进池（需要记历史 / 存设置）。
+    ///
+    /// 以前这里是「按新排序整体对齐」，所以后台每验完一批候选就换掉几张卡 —— 表现为池子里
+    /// 的歌自己变、点下一首也总在同一批里打转。
     /// </summary>
-
-    private bool reconcilePool(IReadOnlyList<RecommendationItem> desired)
+    private bool fillPool(IReadOnlyList<RecommendationItem> desired)
     {
-        HashSet<int> pinned = pinnedBeatmapsetIds();
-        List<RecommendationItem> next = PoolReconciler.Build(
-            recommendations, desired, pinned, Math.Max(1, settings.PoolSize));
-        if (PoolReconciler.SameSequence(recommendations, next))
+        int wanted = Math.Max(1, settings.PoolSize);
+        if (recommendations.Count >= wanted || desired.Count == 0)
             return false;
 
         HashSet<int> known = [.. recommendations.Select(item => item.BeatmapsetId)];
-        // 原地对齐：整表 Clear 再重填会让列表闪烁、滚动位置归零，所以尽量只做 Move / Insert。
-        for (int index = 0; index < next.Count; index += 1)
+        bool added = false;
+        foreach (RecommendationItem item in desired)
         {
-            int existing = indexOfBeatmapset(next[index].BeatmapsetId, index);
-            if (existing == index)
-                continue;
-            if (existing > index)
-                recommendations.Move(existing, index);
-            else
-                recommendations.Insert(index, next[index]);
-        }
-        while (recommendations.Count > next.Count)
-            recommendations.RemoveAt(recommendations.Count - 1);
-
-        bool recorded = false;
-        foreach (RecommendationItem item in next)
-        {
+            if (recommendations.Count >= wanted)
+                break;
             if (!known.Add(item.BeatmapsetId))
                 continue;
+            recommendations.Add(item);
             settings.RecordRecommendation(item.BeatmapsetId);
             item.LoadCover();
-            recorded = true;
+            added = true;
         }
-        AppLog.Info($"推荐池重排：{recommendations.Count} 首（锁定 {pinned.Count}）");
-        return recorded;
-    }
 
-    /// <summary>池子里这个谱面集现在的位置；从 from 开始往后找（前面已经对齐了）。</summary>
-    private int indexOfBeatmapset(int beatmapsetId, int from)
-    {
-        for (int index = from; index < recommendations.Count; index += 1)
-        {
-            if (recommendations[index].BeatmapsetId == beatmapsetId)
-                return index;
-        }
-        return -1;
-    }
-
-    /// <summary>这几张卡片不能被重排换掉：正在玩、正在下载 / 导入、已预约下一首。</summary>
-    private HashSet<int> pinnedBeatmapsetIds()
-    {
-        HashSet<int> pinned = [];
-        foreach (RecommendationItem? item in new[] { playingItem, preparedNextItem, currentRoamItem })
-        {
-            if (item is not null)
-                pinned.Add(item.BeatmapsetId);
-        }
-        foreach (RecommendationItem item in recommendations)
-        {
-            if (item.DownloadState is DownloadState.Queued or DownloadState.Downloading or DownloadState.Importing)
-                pinned.Add(item.BeatmapsetId);
-        }
-        // 正在下的一律锁住：中途换掉只会白下（取消路径会删半截文件，但带宽已经花掉了）。
-        pinned.UnionWith(poolDownloads.Keys);
-        return pinned;
+        if (added)
+            AppLog.Info($"推荐池补入 {recommendations.Count}/{wanted} 首（已有卡片不动）");
+        return added;
     }
 
     private void DetailButton_Click(object sender, RoutedEventArgs e)
@@ -4720,6 +4835,86 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
 
     private async void SettingsControl_Changed(object sender, RoutedEventArgs e) =>
         await persistSettingsQuietlyAsync("高级设置改动");
+
+    /// <summary>
+    /// 开发用：--pool-probe。
+    /// 用真实账号设置跑一遍「搜索 → 候选补给（水位驱动）→ 排池」，把每一层的数字写进日志：
+    /// 总池 / 已判 / 达标 / 未消费达标 / 推荐池内容。用来验证候选池是不是真的会一直从总池进货。
+    /// </summary>
+    private async Task runPoolProbeAsync()
+    {
+        System.Diagnostics.Stopwatch clock = System.Diagnostics.Stopwatch.StartNew();
+        try
+        {
+            string secret = ClientSecretBox.Password;
+            api.Configure(settings.ClientId, secret);
+            int? maniaKeys = settings.Mode == "mania" ? settings.ManiaKeys : null;
+            profile = await api.BuildProfileAsync(settings.Username, settings.Mode, maniaKeys, sessionCancellation.Token);
+            AppLog.Info($"池子自检：玩家 {profile.User.Username}，模式 {settings.Mode}，池大小 {settings.PoolSize}，"
+                        + $"键型闸门 {(usesPatternGate() ? "开" : "关")}");
+
+            searchResults = [];
+            candidates = [];
+            admittedSetIds.Clear();
+            patternMismatchSetIds.Clear();
+            recommendations.Clear();
+            HashSet<int> known = [];
+            await api.SearchCandidatesInBatchesAsync(
+                settings, settings.MinimumStars, settings.MaximumStars,
+                (batch, fromKeyword) =>
+                {
+                    foreach (OsuBeatmapset set in batch)
+                    {
+                        if (!known.Add(set.Id))
+                            continue;
+                        searchResults.Add(set);
+                        if (fromKeyword)
+                            keywordBeatmapsetIds.Add(set.Id);
+                    }
+                    rebuildCandidates();
+                    return Task.CompletedTask;
+                },
+                sessionCancellation.Token,
+                wantsMore: () => true,
+                maximumPages: 8,
+                enoughStrictCandidates: () => false);
+            AppLog.Info($"池子自检：总池 {searchResults.Count} 个谱面集（搜索 {clock.ElapsedMilliseconds} ms）");
+
+            await ensureCandidateSupplyAsync();
+            await publishPoolAsync();
+            AppLog.Info($"池子自检：补给后 总池 {searchResults.Count}｜已判 {judgedSetCount()}"
+                        + $"（达标 {admittedSetIds.Count}）｜未消费达标 {freshQualifiedCandidates()}"
+                        + $"｜推荐池 {recommendations.Count}（{clock.ElapsedMilliseconds} ms）");
+            foreach (RecommendationItem item in recommendations)
+                AppLog.Info($"池子自检：推荐池 - {item.DisplayTitle}{(item.IsFallback ? "（补位）" : string.Empty)}");
+
+            // 模拟连点「下一首」：把池首当成已给过并移出，再补齐一次。
+            // 关键看两件事：①补进来的是不是新谱面；②刚移出的那张会不会又被补回来。
+            List<string> consumedTitles = [];
+            for (int step = 1; step <= 4; step += 1)
+            {
+                RecommendationItem? taken = recommendations.FirstOrDefault();
+                if (taken is null)
+                    break;
+                consumedTitles.Add(taken.DisplayTitle);
+                sessionImportedBeatmapsetIds.Add(taken.BeatmapsetId);
+                recommendations.Remove(taken);
+                await ensureCandidateSupplyAsync();
+                await publishPoolAsync();
+                RecommendationItem? added = recommendations.LastOrDefault();
+                bool cameBack = recommendations.Any(item => item.BeatmapsetId == taken.BeatmapsetId);
+                AppLog.Info($"池子自检：第 {step} 次「下一首」移出《{taken.DisplayTitle}》→"
+                            + $"池子 {recommendations.Count} 首，末位 {added?.DisplayTitle ?? "无"}"
+                            + $"｜刚移出的又回来了={cameBack}｜未消费达标 {freshQualifiedCandidates()}");
+            }
+            AppLog.Info($"池子自检：共移出 {consumedTitles.Count} 首，最终池子 "
+                        + string.Join(" / ", recommendations.Select(item => item.DisplayTitle)));
+        }
+        catch (Exception exception)
+        {
+            AppLog.Error("池子自检失败", exception);
+        }
+    }
 
     /// <summary>
     /// 开发用：--persist-test。
