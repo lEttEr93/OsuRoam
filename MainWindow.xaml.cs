@@ -341,6 +341,13 @@ public partial class MainWindow : Window
             return;
         }
 
+        // 开发用：--debug-pools 启动后直接开「开始漫游」并把池子调试窗打开（截图 / 现场观察都用它）。
+        if (Environment.GetCommandLineArgs().Any(argument => argument == "--debug-pools"))
+        {
+            startPoolDebugProbe();
+            openPoolsDebugWindow();
+        }
+
         // 开发用：--persist-test 验证「改完就存」这条路（改两个值、写完读回文件、再还原），
         // 复现 1.5.6.1 那个「改完直接更新，配置全丢」的问题。
         // 放在 applySettingsToControls 之后：控件填好了 settingsControlsReady 才是 true。
@@ -525,6 +532,190 @@ public partial class MainWindow : Window
         return 0;
     }
 
+    /// <summary>
+    /// 池子调试窗：把总池 / 候选池 / 推荐池摊开看。打开后按 F5 或勾「自动刷新」取新快照。
+    /// 它只读：不改设置、不触发搜索、不下载。
+    /// </summary>
+    private void openPoolsDebugWindow()
+    {
+        if (poolsDebugWindow is null)
+        {
+            poolsDebugWindow = new Controls.PoolsDebugWindow { Owner = this };
+            poolsDebugWindow.Closed += (_, _) => poolsDebugWindow = null;
+            poolsDebugWindow.Attach(buildPoolsSnapshot);
+            poolsDebugWindow.Show();
+            return;
+        }
+
+        poolsDebugWindow.Activate();
+        poolsDebugWindow.Refresh();
+    }
+
+    /// <summary>
+    /// 把三层池子的当前状态整理成调试界面能直接显示的样子。
+    /// 「推荐理由」优先用卡片自带的 <see cref="RecommendationItem.Reason"/>（引擎算出来的），
+    /// 没进池的候选则说明它为什么在这儿（达标但还没排上）。
+    /// </summary>
+    private PoolsSnapshot buildPoolsSnapshot()
+    {
+        if (profile is null)
+            return PoolsSnapshot.Empty;
+
+        HashSet<int> consumed = consumedSetIds();
+        Dictionary<int, RecommendationItem> poolById = [];
+        foreach (RecommendationItem item in recommendations)
+            poolById[item.BeatmapsetId] = item;
+
+        // ---- 总池：简化行，只留「判到哪一步」 ----
+        List<PoolRow> total = new(searchResults.Count);
+        foreach (OsuBeatmapset set in searchResults)
+        {
+            string state = admittedSetIds.Contains(set.Id) ? "达标"
+                : patternMismatchSetIds.Contains(set.Id) ? "不达标"
+                : "未判";
+            if (consumed.Contains(set.Id))
+                state += " / 已给过";
+            total.Add(new PoolRow(
+                $"{set.Artist} - {set.Title}",
+                $"{set.Creator} · {set.Status}",
+                set.Beatmaps.Count > 0 ? $"★{set.Beatmaps.Max(map => map.DifficultyRating):0.00}" : string.Empty,
+                string.Empty,
+                string.Empty,
+                state,
+                set.Id.ToString()));
+        }
+
+        // ---- 候选池：所有达标的谱面集 + 推荐池里的卡片（补位卡可能不在达标集合里）----
+        List<int> candidateIds = [.. admittedSetIds];
+        foreach (RecommendationItem item in recommendations)
+        {
+            if (!candidateIds.Contains(item.BeatmapsetId))
+                candidateIds.Add(item.BeatmapsetId);
+        }
+
+        List<PoolRow> candidates = [];
+        foreach (int setId in candidateIds)
+        {
+            bool inPool = poolById.TryGetValue(setId, out RecommendationItem? pooled);
+            OsuBeatmapset? set = candidatesSourceSet(setId);
+            string title = set is not null ? $"{set.Artist} - {set.Title}" : pooled!.DisplayTitle;
+            string subtitle;
+            string starText;
+            string tagLine;
+            if (set is not null)
+            {
+                (double stars, int keys, string version, string? share) = describeSet(set);
+                subtitle = $"{keys}K [{version}] · {set.Creator}";
+                starText = stars > 0 ? $"★{stars:0.00}" : string.Empty;
+                tagLine = string.Join("　", new[] { share ?? string.Empty, describeTagHits(set) }
+                    .Where(text => text.Length > 0));
+            }
+            else
+            {
+                subtitle = $"{pooled!.KeyCount}K [{pooled.DifficultyName}] · {pooled.Mapper}";
+                starText = $"★{pooled.Stars:0.00}";
+                tagLine = string.Join("　", pooled.Tags.Take(4));
+            }
+
+            string reason = inPool && pooled is not null
+                ? pooled.Reason
+                : consumed.Contains(setId)
+                    ? "本次已给过；有新的够格谱面时它排在最后"
+                    : "达标候选，还没排进推荐池";
+            string state = inPool
+                ? (pooled!.IsFallback ? "补位" : "推荐中")
+                : consumed.Contains(setId) ? "已给过" : "候选";
+            candidates.Add(new PoolRow(title, subtitle, starText, tagLine, reason, state, setId.ToString()));
+        }
+
+        // 推荐池里的卡片排最前面（顺序和主窗一致），其余按星级从近到远。
+        candidates.Sort((left, right) =>
+        {
+            int leftRank = indexOfPoolRow(left, poolById);
+            int rightRank = indexOfPoolRow(right, poolById);
+            return leftRank != rightRank ? leftRank.CompareTo(rightRank) : 0;
+        });
+
+        // ---- 推荐池：正式卡片 + 引擎给的推荐理由 ----
+        List<PoolRow> recommended = [];
+        foreach (RecommendationItem item in recommendations)
+        {
+            recommended.Add(new PoolRow(
+                item.DisplayTitle,
+                $"{item.KeyCount}K [{item.DifficultyName}] · {item.Mapper} · {item.LengthSeconds / 60}:{item.LengthSeconds % 60:00}",
+                $"★{item.Stars:0.00}",
+                string.Join("　", item.Tags.Take(4)),
+                item.Reason,
+                item.IsFallback ? "补位" : "推荐中",
+                item.BeatmapsetId.ToString()));
+        }
+
+        int judged = judgedSetCount();
+        string header = $"总池 {searchResults.Count}｜已判 {judged}（达标 {admittedSetIds.Count}，"
+                        + $"不达标 {patternMismatchSetIds.Count}）｜未消费达标 {freshQualifiedCandidates()}"
+                        + $"｜推荐池 {recommendations.Count}/{Math.Max(1, settings.PoolSize)}"
+                        + $"｜键型闸门 {(usesPatternGate() ? "开" : "关")}";
+        string totalNote = $"总池：{searchResults.Count} 个谱面集（未判 {Math.Max(0, searchResults.Count - judged)} 个）";
+        string candidateNote = $"候选：达标 {admittedSetIds.Count}，其中未消费 {freshQualifiedCandidates()}，"
+                               + $"已给过 {admittedSetIds.Count(id => consumed.Contains(id))}；"
+                               + $"补位卡 {recommendations.Count(item => item.IsFallback)}";
+        string recommendedNote = $"推荐池：{recommendations.Count}/{Math.Max(1, settings.PoolSize)} 张"
+                                 + (candidateSupplyRunning ? "｜候选补给进行中" : string.Empty);
+        return new PoolsSnapshot(header, total, candidates, recommended, totalNote, candidateNote, recommendedNote);
+    }
+
+    /// <summary>候选池里显示用的那一条：从当前候选/搜索结果里按 id 找回来。</summary>
+    private OsuBeatmapset? candidatesSourceSet(int setId) =>
+        candidates.FirstOrDefault(set => set.Id == setId)
+        ?? searchResults.FirstOrDefault(set => set.Id == setId);
+
+    /// <summary>推荐池里的位置（不在池里排到最后，但仍在候选列表里显示）。</summary>
+    private int indexOfPoolRow(PoolRow row, Dictionary<int, RecommendationItem> poolById)
+    {
+        if (!int.TryParse(row.Key, out int setId) || !poolById.TryGetValue(setId, out RecommendationItem? item))
+            return int.MaxValue;
+        int index = recommendations.IndexOf(item);
+        return index < 0 ? int.MaxValue - 1 : index;
+    }
+
+    /// <summary>星级 / 键数 / 难度名 / 键型占比，一次算齐（调试界面用）。</summary>
+    private (double Stars, int Keys, string Version, string? Share) describeSet(OsuBeatmapset set)
+    {
+        OsuBeatmap? best = set.Beatmaps
+            .Where(map => settings.Mode != "mania" || map.Mode == "mania")
+            .OrderByDescending(map => map.DifficultyRating)
+            .FirstOrDefault();
+        if (best is null)
+            return (0, 0, "?", null);
+
+        int keys = (int)Math.Round(best.CircleSize);
+        string? share = null;
+        if (settings.Mode == "mania" && usesPatternGate() &&
+            patternLibrary.TryGetVerified(best.Id) is { } pattern)
+        {
+            share = settings.SelectedPatterns.Count > 0
+                ? $"{string.Join("+", settings.SelectedPatterns)} {PatternShare(pattern):P0}"
+                : $"面谱占比 {PatternShare(pattern):P0}";
+        }
+        return (best.DifficultyRating, keys, best.Version, share);
+    }
+
+    /// <summary>这个谱面集命中了白名单里的哪些 tag（调试界面用来解释「为什么它进来了」）。</summary>
+    private string describeTagHits(OsuBeatmapset set)
+    {
+        if (settings.IncludedTags.Count == 0)
+            return string.Empty;
+        HashSet<string> tags = [.. AppSettings.ParseTags(set.Tags)];
+        List<string> hits = [.. settings.IncludedTags.Where(tag => tags.Contains(tag, StringComparer.OrdinalIgnoreCase))];
+        return hits.Count == 0 ? "tag 无命中" : $"tag 命中 {string.Join("、", hits.Take(4))}";
+    }
+
+    /// <summary>开发用：--debug-pools 时先在后台跑一次「开始漫游」，让调试窗里有真数据。</summary>
+    private void startPoolDebugProbe() => _ = rebuildAsync(false);
+
+    /// <summary>池子调试窗（同一时刻只有一个）。</summary>
+    private Controls.PoolsDebugWindow? poolsDebugWindow;
+
     /// <summary>开发用：--snapshot 时套几张假卡片，让截图里有真实内容可看。</summary>
     private async Task runSnapshotAsync(string path)
     {
@@ -532,6 +723,25 @@ public partial class MainWindow : Window
             Typography.Apply(false);
 
         AppLog.Info($"截图模式：{path}｜{Typography.Describe()}");
+
+        // 开发用：--debug-pools：先把池子调试窗开出来（要真的跑一次搜索，会有网络等待），再截它。
+        if (Environment.GetCommandLineArgs().Any(arg => arg == "--debug-pools"))
+        {
+            startPoolDebugProbe();
+            for (int wait = 0; wait < 400; wait += 1)
+            {
+                await Task.Delay(250);
+                // 等到「补给跑完且推荐池满」再截，否则拍到的是刚开局的空候选池。
+                if (!candidateSupplyRunning && recommendations.Count >= Math.Max(1, settings.PoolSize))
+                    break;
+            }
+            openPoolsDebugWindow();
+            await Task.Delay(800);
+            if (poolsDebugWindow is not null)
+                RenderDiagnostics.CaptureWindow(poolsDebugWindow, path);
+            Close();
+            return;
+        }
 
         if (Environment.GetCommandLineArgs().Any(arg => arg == "--with-info"))
         {

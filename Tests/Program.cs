@@ -1425,6 +1425,10 @@ static void testLocalizationTablesAreInSync()
         {
             if (file.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}", StringComparison.OrdinalIgnoreCase))
                 continue;
+            // 池子调试窗是维护者自己的工具：只有 --debug-pools 能打开、主界面没有入口，
+            // 不进正式界面也就不需要中英切换，这里放过它的硬编码中文。
+            if (Path.GetFileName(file).Equals("PoolsDebugWindow.xaml", StringComparison.OrdinalIgnoreCase))
+                continue;
 
             string name = Path.GetFileName(file);
             string text = File.ReadAllText(file);
