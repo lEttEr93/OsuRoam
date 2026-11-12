@@ -1,9 +1,9 @@
 @echo off
 rem ============================================================================
 rem  Build the SAME thing the released package contains, as an unzipped folder.
-rem  Default target: D:\osu-roam-1.5.6.2-local
+rem  Default target: D:\osu-roam-1.5.6.3-local
 rem
-rem    pack-unzipped.cmd                 -> D:\osu-roam-1.5.6.2-local
+rem    pack-unzipped.cmd                 -> D:\osu-roam-1.5.6.3-local
 rem    pack-unzipped.cmd D:\some\folder  -> any other folder
 rem
 rem  Two steps on purpose:
@@ -19,7 +19,7 @@ rem ============================================================================
 setlocal
 set "ROOT=%~dp0"
 set "TARGET=%~1"
-if not defined TARGET set "TARGET=D:\osu-roam-1.5.6.2-local"
+if not defined TARGET set "TARGET=D:\osu-roam-1.5.6.3-local"
 set "STAGE=%ROOT%bin\local-publish"
 set "LOG=%ROOT%bin\pack.log"
 
