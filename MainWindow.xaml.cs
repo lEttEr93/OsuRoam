@@ -544,11 +544,15 @@ public partial class MainWindow : Window
             poolsDebugWindow.Closed += (_, _) => poolsDebugWindow = null;
             poolsDebugWindow.Attach(buildPoolsSnapshot);
             poolsDebugWindow.Show();
+            // 现场排查「窗口没出来」时看这一行：IsVisible 与窗口尺寸都打出来。
+            AppLog.Info($"池子调试窗：已打开（IsVisible={poolsDebugWindow.IsVisible}，"
+                        + $"{poolsDebugWindow.ActualWidth:0}×{poolsDebugWindow.ActualHeight:0}）");
             return;
         }
 
         poolsDebugWindow.Activate();
         poolsDebugWindow.Refresh();
+        AppLog.Info("池子调试窗：已刷新");
     }
 
     /// <summary>

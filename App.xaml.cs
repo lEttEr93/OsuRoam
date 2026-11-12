@@ -68,6 +68,24 @@ public partial class App : Application
         AppLog.Info($"单实例锁：{(createdNew ? "获得" : "已被占用")}（{mutexName}）");
         if (!createdNew)
         {
+            // 带这类参数时用户是「想看点什么」的：不能像双击那样安静退出，否则现场表现是
+            // 「我明明加了 --debug-pools，却什么都没多出来」。
+            bool wantsOwnWindow = e.Args.Any(argument => argument is
+                "--debug-pools" or "--pool-probe" or "--persist-test" or "--update-check");
+            if (wantsOwnWindow)
+            {
+                AppLog.Info("另一个实例在运行；这次带了需要独占的开发参数，提示后退出");
+                MessageBox.Show(
+                    "已经有一个 osu! Roam 在运行。\n\n"
+                    + "池子调试窗要独占单实例锁（它会写配置和推荐历史），请先关掉那个实例，"
+                    + "再带 --debug-pools 重新启动。",
+                    "osu! Roam",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Information);
+                Shutdown();
+                return;
+            }
+
             // 双击第二次不该被弹窗拦住：把已经在跑的那个窗口叫到前面，然后自己安静退出。
             AppLog.Info("另一个实例在运行，唤起它");
             wakeRunningInstance();
