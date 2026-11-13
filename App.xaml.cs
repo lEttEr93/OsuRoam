@@ -145,12 +145,17 @@ public partial class App : Application
         window.Show();
     }
 
-    /// <summary>启动画面：淡入 → 停约 3.3 秒 → 淡出，然后主窗出现。</summary>
+    /// <summary>启动画面：淡入 → 停约 3 秒 → 淡出，然后主窗出现。</summary>
     private async Task ShowSplashThenMainAsync()
     {
         Controls.SplashWindow? splash = null;
         try
         {
+            // 启动画面期间先关掉「最后一个窗口关掉就退出」这条规则：
+            // 两个窗口交接的一瞬间很容易被判定成「没窗口了」，整个进程就悄悄退出
+            //（现场：只看到启动画面，日志停在「主窗：已显示」，之后什么都没有）。
+            ShutdownMode = ShutdownMode.OnExplicitShutdown;
+
             splash = new Controls.SplashWindow();
             splash.Show();
             AppLog.Info("启动画面：已显示，约 4 秒后进主窗");
@@ -163,15 +168,32 @@ public partial class App : Application
             AppLog.Error("启动画面失败，直接进主窗", exception);
         }
 
+        // 交接：先把启动画面收掉，再创建主窗 —— 中间不留「两个窗口同时在」的那一刻。
+        try
+        {
+            splash?.Close();
+            splash = null;
+        }
+        catch (Exception exception)
+        {
+            AppLog.Error("关闭启动画面失败", exception);
+        }
+
         try
         {
             ShowMainWindow();
-            AppLog.Info("主窗：已显示（启动画面之后）");
+            AppLog.Info($"主窗：已显示（启动画面之后）｜IsVisible={MainWindow?.IsVisible}｜"
+                        + $"窗口数={Windows.Count}");
         }
-        finally
+        catch (Exception exception)
         {
-            splash?.Close();
+            AppLog.Error("主窗显示失败", exception);
+            Shutdown(-1);
+            return;
         }
+
+        // 交接完成：恢复「关掉主窗就退出」。
+        ShutdownMode = ShutdownMode.OnMainWindowClose;
     }
 
     /// <summary>开发用 --splash-only：只放启动画面、量一下耗时、写日志后退出（不进主窗）。</summary>
