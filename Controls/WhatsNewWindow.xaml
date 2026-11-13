@@ -1,0 +1,35 @@
+<Window x:Class="OsuRoam.Controls.WhatsNewWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="{DynamicResource L.whatsnew.title}"
+        Width="520" SizeToContent="Height"
+        WindowStartupLocation="CenterOwner"
+        ShowInTaskbar="False"
+        ResizeMode="NoResize"
+        Topmost="True"
+        Background="#0F1116"
+        TextOptions.TextFormattingMode="Ideal">
+
+    <Border Background="#171A21" BorderBrush="#262B35" BorderThickness="1" CornerRadius="10" Padding="18,16">
+        <StackPanel>
+            <TextBlock x:Name="HeadlineText" Text="{DynamicResource L.whatsnew.title}" FontSize="15" FontWeight="SemiBold"
+                       Foreground="#E6EAF2" TextWrapping="Wrap" />
+
+            <ItemsControl x:Name="BulletList" Margin="0,10,0,0">
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                        <TextBlock Text="{Binding}" FontSize="12" Margin="0,0,0,6" TextWrapping="Wrap"
+                                   Foreground="#C8CFDC" LineHeight="19" />
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+
+            <DockPanel Margin="0,10,0,0" LastChildFill="False">
+                <TextBlock Text="{DynamicResource L.whatsnew.once}" FontSize="10.5" VerticalAlignment="Center"
+                           Foreground="#8A93A6" />
+                <Button x:Name="OkButton" DockPanel.Dock="Right" Content="{DynamicResource L.whatsnew.ok}"
+                        Padding="16,5" FontSize="12" IsDefault="True" Click="OkButton_Click" />
+            </DockPanel>
+        </StackPanel>
+    </Border>
+</Window>

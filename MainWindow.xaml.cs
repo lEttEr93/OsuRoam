@@ -363,6 +363,19 @@ public partial class MainWindow : Window
             openPoolsDebugWindow();
         }
 
+        // 更新后的第一次启动：弹一次「更新了什么」。--whats-new 可以强制重现（截图用）。
+        bool forcedWhatsNew = Environment.GetCommandLineArgs().Any(argument => argument == "--whats-new");
+        if (forcedWhatsNew)
+        {
+            justUpdatedVersion = AppVersion.Display;
+            AppLog.Info("更新说明：--whats-new 强制显示");
+        }
+        if (justUpdatedVersion is not null && snapshotPath() is null)
+        {
+            _ = showWhatsNewIfPendingAsync(justUpdatedVersion);
+            justUpdatedVersion = null;
+        }
+
         // 开发用：--persist-test 验证「改完就存」这条路（改两个值、写完读回文件、再还原），
         // 复现 1.5.6.1 那个「改完直接更新，配置全丢」的问题。
         // 放在 applySettingsToControls 之后：控件填好了 settingsControlsReady 才是 true。
@@ -760,6 +773,22 @@ public partial class MainWindow : Window
             Typography.Apply(false);
 
         AppLog.Info($"截图模式：{path}｜{Typography.Describe()}");
+
+        // 开发用：--whats-new：截「更新说明」小窗。
+        if (Environment.GetCommandLineArgs().Any(arg => arg == "--whats-new"))
+        {
+            WhatsNew.Entry? entry = WhatsNew.For(AppVersion.Display);
+            if (entry is not null)
+            {
+                whatsNewWindow = new Controls.WhatsNewWindow { Owner = this };
+                whatsNewWindow.ShowEntry(entry);
+                whatsNewWindow.Show();
+                await Task.Delay(500);
+                RenderDiagnostics.CaptureWindow(whatsNewWindow, path);
+            }
+            Close();
+            return;
+        }
 
         // 开发用：--debug-pools：先把池子调试窗开出来（要真的跑一次搜索，会有网络等待），再截它。
         if (Environment.GetCommandLineArgs().Any(arg => arg == "--debug-pools"))
@@ -4888,6 +4917,8 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
         {
             AppLog.Info($"上次就地更新已完成，当前版本 {AppVersion.Display}");
             setStatus("update.done", AppVersion.Display);
+            // 记住「刚更新上来」这件事，等界面就绪后弹一次更新说明（结果文件已经清掉了，所以只会有这一次）。
+            justUpdatedVersion = AppVersion.Display;
         }
         else
         {
@@ -4895,6 +4926,38 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
             setStatus("update.lastfailed", result, AppVersion.Display);
         }
     }
+
+    /// <summary>
+    /// 就地更新后的第一次启动：弹一个小窗，简短说这次更新改了什么。
+    /// 只显示一次 —— 触发条件是「更新脚本留下了 ok」，而这个文件在
+    /// <see cref="reportLastUpdateResult"/> 里已经被清掉了。
+    /// </summary>
+    private async Task showWhatsNewIfPendingAsync(string? version)
+    {
+        WhatsNew.Entry? entry = WhatsNew.For(version);
+        if (entry is null)
+            return;
+
+        // 等主窗把首屏画完再弹，免得抢在启动动画中间。
+        await Task.Delay(700);
+        try
+        {
+            whatsNewWindow = new Controls.WhatsNewWindow { Owner = this };
+            whatsNewWindow.ShowEntry(entry);
+            whatsNewWindow.Closed += (_, _) => whatsNewWindow = null;
+            whatsNewWindow.Show();
+            AppLog.Info($"更新说明：已显示 {entry.Version}（{WhatsNew.Lines(entry).Count} 行）");
+        }
+        catch (Exception exception)
+        {
+            AppLog.Error("更新说明窗口打开失败", exception);
+        }
+    }
+
+    /// <summary>更新说明窗（同一时刻只有一个；正常流程里只出现一次）。</summary>
+    private Controls.WhatsNewWindow? whatsNewWindow;
+    /// <summary>刚更新到的版本号；非空表示这次启动是更新后的第一次。</summary>
+    private string? justUpdatedVersion;
 
     private async void CheckUpdateButton_Click(object sender, RoutedEventArgs e) => await checkForUpdatesAsync(silent: false);
 
