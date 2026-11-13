@@ -138,8 +138,16 @@ public partial class MainWindow : Window
     /// 候选池的水位：够格的「还没给过」候选攒到这里就不再烧预算。
     /// 以前是池大小 × 2（5 张池子 = 10 首），点十来次下一首就见底；现在按池大小放大，
     /// 但夹在 20–60 之间 —— 每首都要抓一份 .osu 解析，水位太高会让后台一直跑。
+    /// 现场想临时调大调小：`set ROAM_CANDIDATE_WATER=60` 再启动，不用重新编译。
     /// </summary>
-    private int candidateWaterLevel() => Math.Clamp(Math.Max(1, settings.PoolSize) * 6, 20, 60);
+    private int candidateWaterLevel()
+    {
+        if (int.TryParse(Environment.GetEnvironmentVariable("ROAM_CANDIDATE_WATER"), out int configured) &&
+            configured > 0)
+            return Math.Clamp(configured, 5, 300);
+
+        return Math.Clamp(Math.Max(1, settings.PoolSize) * 6, 20, 60);
+    }
 
     /// <summary>准入每批的抓取预算（水位驱动的补给循环一批一批地跑）。</summary>
     private const int AdmissionBudgetPerRound = 12;
@@ -341,7 +349,7 @@ public partial class MainWindow : Window
 
         // 开发用：--pool-probe 跑一遍「搜索 → 候选补给 → 排池」，把漏斗写进日志后退出。
         // 用来验证「候选池会一直从总池进货」这条路（不进 osu!，不导入任何谱面）。
-        if (Environment.GetCommandLineArgs().Any(argument => argument == "--pool-probe"))
+        if (Environment.GetCommandLineArgs().Any(argument => argument.StartsWith("--pool-probe", StringComparison.OrdinalIgnoreCase)))
         {
             await runPoolProbeAsync();
             Close();
@@ -5130,8 +5138,18 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
 
             // 模拟连点「下一首」：把池首当成已给过并移出，再补齐一次。
             // 关键看两件事：①补进来的是不是新谱面；②刚移出的那张会不会又被补回来。
+            // 次数可以用 --pool-probe=20 指定，默认 4（跑 20 次能看出「第几次开始重复」）。
+            int clicks = 4;
+            string? probeArgument = Environment.GetCommandLineArgs()
+                .FirstOrDefault(argument => argument.StartsWith("--pool-probe=", StringComparison.OrdinalIgnoreCase));
+            if (probeArgument is not null &&
+                int.TryParse(probeArgument["--pool-probe=".Length..], out int configuredClicks) &&
+                configuredClicks > 0)
+                clicks = Math.Min(configuredClicks, 200);
+
             List<string> consumedTitles = [];
-            for (int step = 1; step <= 4; step += 1)
+            int repeats = 0;
+            for (int step = 1; step <= clicks; step += 1)
             {
                 RecommendationItem? taken = recommendations.FirstOrDefault();
                 if (taken is null)
@@ -5143,11 +5161,14 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
                 await publishPoolAsync();
                 RecommendationItem? added = recommendations.LastOrDefault();
                 bool cameBack = recommendations.Any(item => item.BeatmapsetId == taken.BeatmapsetId);
+                if (cameBack)
+                    repeats += 1;
                 AppLog.Info($"池子自检：第 {step} 次「下一首」移出《{taken.DisplayTitle}》→"
                             + $"池子 {recommendations.Count} 首，末位 {added?.DisplayTitle ?? "无"}"
                             + $"｜刚移出的又回来了={cameBack}｜未消费达标 {freshQualifiedCandidates()}");
             }
-            AppLog.Info($"池子自检：共移出 {consumedTitles.Count} 首，最终池子 "
+            AppLog.Info($"池子自检：共移出 {consumedTitles.Count} 首（去重 {consumedTitles.Distinct().Count()} 首），"
+                        + $"重复补入 {repeats} 次；最终池子 "
                         + string.Join(" / ", recommendations.Select(item => item.DisplayTitle)));
         }
         catch (Exception exception)
