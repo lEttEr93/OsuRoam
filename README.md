@@ -1,4 +1,4 @@
-# osu! Roam v1.5.6.2
+# osu! Roam v1.5.6.3
 
 [English](#english) · [中文](#中文)
 
@@ -15,8 +15,8 @@ keep roaming without touching it.
 
 | Package | UI language | Default download source |
 |---|---|---|
-| `osu-roam-1.5.6.2-portable.zip` | follows the system language | sayobot mirrors (China) |
-| `osu-roam-1.5.6.2-en-portable.zip` | English | catboy / beatconnect (international) |
+| `osu-roam-1.5.6.3-portable.zip` | follows the system language | sayobot mirrors (China) |
+| `osu-roam-1.5.6.3-en-portable.zip` | English | catboy / beatconnect (international) |
 
 **Companion packages:** [`OsuSv`](https://www.nuget.org/packages/OsuSv) /
 [`OsuSv.Cli`](https://www.nuget.org/packages/OsuSv.Cli) — the scroll-velocity (SV) analysis used by Roam, shipped as a
@@ -27,6 +27,22 @@ see [`docs/1.5.3-SV评估算法.md`](docs/1.5.3-SV评估算法.md) for the model
 The .NET runtime and `tosu.exe` are already inside the archive — extract and run. Each build keeps its own `data`
 folder, so **do not install one over the other**.  A fresh folder inherits the analysed-pattern library from a
 neighbouring `osu-roam*` install, so pattern data does not start from zero.
+
+## What's new in 1.5.6.3
+
+Fixes the "Next keeps cycling the same few maps" problem, and adds a one-shot notice after an in-place update.
+
+- **The candidate pool keeps topping itself up**: admission used to stop after at most 3 rounds (a round that
+  found nothing ended it), so a 700-set total pool was often judged to ~30 charts and the recommendation pool
+  could only ever draw from those. It is now water-level driven — while the number of *unseen* qualified
+  candidates is below the level (pool size × 6, clamped to 20–60) it keeps judging batch after batch, and when
+  the total pool has no unjudged sets left it runs **another search** (different rotation) to bring more in.
+- **The recommendation pool is append-only again**: cards already on screen are no longer replaced by background
+  re-ranking; they only leave by being played, skipped or replaced through "Next".
+- **Candidates are split into two tiers**: unseen qualified charts fill the candidate slots; charts you already
+  got (imported or played) sit at the tail as a backup and get pushed out as soon as new ones arrive.
+- **First launch after an in-place update shows a small notice**: "Updated to 1.5.6.3 — improved the
+  recommendation algorithm". It is shown once: the updater's result file is consumed when it is read.
 
 ## What's new in 1.5.6.2
 
@@ -177,13 +193,26 @@ osu! 谱面漫游推荐工具，Windows / WPF / .NET 8。读你的成绩样本�
 
 | 包 | 界面语言 | 默认下载源 |
 |---|---|---|
-| `osu-roam-1.5.6.2-portable.zip` | 跟随系统 | sayobot 镜像（国内） |
-| `osu-roam-1.5.6.2-en-portable.zip` | 英文 | catboy / beatconnect（国际） |
+| `osu-roam-1.5.6.3-portable.zip` | 跟随系统 | sayobot 镜像（国内） |
+| `osu-roam-1.5.6.3-en-portable.zip` | 英文 | catboy / beatconnect（国际） |
 
 **附带产品：[`OsuSv`](https://www.nuget.org/packages/OsuSv) / [`OsuSv.Cli`](https://www.nuget.org/packages/OsuSv.Cli)** —— 谱面变速（SV）评估算法单独出的库
 和命令行（`dotnet tool install --global OsuSv.Cli`，或下 Release 里的单文件 exe）。输入 .osu 文本，输出
 不等时 / 极端度 / 背谱度 / 不适度 / 夸张度五个量，口径见 [`docs/1.5.3-SV评估算法.md`](docs/1.5.3-SV评估算法.md)。
 源码在 `src/OsuSv`、`src/OsuSv.Cli`，许可证 MIT。
+
+## 1.5.6.3 新增
+
+这一版主要是把「点下一首只有那几首在转」修掉，另外更新后第一次启动会告诉你更新了什么。
+
+- **候选池会一直从总池进货**：以前准入最多跑 3 轮（某一轮没找到达标就停），700 个候选常常只判了 30 多张，
+  推荐池只能从这几十张里出。现在按水位驱动 —— 「还没给过的达标候选」低于水位
+  （池大小 × 6，夹在 20–60）就一批批继续判；总池里没判过的判完了，还会**换一轮搜索**继续进货。
+- **推荐池只加不换**：已经出现在列表里的卡片不会再被后台重排换掉，出场只靠「打完 / 跳过 / 点下一首」。
+- **候选池分两档**：没给过的占候选池的位置；给过（导入过 / 玩过）的只排在最后当备用，
+  一旦有新的够格谱面就把它们挤出去。
+- **更新后第一次启动弹一次小窗**：「已更新到 1.5.6.3 —— 优化了推荐算法」，只显示一次
+  （更新脚本留下的结果文件被读走即清）。
 
 ## 1.5.6.2 新增
 
