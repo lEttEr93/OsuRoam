@@ -9,10 +9,10 @@
     <AssemblyName>OsuRoam</AssemblyName>
     <RootNamespace>OsuRoam</RootNamespace>
     <LangVersion>latest</LangVersion>
-    <Version>1.5.6.3</Version>
-    <AssemblyVersion>1.5.6.3</AssemblyVersion>
-    <FileVersion>1.5.6.3</FileVersion>
-    <InformationalVersion>1.5.6.3</InformationalVersion>
+    <Version>1.5.6.4</Version>
+    <AssemblyVersion>1.5.6.4</AssemblyVersion>
+    <FileVersion>1.5.6.4</FileVersion>
+    <InformationalVersion>1.5.6.4</InformationalVersion>
     <ApplicationIcon>Assets\OsuRoam.ico</ApplicationIcon>
   </PropertyGroup>
   <!-- 英文版：dotnet publish -p:RoamFlavor=en。同一份源码，只换常量与默认值，
@@ -30,6 +30,8 @@
     <Page Remove="src\**\*.xaml" />
     <Resource Remove="src\**\*" />
     <Resource Include="Assets\OsuRoam.ico" />
+    <!-- 启动画面用 png（256x256），ico 只给窗口/任务栏图标 -->
+    <Resource Include="Assets\OsuRoam.png" />
     <!-- 字体必须以 Resource 编进程序集，pack URI 才能按 #Outfit 找到它；
          Content/CopyToOutput 的话换目录运行就会掉字。 -->
     <Resource Include="Fonts\*.ttf" />

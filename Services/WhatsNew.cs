@@ -17,6 +17,9 @@ public static class WhatsNew
     /// <summary>新版本放在最前面。</summary>
     private static readonly Entry[] Entries =
     [
+        new Entry("1.5.6.4",
+            ["启动更稳、键型页跟模式走、加了「不善长条」"],
+            ["Smoother startup, a mode-aware pattern tab, and an LN-heavy filter"]),
         new Entry("1.5.6.3",
             ["优化了推荐算法"],
             ["Improved the recommendation algorithm"])

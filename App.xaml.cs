@@ -105,7 +105,88 @@ public partial class App : Application
         // 先把内置字体装上；真正的开关在读到配置后再由 MainWindow 应用。
         Typography.Apply(preferEmbeddedFont: true);
 
+        // 维护清单 19：先放约 4 秒的启动画面，再出主窗。
+        // 开发/探针模式不走这条路 —— 它们要的是「几百毫秒内就抓到画面」。
+        if (e.Args.Any(argument => argument == "--splash-only"))
+        {
+            _ = runSplashOnlyAsync();
+        }
+        else if (IsDevelopmentRun(e.Args))
+        {
+            ShowMainWindow();
+        }
+        else
+        {
+            _ = ShowSplashThenMainAsync();
+        }
+
         base.OnStartup(e);
+    }
+
+    /// <summary>需要立刻出主窗的模式：截图、探针、诊断、检查更新……</summary>
+    private static bool IsDevelopmentRun(string[] arguments) => arguments.Any(argument =>
+        argument.StartsWith("--snapshot", StringComparison.OrdinalIgnoreCase) ||
+        argument.StartsWith("--experiment", StringComparison.OrdinalIgnoreCase) ||
+        argument.StartsWith("--pool-probe", StringComparison.OrdinalIgnoreCase) ||
+        argument.StartsWith("--preview", StringComparison.OrdinalIgnoreCase) ||
+        argument is "--diagnose" or "--diagnose-opaque" or "--debug-pools" or "--persist-test"
+            or "--update-check" or "--update-auto-test" or "--whats-new" or "--no-splash");
+
+    private void ShowMainWindow()
+    {
+        if (MainWindow is not null)
+        {
+            MainWindow.Show();
+            return;
+        }
+
+        MainWindow window = new MainWindow();
+        MainWindow = window;
+        window.Show();
+    }
+
+    /// <summary>启动画面：淡入 → 停约 3.3 秒 → 淡出，然后主窗出现。</summary>
+    private async Task ShowSplashThenMainAsync()
+    {
+        Controls.SplashWindow? splash = null;
+        try
+        {
+            splash = new Controls.SplashWindow();
+            splash.Show();
+            AppLog.Info("启动画面：已显示，约 4 秒后进主窗");
+            await splash.FadeInAsync();
+            await Task.Delay(TimeSpan.FromSeconds(3.0));
+            await splash.FadeOutAsync();
+        }
+        catch (Exception exception)
+        {
+            AppLog.Error("启动画面失败，直接进主窗", exception);
+        }
+
+        try
+        {
+            ShowMainWindow();
+            AppLog.Info("主窗：已显示（启动画面之后）");
+        }
+        finally
+        {
+            splash?.Close();
+        }
+    }
+
+    /// <summary>开发用 --splash-only：只放启动画面、量一下耗时、写日志后退出（不进主窗）。</summary>
+    private async Task runSplashOnlyAsync()
+    {
+        System.Diagnostics.Stopwatch clock = System.Diagnostics.Stopwatch.StartNew();
+        Controls.SplashWindow splash = new();
+        splash.Show();
+        await splash.FadeInAsync();
+        await Task.Delay(TimeSpan.FromSeconds(3.0));
+        await splash.FadeOutAsync();
+        splash.Close();
+        clock.Stop();
+        AppLog.Info($"启动画面自检：从显示到结束 {clock.ElapsedMilliseconds} ms（目标约 4000）");
+        Shutdown();
     }
 
     /// <summary>第二个实例：把前台权限交给已经在跑的那个，然后敲一下事件。</summary>

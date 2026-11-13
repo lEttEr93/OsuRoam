@@ -1,0 +1,24 @@
+<Window x:Class="OsuRoam.Controls.SplashWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        WindowStyle="None"
+        AllowsTransparency="True"
+        Background="Transparent"
+        Topmost="True"
+        ShowInTaskbar="False"
+        ResizeMode="NoResize"
+        SizeToContent="WidthAndHeight"
+        WindowStartupLocation="CenterScreen"
+        TextOptions.TextFormattingMode="Ideal">
+
+    <Border Background="#121416" BorderBrush="#34393E" BorderThickness="1" CornerRadius="14" Padding="34,26">
+        <StackPanel HorizontalAlignment="Center">
+            <Image x:Name="IconImage" Width="64" Height="64" HorizontalAlignment="Center"
+                   RenderOptions.BitmapScalingMode="HighQuality" />
+            <TextBlock Text="osu!Roam" FontSize="22" FontWeight="SemiBold" HorizontalAlignment="Center"
+                       Margin="0,12,0,0" Foreground="#F3F5F6" />
+            <TextBlock Text="Your hands are for your life, not for osu." FontSize="11" HorizontalAlignment="Center"
+                       Margin="0,8,0,0" Foreground="#A5ADB3" />
+        </StackPanel>
+    </Border>
+</Window>

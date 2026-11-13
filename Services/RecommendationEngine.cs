@@ -115,7 +115,8 @@ public sealed class RecommendationEngine
                 // 勾选了键型就用勾选结果当目标向量（强权重）；没勾才退回「从成绩反推」的旧路径。
                 bool usesSelection = settings.SelectedPatterns.Count > 0;
                 ManiaPattern? pattern = patternLookup is not null &&
-                                        (usesSelection || settings.PreferLn || (patternPreference is not null && patternWeight > 0))
+                                        (usesSelection || settings.PreferLn || settings.AvoidLongNotes ||
+                                         (patternPreference is not null && patternWeight > 0))
                     ? patternLookup(beatmap.Id)
                     : null;
 
@@ -152,6 +153,12 @@ public sealed class RecommendationEngine
                 // 比「25% 叠键」能拿到的 0.15 还大 —— 噪声盖过信号，用户就会觉得勾了没用。
                 double explorationWeight = usesSelection ? 0.35 : 1.0;
                 double score = familiarityWeight * (starFit * 0.73 + lengthFit * 0.12 + mapperFit * 0.15) + settings.Exploration * 0.55 * discovery * explorationWeight + tagFit * 0.12 + simpleFilterBonus + patternFit * effectivePatternWeight;
+                // 「不善长条」：LN 占比超过门槛的谱面直接压到最后（正常分数在 0–1.2 之间，减 10 足够沉底），
+                // 仍保留它们 —— 名字里叫「排后」不是「不推荐」，池子空了还会用到。
+                bool lnHeavy = settings.AvoidLongNotes && pattern is not null &&
+                               pattern.LnRatio > AppSettings.LnHeavyThreshold;
+                if (lnHeavy)
+                    score -= 10;
                 // 理由只记「哪种匹配 + 两个数值」，具体文字按当前语言现拼，
                 // 这样切语言时卡片上的理由会跟着变。
                 ReasonKind reasonKind = tagFit > 0
@@ -175,7 +182,8 @@ public sealed class RecommendationEngine
                     ReasonKind = reasonKind, ReasonTagFit = tagFit, ReasonStarFit = starFit, ReasonCategory = reasonCategory,
                     Tags = setTags, TagItems = setTags.Select(tag => new RecommendationTag(tag, settings.IncludedTags.Contains(tag, StringComparer.OrdinalIgnoreCase))).ToList(), KeyCount = settings.Mode == "mania" ? (int)Math.Round(beatmap.CircleSize) : 0,
                     IsRecycled = isRecycled,
-                    IsFallback = isFallback
+                    IsFallback = isFallback,
+                    IsLongNoteHeavy = lnHeavy
                 };
                 if (bestDifficulty is null || item.Score > bestDifficulty.Score) bestDifficulty = item;
             }

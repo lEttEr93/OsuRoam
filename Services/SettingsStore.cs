@@ -16,6 +16,37 @@ public sealed class SettingsStore
     /// <summary>读取失败时的原因；界面用它提示，避免静默变成空配置。</summary>
     public string? LoadFailure { get; private set; }
 
+    /// <summary>
+    /// 只把上次的窗口位置读出来（不反序列化整个配置）。
+    /// 窗口位置必须在 <c>Show()</c> 之前定好，否则会先出现在默认位置再跳一下（维护清单 16）；
+    /// 而完整配置要等启动流程里那段异步加载，来不及。
+    /// </summary>
+    public bool TryReadWindowPlacement(out double left, out double top)
+    {
+        left = double.NaN;
+        top = double.NaN;
+        try
+        {
+            if (!File.Exists(SettingsPath))
+                return false;
+
+            using FileStream stream = File.OpenRead(SettingsPath);
+            using JsonDocument document = JsonDocument.Parse(stream);
+            if (!document.RootElement.TryGetProperty(nameof(AppSettings.WindowLeft), out JsonElement leftElement) ||
+                !document.RootElement.TryGetProperty(nameof(AppSettings.WindowTop), out JsonElement topElement))
+                return false;
+
+            left = leftElement.GetDouble();
+            top = topElement.GetDouble();
+            return !double.IsNaN(left) && !double.IsNaN(top);
+        }
+        catch (Exception exception)
+        {
+            AppLog.Error("读取窗口位置失败", exception);
+            return false;
+        }
+    }
+
     public async Task<AppSettings> LoadAsync()
     {
         LoadFailure = null;
@@ -23,6 +54,7 @@ public sealed class SettingsStore
         {
             if (!File.Exists(SettingsPath))
                 return new AppSettings();
+
 
             await using FileStream stream = File.OpenRead(SettingsPath);
             AppSettings settings = await JsonSerializer.DeserializeAsync<AppSettings>(stream) ?? new AppSettings();

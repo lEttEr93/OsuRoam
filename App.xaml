@@ -1,8 +1,8 @@
 <Application x:Class="OsuRoam.App"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-             xmlns:controls="clr-namespace:OsuRoam.Controls"
-             StartupUri="MainWindow.xaml">
+             xmlns:controls="clr-namespace:OsuRoam.Controls">
+    <!-- 没有 StartupUri：主窗由 App.OnStartup 在启动画面之后自己创建（维护清单 19）。 -->
     <Application.Resources>
         <BooleanToVisibilityConverter x:Key="BoolToVis" />
         <!-- 滚动条常驻是为了宽度稳定，内容放得下时按这个转换器把滑块藏掉。 -->

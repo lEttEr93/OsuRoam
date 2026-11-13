@@ -172,6 +172,16 @@ public sealed class AppSettings
 
     /// <summary>只要面谱：LnRatio ≥ <see cref="ManiaPattern.LnChartThreshold"/> 的谱面。</summary>
     public bool PreferLn { get; set; }
+
+    /// <summary>
+    /// 不善长条：长条（LN）占比高于 <see cref="LnHeavyThreshold"/> 的谱面排到候选池最后，
+    /// 池子满时遇到非长条的新候选会被换掉（维护清单 18）。
+    /// </summary>
+    public bool AvoidLongNotes { get; set; }
+
+    /// <summary>「不善长条」的判定门槛：LN 占比超过这个值就算长条偏多。</summary>
+    public const double LnHeavyThreshold = 0.30;
+
     public List<string> IncludedTags { get; set; } = [];
     public List<string> ExcludedTags { get; set; } = [];
     public List<string> IncludedStatuses { get; set; } = [.. DefaultStatusFilters];

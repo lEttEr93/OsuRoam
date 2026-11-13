@@ -561,19 +561,28 @@
                                 </ItemsControl>
                             </StackPanel>
 
-                            <!-- ③ 键型：偏好勾选 + 只要面谱 -->
+                            <!-- ③ 键型：偏好勾选 + 只要面谱 + 不善长条。
+                                 键型分析只对 mania 有效，切到别的模式就换成一句说明（维护清单 17）。 -->
                             <StackPanel x:Name="RangePatternPanel" Visibility="Collapsed" Margin="0,9,0,0">
-                                <TextBlock Text="{DynamicResource L.label.patterns}" Foreground="{StaticResource MutedTextBrush}" FontSize="11" />
-                                <WrapPanel Margin="0,2,0,0">
-                                    <CheckBox x:Name="PatternStreamCheck" Content="{DynamicResource L.pattern.stream}" Tag="Stream" Click="PatternCheck_Click" Margin="0,0,12,4" />
-                                    <CheckBox x:Name="PatternChordstreamCheck" Content="{DynamicResource L.pattern.chordstream}" Tag="Chordstream" Click="PatternCheck_Click" Margin="0,0,12,4" />
-                                    <CheckBox x:Name="PatternJacksCheck" Content="{DynamicResource L.pattern.jacks}" Tag="Jacks" Click="PatternCheck_Click" Margin="0,0,12,4" />
-                                    <CheckBox x:Name="PatternCoordinationCheck" Content="{DynamicResource L.pattern.coordination}" Tag="Coordination" Click="PatternCheck_Click" Margin="0,0,12,4" />
-                                    <CheckBox x:Name="PatternDensityCheck" Content="{DynamicResource L.pattern.density}" Tag="Density" Click="PatternCheck_Click" Margin="0,0,12,4" />
-                                    <CheckBox x:Name="PatternMiscCheck" Content="{DynamicResource L.pattern.misc}" Tag="Wildcard" Click="PatternCheck_Click" Margin="0,0,12,4" />
-                                </WrapPanel>
-                                <CheckBox x:Name="PreferLnCheck" Content="{DynamicResource L.label.preferln}" Margin="0,4,0,0"
-                                          Click="PreferLnCheck_Click" />
+                                <TextBlock x:Name="PatternModeHint" Visibility="Collapsed" TextWrapping="Wrap"
+                                           Text="{DynamicResource L.pattern.maniaonly}"
+                                           Foreground="{StaticResource MutedTextBrush}" FontSize="11" />
+                                <StackPanel x:Name="PatternOptionsPanel">
+                                    <TextBlock Text="{DynamicResource L.label.patterns}" Foreground="{StaticResource MutedTextBrush}" FontSize="11" />
+                                    <WrapPanel Margin="0,2,0,0">
+                                        <CheckBox x:Name="PatternStreamCheck" Content="{DynamicResource L.pattern.stream}" Tag="Stream" Click="PatternCheck_Click" Margin="0,0,12,4" />
+                                        <CheckBox x:Name="PatternChordstreamCheck" Content="{DynamicResource L.pattern.chordstream}" Tag="Chordstream" Click="PatternCheck_Click" Margin="0,0,12,4" />
+                                        <CheckBox x:Name="PatternJacksCheck" Content="{DynamicResource L.pattern.jacks}" Tag="Jacks" Click="PatternCheck_Click" Margin="0,0,12,4" />
+                                        <CheckBox x:Name="PatternCoordinationCheck" Content="{DynamicResource L.pattern.coordination}" Tag="Coordination" Click="PatternCheck_Click" Margin="0,0,12,4" />
+                                        <CheckBox x:Name="PatternDensityCheck" Content="{DynamicResource L.pattern.density}" Tag="Density" Click="PatternCheck_Click" Margin="0,0,12,4" />
+                                        <CheckBox x:Name="PatternMiscCheck" Content="{DynamicResource L.pattern.misc}" Tag="Wildcard" Click="PatternCheck_Click" Margin="0,0,12,4" />
+                                    </WrapPanel>
+                                    <CheckBox x:Name="PreferLnCheck" Content="{DynamicResource L.label.preferln}" Margin="0,4,0,0"
+                                              Click="PreferLnCheck_Click" />
+                                    <CheckBox x:Name="AvoidLongNotesCheck" Content="{DynamicResource L.label.avoidln}"
+                                              ToolTip="{DynamicResource L.tip.avoidln}" Margin="0,4,0,0"
+                                              Click="AvoidLongNotesCheck_Click" />
+                                </StackPanel>
                             </StackPanel>
 
                             <!-- 探索度影响整个推荐池，不属于任何一个标签页，所以单独放最下面 -->

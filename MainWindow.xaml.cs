@@ -210,6 +210,16 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+        // 维护清单 16：窗口位置在 Show() 之前就定好。
+        // 以前是在 Loaded 里赋 Left/Top，窗口会先出现在默认位置、再跳到上次的位置，
+        // 看着就是「启动时窗口动了一下」。
+        if (settingsStore.TryReadWindowPlacement(out double savedLeft, out double savedTop))
+        {
+            WindowStartupLocation = WindowStartupLocation.Manual;
+            Left = savedLeft;
+            Top = savedTop;
+            AppLog.Info($"窗口位置：({savedLeft:0},{savedTop:0})，显示前就位（不会再跳）");
+        }
         // 根卡片同时要位移和缩放：退出/隐藏动画动的是 rootSlide.Y，启动动画还要一点点放大。
         RootCard.RenderTransform = new TransformGroup { Children = { rootScale, rootSlide } };
         RootCard.RenderTransformOrigin = new Point(0.5, 0.5);
@@ -1963,7 +1973,7 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
     private bool fillPool(IReadOnlyList<RecommendationItem> desired)
     {
         int wanted = Math.Max(1, settings.PoolSize);
-        if (recommendations.Count >= wanted || desired.Count == 0)
+        if (desired.Count == 0)
             return false;
 
         HashSet<int> known = [.. recommendations.Select(item => item.BeatmapsetId)];
@@ -1971,7 +1981,23 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
         foreach (RecommendationItem item in desired)
         {
             if (recommendations.Count >= wanted)
-                break;
+            {
+                // 池子满了：开了「不善长条」时，长条偏多的卡片是可替换的 ——
+                // 拿一个非长条的新候选把池里最靠后的长条卡换掉（正在玩 / 已预约的那张不动）。
+                if (!settings.AvoidLongNotes || item.IsLongNoteHeavy || !known.Add(item.BeatmapsetId))
+                    break;
+                int slot = lastReplaceableLongNoteIndex();
+                if (slot < 0)
+                    break;
+                AppLog.Info($"替换长条卡：{recommendations[slot].DisplayTitle} → {item.DisplayTitle}");
+                recommendations.RemoveAt(slot);
+                recommendations.Insert(slot, item);
+                settings.RecordRecommendation(item.BeatmapsetId);
+                item.LoadCover();
+                added = true;
+                continue;
+            }
+
             if (!known.Add(item.BeatmapsetId))
                 continue;
             recommendations.Add(item);
@@ -1983,6 +2009,22 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
         if (added)
             AppLog.Info($"推荐池补入 {recommendations.Count}/{wanted} 首（已有卡片不动）");
         return added;
+    }
+
+    /// <summary>池里最后一张「长条偏多、且没在玩 / 没预约」的卡片位置；没有就 -1。</summary>
+    private int lastReplaceableLongNoteIndex()
+    {
+        for (int index = recommendations.Count - 1; index >= 0; index -= 1)
+        {
+            RecommendationItem item = recommendations[index];
+            if (!item.IsLongNoteHeavy)
+                continue;
+            if (ReferenceEquals(item, currentRoamItem) || ReferenceEquals(item, playingItem) ||
+                ReferenceEquals(item, preparedNextItem))
+                continue;
+            return index;
+        }
+        return -1;
     }
 
     private void DetailButton_Click(object sender, RoutedEventArgs e)
@@ -3401,6 +3443,7 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
                 box.IsChecked = settings.SelectedPatterns.Contains(name, StringComparer.OrdinalIgnoreCase);
         }
         PreferLnCheck.IsChecked = settings.PreferLn;
+        AvoidLongNotesCheck.IsChecked = settings.AvoidLongNotes;
         foreach (ComboBoxItem item in MapInfoSourceBox.Items)
             if (Equals(item.Tag?.ToString(), settings.MapInfoSource)) MapInfoSourceBox.SelectedItem = item;
         tosuFiles.Configure(settings.TosuWebSocketUrl);
@@ -3990,6 +4033,38 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
         }
     }
 
+    /// <summary>
+    /// 「不善长条」：长条占比 &gt; 30% 的谱面在候选池里排到最后，池子满时可以被非长条的新候选换掉。
+    /// 改完要重排一次池子才生效（已经在池里的长条卡要重新排队）。
+    /// </summary>
+    private async void AvoidLongNotesCheck_Click(object sender, RoutedEventArgs e)
+    {
+        if (!settingsControlsReady)
+            return;
+        settings.AvoidLongNotes = AvoidLongNotesCheck.IsChecked == true;
+        try
+        {
+            await settingsStore.SaveAsync(settings);
+        }
+        catch (Exception exception)
+        {
+            AppLog.Error("保存「不善长条」设置失败", exception);
+        }
+        if (isRunning)
+            requestPoolPublish();
+    }
+
+    /// <summary>
+    /// 维护清单 17：键型页的内容跟模式走。
+    /// 键型分析（键型占比、LN、雷达）只对 mania 有效，其他模式把勾选框收起来、留一句说明。
+    /// </summary>
+    private void updatePatternPanelForMode()
+    {
+        bool mania = settings.Mode == "mania";
+        PatternOptionsPanel.Visibility = mania ? Visibility.Visible : Visibility.Collapsed;
+        PatternModeHint.Visibility = mania ? Visibility.Collapsed : Visibility.Visible;
+    }
+
     private async void TagSubmitCheck_Click(object sender, RoutedEventArgs e)
     {
         if (!settingsControlsReady)
@@ -4139,6 +4214,8 @@ settings.AutomaticDifficulty = difficultyRange.Automatic;
 
         // 键数只在 mania 下有意义，放在这一行右边的空位上，不额外占高度。
         setManiaKeysVisible(settings.Mode == "mania");
+        // 键型页的内容也跟着模式走（维护清单 17）。
+        updatePatternPanelForMode();
     }
 
     private void ModeButton_Click(object sender, RoutedEventArgs e)

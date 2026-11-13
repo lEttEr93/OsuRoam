@@ -39,6 +39,8 @@ public sealed class RecommendationItem : INotifyPropertyChanged
                 _ => Services.Loc.F("reason.explore", ReasonStarFit.ToString("P0"))
             };
             string text = ReasonCategory.Length == 0 ? reason : $"{reason} · {ReasonCategory}";
+            if (IsLongNoteHeavy)
+                text += $" · {Services.Loc.T("reason.lnheavy")}";
             // 补位卡片要自己说明身分，否则玩家分不清哪首是「凑数」的。
             return IsFallback ? $"{text} · {Services.Loc.T("reason.fallback")}" : text;
         }
@@ -49,6 +51,12 @@ public sealed class RecommendationItem : INotifyPropertyChanged
 
     /// <summary>该条目来自推荐历史回收，而不是本次新抓到的候选。</summary>
     public bool IsRecycled { get; init; }
+
+    /// <summary>
+    /// 长条偏多（LN 占比 &gt; <see cref="AppSettings.LnHeavyThreshold"/>）且开启了「不善长条」。
+    /// 这类卡片排到候选池最后，并且**可被替换**：池子满时来了非长条的新候选就把它换掉（维护清单 18）。
+    /// </summary>
+    public bool IsLongNoteHeavy { get; init; }
 
     /// <summary>
     /// 候选不足时补进来的「凑数」条目：放宽了 tag 白名单或允许已玩过的谱面。
