@@ -30,14 +30,11 @@ neighbouring `osu-roam*` install, so pattern data does not start from zero.
 
 ## What's new in 1.5.6.4
 
-- **The window no longer jumps at startup**: the saved position is applied before the window is shown
-  (it used to be applied in `Loaded`, so the window appeared at the default spot and then moved).
-- **The pattern tab follows the mode**: on anything other than mania the pattern checkboxes are replaced by a
-  one-line note, since pattern analysis only exists for mania.
-- **New "Avoid LN-heavy charts"**: charts with more than 30% long notes sort to the end of the candidate pool and
-  can be swapped out while the pool is full (their reason line says so).
-- **A four-second splash on startup**: icon, `osu!Roam` and "Your hands are for your life, not for osu.", fading
-  in and out; the main window only appears afterwards, so clicking early can no longer stall it.
+- The window no longer jumps at startup.
+- The pattern tab now depends on the selected mode.
+- New "Avoid LN-heavy charts" on mania: charts above 30% long notes sort to the back of the candidate pool and can
+  be replaced.
+- Added a startup animation.
 
 ## What's new in 1.5.6.3
 
@@ -214,12 +211,10 @@ osu! 谱面漫游推荐工具，Windows / WPF / .NET 8。读你的成绩样本�
 
 ## 1.5.6.4 新增
 
-- **启动时窗口不再跳动**：位置在窗口显示之前就定好（以前是在 `Loaded` 里赋，会先出默认位置再挪过去）。
-- **键型页跟模式走**：非 mania 模式下收起勾选框，改成一行说明——键型分析只有 mania 有。
-- **新增「不善长条」**：长条（LN）占比高于 30% 的谱面排到候选池最后，池子满时可以被非长条的新候选换掉，
-  推荐理由里会标出来。
-- **四秒启动画面**：图标 + `osu!Roam` + “Your hands are for your life, not for osu.”，淡入淡出，
-  之后主窗才出现 —— 启动期间点不到东西，也就不会把主窗点卡。
+- 修复启动时窗口会跳动的情况
+- 键型选项卡内的内容与所选模式有关
+- mania 键型中增加「不善长条」：候选池里长条占比高于 30% 的排后，并可被替换
+- 加入启动动画
 
 ## 1.5.6.3 新增
 
