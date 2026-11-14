@@ -1,4 +1,4 @@
-# osu! Roam v1.5.6.3
+# osu! Roam v1.5.6.4
 
 [English](#english) · [中文](#中文)
 
@@ -15,8 +15,8 @@ keep roaming without touching it.
 
 | Package | UI language | Default download source |
 |---|---|---|
-| `osu-roam-1.5.6.3-portable.zip` | follows the system language | sayobot mirrors (China) |
-| `osu-roam-1.5.6.3-en-portable.zip` | English | catboy / beatconnect (international) |
+| `osu-roam-1.5.6.4-portable.zip` | follows the system language | sayobot mirrors (China) |
+| `osu-roam-1.5.6.4-en-portable.zip` | English | catboy / beatconnect (international) |
 
 **Companion packages:** [`OsuSv`](https://www.nuget.org/packages/OsuSv) /
 [`OsuSv.Cli`](https://www.nuget.org/packages/OsuSv.Cli) — the scroll-velocity (SV) analysis used by Roam, shipped as a
@@ -27,6 +27,17 @@ see [`docs/1.5.3-SV评估算法.md`](docs/1.5.3-SV评估算法.md) for the model
 The .NET runtime and `tosu.exe` are already inside the archive — extract and run. Each build keeps its own `data`
 folder, so **do not install one over the other**.  A fresh folder inherits the analysed-pattern library from a
 neighbouring `osu-roam*` install, so pattern data does not start from zero.
+
+## What's new in 1.5.6.4
+
+- **The window no longer jumps at startup**: the saved position is applied before the window is shown
+  (it used to be applied in `Loaded`, so the window appeared at the default spot and then moved).
+- **The pattern tab follows the mode**: on anything other than mania the pattern checkboxes are replaced by a
+  one-line note, since pattern analysis only exists for mania.
+- **New "Avoid LN-heavy charts"**: charts with more than 30% long notes sort to the end of the candidate pool and
+  can be swapped out while the pool is full (their reason line says so).
+- **A four-second splash on startup**: icon, `osu!Roam` and "Your hands are for your life, not for osu.", fading
+  in and out; the main window only appears afterwards, so clicking early can no longer stall it.
 
 ## What's new in 1.5.6.3
 
@@ -193,13 +204,22 @@ osu! 谱面漫游推荐工具，Windows / WPF / .NET 8。读你的成绩样本�
 
 | 包 | 界面语言 | 默认下载源 |
 |---|---|---|
-| `osu-roam-1.5.6.3-portable.zip` | 跟随系统 | sayobot 镜像（国内） |
-| `osu-roam-1.5.6.3-en-portable.zip` | 英文 | catboy / beatconnect（国际） |
+| `osu-roam-1.5.6.4-portable.zip` | 跟随系统 | sayobot 镜像（国内） |
+| `osu-roam-1.5.6.4-en-portable.zip` | 英文 | catboy / beatconnect（国际） |
 
 **附带产品：[`OsuSv`](https://www.nuget.org/packages/OsuSv) / [`OsuSv.Cli`](https://www.nuget.org/packages/OsuSv.Cli)** —— 谱面变速（SV）评估算法单独出的库
 和命令行（`dotnet tool install --global OsuSv.Cli`，或下 Release 里的单文件 exe）。输入 .osu 文本，输出
 不等时 / 极端度 / 背谱度 / 不适度 / 夸张度五个量，口径见 [`docs/1.5.3-SV评估算法.md`](docs/1.5.3-SV评估算法.md)。
 源码在 `src/OsuSv`、`src/OsuSv.Cli`，许可证 MIT。
+
+## 1.5.6.4 新增
+
+- **启动时窗口不再跳动**：位置在窗口显示之前就定好（以前是在 `Loaded` 里赋，会先出默认位置再挪过去）。
+- **键型页跟模式走**：非 mania 模式下收起勾选框，改成一行说明——键型分析只有 mania 有。
+- **新增「不善长条」**：长条（LN）占比高于 30% 的谱面排到候选池最后，池子满时可以被非长条的新候选换掉，
+  推荐理由里会标出来。
+- **四秒启动画面**：图标 + `osu!Roam` + “Your hands are for your life, not for osu.”，淡入淡出，
+  之后主窗才出现 —— 启动期间点不到东西，也就不会把主窗点卡。
 
 ## 1.5.6.3 新增
 
